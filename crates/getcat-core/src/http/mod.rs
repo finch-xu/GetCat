@@ -411,6 +411,15 @@ mod tests {
 
     #[tokio::test]
     async fn dns_failure_is_classified() {
+        // 某些本地代理（如 Clash 的 fake-ip 模式）会把任意域名解析到 198.18.0.0/15，
+        // 此时无法测到真正的 DNS 失败，跳过而不是误报。
+        if tokio::net::lookup_host("nonexistent.invalid:80")
+            .await
+            .is_ok()
+        {
+            eprintln!("skipped: environment resolves nonexistent.invalid (fake-ip DNS?)");
+            return;
+        }
         let err = run(&draft(Method::Get, "http://nonexistent.invalid/".into()))
             .await
             .unwrap_err();

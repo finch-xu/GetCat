@@ -19,7 +19,7 @@ gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f" }
 
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "charset", "system-proxy", "stream", "gzip", "brotli", "zstd", "json", "multipart"] }
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 url = "2.5.8"
