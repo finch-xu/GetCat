@@ -5,10 +5,15 @@ use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
-use gpui::{App, AppContext, Context, Entity, SharedString, Subscription, Window};
+use gpui::{
+    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
+    Subscription, Window, div, px,
+};
 use gpui_component::IndexPath;
 use gpui_component::input::{EditorState, InputEvent, InputState};
+use gpui_component::resizable::{resizable_panel, v_resizable};
 use gpui_component::select::SelectState;
+use gpui_component::v_flex;
 
 use crate::state::response::ResponseState;
 use crate::ui::kv_table::{KvTable, KvTableEvent};
@@ -61,6 +66,8 @@ impl BodyMode {
 const RESPONSE_LANGUAGES: [&str; 3] = ["json", "html", "text"];
 
 pub struct RequestTab {
+    /// Task 9 的在途请求用它区分 Tab。
+    #[allow(dead_code)]
     pub id: u64,
     pub method: Entity<SelectState<Vec<&'static str>>>,
     pub url: Entity<InputState>,
@@ -209,7 +216,8 @@ impl RequestTab {
         !extract_path_params(&self.url.read(cx).value()).is_empty()
     }
 
-    /// 从各输入组件快照出纯数据的 RequestDraft。
+    /// 从各输入组件快照出纯数据的 RequestDraft。（Task 9 的 send 使用）
+    #[allow(dead_code)]
     pub fn draft(&self, cx: &App) -> RequestDraft {
         let body = match self.body_mode {
             BodyMode::None => BodyKind::None,
@@ -259,6 +267,30 @@ impl RequestTab {
     pub fn send(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // Task 9 实现真正的发送；此处仅保证 Task 7/8 可编译。
         cx.notify();
+    }
+
+    /// 取消进行中的请求：递增 generation 让在途任务的回调失效，并 drop 掉任务本身。
+    pub fn cancel(&mut self, cx: &mut Context<Self>) {
+        self.generation += 1;
+        self.response = ResponseState::Idle;
+        cx.notify();
+    }
+}
+
+impl Render for RequestTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex().size_full().child(self.render_url_bar(cx)).child(
+            div().flex_1().min_h_0().child(
+                v_resizable("request-response")
+                    .child(
+                        resizable_panel()
+                            .size(px(300.))
+                            .size_range(px(140.)..px(900.))
+                            .child(self.render_request_pane(cx)),
+                    )
+                    .child(resizable_panel().child(self.render_response_pane(cx))),
+            ),
+        )
     }
 }
 
