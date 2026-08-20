@@ -4,13 +4,16 @@ use getcat_core::model::RawFormat;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, Sizable, h_flex,
+    ActiveTheme, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex,
     input::Editor,
     tab::{Tab, TabBar},
     v_flex,
 };
 
 use crate::state::request_tab::{BodyMode, RequestSection, RequestTab};
+use crate::ui::format_bytes;
 
 fn section_label(text: &'static str, cx: &App) -> impl IntoElement {
     div()
@@ -99,7 +102,8 @@ impl RequestTab {
                             }))
                             .child("none")
                             .child("raw")
-                            .child("form-urlencoded"),
+                            .child("form-urlencoded")
+                            .child("file"),
                     )
                     .when(mode == BodyMode::Raw, |h| {
                         h.child(
@@ -124,16 +128,22 @@ impl RequestTab {
                     .text_color(cx.theme().muted_foreground)
                     .child("此请求没有 Body")
                     .into_any_element(),
-                BodyMode::Raw => div()
+                BodyMode::Raw => v_flex()
                     .flex_1()
                     .min_h_0()
+                    .gap_1()
                     .child(
-                        Editor::new(self.editor_for(self.raw_format))
-                            .aria_label("请求 Body 编辑器")
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_size(cx.theme().mono_font_size)
-                            .size_full(),
+                        div().flex_1().min_h_0().child(
+                            Editor::new(self.editor_for(self.raw_format))
+                                .aria_label("请求 Body 编辑器")
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .text_size(cx.theme().mono_font_size)
+                                .size_full(),
+                        ),
                     )
+                    .when_some(self.body_hint.clone(), |v, hint| {
+                        v.child(div().text_xs().text_color(cx.theme().warning).child(hint))
+                    })
                     .into_any_element(),
                 BodyMode::Form => div()
                     .id("form-body")
@@ -141,6 +151,63 @@ impl RequestTab {
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(self.form.clone())
+                    .into_any_element(),
+                BodyMode::File => self.render_file_body(cx),
+            })
+            .into_any_element()
+    }
+
+    fn render_file_body(&self, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Button::new("choose-file")
+                            .outline()
+                            .small()
+                            .label("选择文件")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.choose_file(window, cx)),
+                            ),
+                    )
+                    .when(self.file_path.is_some(), |h| {
+                        h.child(
+                            Button::new("clear-file")
+                                .ghost()
+                                .small()
+                                .label("清除")
+                                .on_click(cx.listener(|this, _, _, cx| this.clear_file(cx))),
+                        )
+                    }),
+            )
+            .child(match &self.file_path {
+                Some(path) => h_flex()
+                    .gap_3()
+                    .text_sm()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .child(path.display().to_string()),
+                    )
+                    .when_some(self.file_size, |h, size| {
+                        h.child(
+                            div()
+                                .flex_none()
+                                .text_color(muted)
+                                .child(format_bytes(size)),
+                        )
+                    })
+                    .into_any_element(),
+                None => div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child("尚未选择文件；发送时将以流式方式上传，内容不进入内存")
                     .into_any_element(),
             })
             .into_any_element()

@@ -8,6 +8,7 @@ use std::{
     cell::Cell,
     io::{Read, Write},
     net::TcpListener,
+    path::PathBuf,
     rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
@@ -16,10 +17,11 @@ use std::{
 use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
-use getcat_core::model::ResponseMeta;
+use getcat_core::model::{BodyKind, RawFormat, ResponseMeta};
 use gpui::{AppContext, Entity, IntoElement, TestAppContext, VisualTestContext, point, px, size};
+use gpui_component::input::InputEvent;
 
-use crate::state::request_tab::{RequestTab, ResponseSection};
+use crate::state::request_tab::{BODY_HINT_BYTES, BodyMode, RequestTab, ResponseSection};
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::workspace::Workspace;
 use crate::ui::body_view::LINE_HEIGHT_PX;
@@ -447,4 +449,82 @@ fn save_body_does_nothing_when_not_done(cx: &mut TestAppContext) {
     let tab = new_tab(cx);
     cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
     assert!(!cx.did_prompt_for_new_path());
+}
+
+#[gpui::test]
+fn choose_file_sets_file_body_and_clear_resets_it(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let path = std::env::temp_dir().join(format!("getcat-choose-{}.json", std::process::id()));
+    std::fs::write(&path, b"{}").unwrap();
+
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.choose_file(window, cx)));
+    assert!(cx.did_prompt_for_paths());
+    let chosen = path.clone();
+    cx.simulate_path_prompt_response(move |opts| {
+        assert!(opts.files && !opts.directories && !opts.multiple);
+        Some(vec![chosen])
+    });
+    // metadata 在 gpui 后台执行器上读取，跑到空闲即可
+    cx.run_until_parked();
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.body_mode, BodyMode::File);
+        assert_eq!(t.file_size, Some(2));
+        assert_eq!(
+            t.draft(app).body,
+            BodyKind::File {
+                path: path.clone(),
+                content_type: Some("application/json".into()),
+            }
+        );
+    });
+
+    cx.update(|_, cx| tab.update(cx, |t, cx| t.clear_file(cx)));
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.file_size, None);
+        assert_eq!(
+            t.draft(app).body,
+            BodyKind::File {
+                path: PathBuf::new(),
+                content_type: None,
+            }
+        );
+    });
+    let _ = std::fs::remove_file(&path);
+}
+
+#[gpui::test]
+fn cancelled_file_dialog_keeps_previous_state(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.choose_file(window, cx)));
+    cx.simulate_path_prompt_response(|_| None);
+    cx.run_until_parked();
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.body_mode, BodyMode::None);
+        assert!(t.file_path.is_none());
+    });
+}
+
+#[gpui::test]
+fn oversized_raw_body_shows_file_hint(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let big = "a".repeat(BODY_HINT_BYTES + 1);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.body_mode = BodyMode::Raw;
+            let editor = t.editor_for(RawFormat::Json).clone();
+            // set_value 不发 Change 事件（gpui-component 如此设计），这里直接驱动事件处理器模拟一次粘贴
+            editor.update(cx, |e, cx| e.set_value(big, window, cx));
+            t.on_body_editor_event(&editor, &InputEvent::Change, window, cx);
+            assert!(t.body_hint.as_ref().unwrap().contains("10 MB"));
+            editor.update(cx, |e, cx| e.set_value("{}", window, cx));
+            t.on_body_editor_event(&editor, &InputEvent::Change, window, cx);
+            assert!(t.body_hint.is_none());
+        })
+    });
 }

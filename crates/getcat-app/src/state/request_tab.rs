@@ -1,20 +1,20 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use getcat_core::body::tier::ViewTier;
 use getcat_core::detect::ContentKind;
-use getcat_core::http::{self, BodyStore, HttpResponse, RequestError};
+use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
 use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft};
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use gpui::{
-    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, ScrollStrategy,
-    SharedString, Styled, Subscription, UniformListScrollHandle, Window, div, px,
+    App, AppContext, Context, Entity, IntoElement, ParentElement, PathPromptOptions, Render,
+    ScrollStrategy, SharedString, Styled, Subscription, UniformListScrollHandle, Window, div, px,
 };
 use gpui_component::IndexPath;
 use gpui_component::input::{EditorState, InputEvent, InputState};
@@ -60,10 +60,16 @@ pub enum BodyMode {
     None,
     Raw,
     Form,
+    File,
 }
 
 impl BodyMode {
-    pub const ALL: [BodyMode; 3] = [BodyMode::None, BodyMode::Raw, BodyMode::Form];
+    pub const ALL: [BodyMode; 4] = [
+        BodyMode::None,
+        BodyMode::Raw,
+        BodyMode::Form,
+        BodyMode::File,
+    ];
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|m| *m == self).unwrap_or(0)
     }
@@ -78,6 +84,13 @@ const RESPONSE_LANGUAGES: [&str; 3] = ["json", "html", "text"];
 /// 在途时状态行重绘的间隔（实时耗时）。
 const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
+/// 文本 Body 超过此大小时提示改用文件 Body（spec §6.5）。
+pub const BODY_HINT_BYTES: usize = 10 * 1024 * 1024;
+
+pub fn body_hint_for(len: usize) -> Option<SharedString> {
+    (len > BODY_HINT_BYTES).then(|| "文本 Body 超过 10 MB，建议改用文件 Body 流式上传".into())
+}
+
 pub struct RequestTab {
     /// Tab 的稳定标识；当前只由 Workspace 分配，展示与持久化在后续阶段使用。
     #[allow(dead_code)]
@@ -91,6 +104,11 @@ pub struct RequestTab {
     pub form: Entity<KvTable>,
     pub body_mode: BodyMode,
     pub raw_format: RawFormat,
+    /// 文件 Body：所选文件路径与大小（大小只用于显示）。
+    pub file_path: Option<PathBuf>,
+    pub file_size: Option<u64>,
+    /// 文本 Body 过大时的非阻塞提示。
+    pub body_hint: Option<SharedString>,
     body_editors: Vec<(RawFormat, Entity<EditorState>)>,
     response_editors: Vec<(&'static str, Entity<EditorState>)>,
     pub request_section: RequestSection,
@@ -150,13 +168,16 @@ impl RequestTab {
             })
             .collect();
 
-        let subs = vec![
+        let mut subs = vec![
             cx.subscribe_in(&url, window, Self::on_url_event),
             cx.subscribe_in(&params, window, |_, _, _: &KvTableEvent, _, cx| cx.notify()),
             cx.subscribe_in(&headers, window, |_, _, _: &KvTableEvent, _, cx| {
                 cx.notify()
             }),
         ];
+        for (_, editor) in &body_editors {
+            subs.push(cx.subscribe_in(editor, window, Self::on_body_editor_event));
+        }
         // body 编辑器内的 ⌘⏎ 由全局 SendRequest 动作处理（见 main.rs 的 bind_keys），不在此订阅
 
         Self {
@@ -170,6 +191,9 @@ impl RequestTab {
             form,
             body_mode: BodyMode::None,
             raw_format: RawFormat::Json,
+            file_path: None,
+            file_size: None,
+            body_hint: None,
             body_editors,
             response_editors,
             request_section: RequestSection::Params,
@@ -202,6 +226,66 @@ impl RequestTab {
             InputEvent::PressEnter { .. } => self.send(window, cx),
             _ => {}
         }
+    }
+
+    /// 文本 Body 编辑器内容变化：按 rope 的字节数（O(1)）判断是否提示改用文件 Body。
+    pub(crate) fn on_body_editor_event(
+        &mut self,
+        editor: &Entity<EditorState>,
+        ev: &InputEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(ev, InputEvent::Change) {
+            return;
+        }
+        // 三个格式各一个编辑器，只看当前格式的那个
+        if editor != self.editor_for(self.raw_format) {
+            return;
+        }
+        let len = editor.read(cx).text().len();
+        let hint = body_hint_for(len);
+        if hint != self.body_hint {
+            self.body_hint = hint;
+            cx.notify();
+        }
+    }
+
+    /// "选择文件"：系统打开对话框 → 后台读 metadata → 切到 file 模式。
+    pub fn choose_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("选择".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = rx.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let size = cx
+                .background_spawn({
+                    let path = path.clone();
+                    async move { std::fs::metadata(&path).map(|m| m.len()).ok() }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_path = Some(path);
+                this.file_size = size;
+                this.body_mode = BodyMode::File;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn clear_file(&mut self, cx: &mut Context<Self>) {
+        self.file_path = None;
+        self.file_size = None;
+        cx.notify();
     }
 
     pub fn focus_url(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -252,6 +336,13 @@ impl RequestTab {
             },
             BodyMode::Form => BodyKind::FormUrlEncoded {
                 fields: self.form.read(cx).values(cx),
+            },
+            BodyMode::File => BodyKind::File {
+                path: self.file_path.clone().unwrap_or_default(),
+                content_type: self
+                    .file_path
+                    .as_deref()
+                    .map(|p| guess_content_type(p).to_string()),
             },
         };
         RequestDraft {
@@ -538,6 +629,26 @@ pub fn tab_title(url: &str) -> SharedString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn body_hint_threshold() {
+        assert!(body_hint_for(0).is_none());
+        assert!(body_hint_for(BODY_HINT_BYTES).is_none());
+        assert!(
+            body_hint_for(BODY_HINT_BYTES + 1)
+                .unwrap()
+                .contains("10 MB")
+        );
+    }
+
+    #[test]
+    fn body_mode_round_trips_through_index() {
+        for (ix, mode) in BodyMode::ALL.iter().enumerate() {
+            assert_eq!(mode.index(), ix);
+            assert_eq!(BodyMode::from_index(ix), *mode);
+        }
+        assert_eq!(BodyMode::from_index(99), BodyMode::None);
+    }
 
     #[test]
     fn title_from_url() {
