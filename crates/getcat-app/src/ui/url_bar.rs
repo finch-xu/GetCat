@@ -42,13 +42,17 @@ impl RequestTab {
                     .gap_2()
                     .items_center()
                     .child(
-                        Select::new(&self.method)
+                        // gpui-component 的 Select 外层无条件 size_full()，必须用定宽 flex_none 容器约束，
+                        // 否则它会撑满整行，把 URL 输入框挤没。
+                        div()
                             .w(px(120.))
-                            .text_color(method_color(method, cx)),
+                            .flex_none()
+                            .child(Select::new(&self.method).text_color(method_color(method, cx))),
                     )
                     .child(
                         div()
                             .flex_1()
+                            .min_w_0()
                             .child(Input::new(&self.url).cleanable(true).aria_label("请求 URL")),
                     )
                     .child(action_button),

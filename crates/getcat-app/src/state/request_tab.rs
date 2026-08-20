@@ -138,26 +138,14 @@ impl RequestTab {
             })
             .collect();
 
-        let mut subs = vec![
+        let subs = vec![
             cx.subscribe_in(&url, window, Self::on_url_event),
             cx.subscribe_in(&params, window, |_, _, _: &KvTableEvent, _, cx| cx.notify()),
             cx.subscribe_in(&headers, window, |_, _, _: &KvTableEvent, _, cx| {
                 cx.notify()
             }),
         ];
-        // Body 编辑器里按 ⌘⏎ / Ctrl+Enter 同样发送请求。
-        for (_, editor) in &body_editors {
-            subs.push(
-                cx.subscribe_in(editor, window, |this, _, ev: &InputEvent, window, cx| {
-                    if let InputEvent::PressEnter {
-                        secondary: true, ..
-                    } = ev
-                    {
-                        this.send(window, cx);
-                    }
-                }),
-            );
-        }
+        // body 编辑器内的 ⌘⏎ 由全局 SendRequest 动作处理（见 main.rs 的 bind_keys），不在此订阅
 
         Self {
             id,
