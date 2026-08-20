@@ -82,28 +82,29 @@ impl TextDoc {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClippedLine<'a> {
     pub text: &'a str,
-    /// 被截掉的字符数；0 表示未截断。
-    pub hidden_chars: usize,
+    /// 被截掉的字节数（O(1) 计算）；0 表示未截断。
+    pub hidden_bytes: usize,
 }
 
 /// 超过 MAX_LINE_CHARS 个字符的行只保留前 MAX_LINE_CHARS 个字符（按字符边界切）。
+/// `hidden_bytes` 用剩余字节数（`line.len() - cut`）而非重新数字符，保持 O(MAX_LINE_CHARS)：
+/// 单行几 MB 时若数剩余字符数会在每帧渲染中做一次 O(整行) 扫描。
 pub fn clip_line(line: &str) -> ClippedLine<'_> {
     // 字节数 ≤ 上限则字符数必然 ≤ 上限：常见短行零开销
     if line.len() <= MAX_LINE_CHARS {
         return ClippedLine {
             text: line,
-            hidden_chars: 0,
+            hidden_bytes: 0,
         };
     }
-    match line.char_indices().nth(MAX_LINE_CHARS) {
-        None => ClippedLine {
-            text: line,
-            hidden_chars: 0,
-        },
-        Some((cut, _)) => ClippedLine {
-            text: &line[..cut],
-            hidden_chars: line[cut..].chars().count(),
-        },
+    let cut = line
+        .char_indices()
+        .nth(MAX_LINE_CHARS)
+        .map(|(i, _)| i)
+        .unwrap_or(line.len());
+    ClippedLine {
+        text: &line[..cut],
+        hidden_bytes: line.len() - cut,
     }
 }
 
@@ -150,7 +151,7 @@ mod tests {
         let line = "a".repeat(MAX_LINE_CHARS);
         let c = clip_line(&line);
         assert_eq!(c.text.len(), MAX_LINE_CHARS);
-        assert_eq!(c.hidden_chars, 0);
+        assert_eq!(c.hidden_bytes, 0);
     }
 
     #[test]
@@ -158,12 +159,23 @@ mod tests {
         let ascii = "a".repeat(MAX_LINE_CHARS + 1);
         let c = clip_line(&ascii);
         assert_eq!(c.text.len(), MAX_LINE_CHARS);
-        assert_eq!(c.hidden_chars, 1);
+        assert_eq!(c.hidden_bytes, 1);
 
+        // 每个 CJK 字符占 3 字节：截掉 500 个字符 == 1500 字节。
         let wide = "中".repeat(2500);
         let c = clip_line(&wide);
         assert_eq!(c.text.chars().count(), MAX_LINE_CHARS);
         assert_eq!(c.text.len(), MAX_LINE_CHARS * 3);
-        assert_eq!(c.hidden_chars, 500);
+        assert_eq!(c.hidden_bytes, 500 * 3);
+    }
+
+    #[test]
+    fn clip_line_is_fast_on_a_multi_megabyte_single_line() {
+        // 证明 hidden_bytes 是 O(1) 算术而非重新扫描剩余字节：3 MB 单行不会超时/panic，
+        // 且数值等于「总字节数 - 截断点字节数」。
+        let line = "a".repeat(3_000_000);
+        let c = clip_line(&line);
+        assert_eq!(c.text.len(), MAX_LINE_CHARS);
+        assert_eq!(c.hidden_bytes, 3_000_000 - MAX_LINE_CHARS);
     }
 }

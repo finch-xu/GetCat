@@ -13,6 +13,8 @@ use gpui_component::{
     scroll::{Scrollbar, ScrollbarAxis},
 };
 
+use crate::ui::format_bytes;
+
 /// 每行固定高度（uniform_list 要求等高；按第一项测量，所有行都用同一个 h()）。
 pub const LINE_HEIGHT_PX: f32 = 20.;
 
@@ -52,9 +54,9 @@ pub fn render_text_lines(
                             .child(SharedString::from((ix + 1).to_string())),
                     )
                     .child(div().child(SharedString::from(clipped.text.to_string())))
-                    .when(clipped.hidden_chars > 0, |h| {
+                    .when(clipped.hidden_bytes > 0, |h| {
                         h.child(div().ml_2().text_color(warning).child(SharedString::from(
-                            format!("… 已截断，剩余 {} 字符", clipped.hidden_chars),
+                            format!("…（已省略 {}）", format_bytes(clipped.hidden_bytes as u64)),
                         )))
                     })
             })
