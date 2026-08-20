@@ -18,6 +18,8 @@ pub enum RequestError {
     Timeout,
     #[error("临时文件写入失败：{0}")]
     Spill(String),
+    #[error("无法读取文件：{0}")]
+    FileBody(String),
     #[error("已取消")]
     Cancelled,
     #[error("网络错误：{0}")]
@@ -35,6 +37,7 @@ impl RequestError {
             RequestError::Tls(_) => "TLS 错误",
             RequestError::Timeout => "超时",
             RequestError::Spill(_) => "落盘失败",
+            RequestError::FileBody(_) => "文件不可读",
             RequestError::Cancelled => "已取消",
             RequestError::Other(_) => "网络错误",
         }

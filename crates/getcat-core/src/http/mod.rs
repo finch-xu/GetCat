@@ -3,14 +3,14 @@
 mod error;
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use bytes::BytesMut;
 use futures::StreamExt;
-use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderName, HeaderValue};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use url::Url;
@@ -32,7 +32,15 @@ pub const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboundBody {
     Empty,
-    Bytes { content_type: String, data: Vec<u8> },
+    Bytes {
+        content_type: String,
+        data: Vec<u8>,
+    },
+    /// 文件流式上传：发送时打开、按块读取，内容不进内存。
+    File {
+        path: PathBuf,
+        content_type: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -238,10 +246,14 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
                 data: ser.finish().into_bytes(),
             }
         }
-        BodyKind::File { .. } => {
-            return Err(RequestError::Unsupported(
-                "文件 Body 将在后续版本支持".to_string(),
-            ));
+        BodyKind::File { path, content_type } => {
+            if path.as_os_str().is_empty() {
+                return Err(RequestError::FileBody("未选择文件".to_string()));
+            }
+            OutboundBody::File {
+                path: path.clone(),
+                content_type: content_type.clone(),
+            }
         }
     };
 
@@ -251,6 +263,31 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
         headers,
         body,
     })
+}
+
+/// 按扩展名猜测文件 Body 的 Content-Type；未知类型用 application/octet-stream。
+pub fn guess_content_type(path: &Path) -> &'static str {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("json") => "application/json",
+        Some("xml") => "application/xml",
+        Some("txt" | "log" | "md") => "text/plain",
+        Some("csv") => "text/csv",
+        Some("html" | "htm") => "text/html",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("pdf") => "application/pdf",
+        Some("zip") => "application/zip",
+        _ => "application/octet-stream",
+    }
+}
+
+fn file_err(path: &Path, e: std::io::Error) -> RequestError {
+    RequestError::FileBody(format!("{}：{e}", path.display()))
 }
 
 fn to_reqwest_method(m: Method) -> reqwest::Method {
@@ -290,11 +327,27 @@ pub(crate) async fn execute_with_threshold(
         }
         builder = builder.header(k.as_str(), v.as_str());
     }
-    if let OutboundBody::Bytes { content_type, data } = req.body {
-        if !has_content_type {
-            builder = builder.header(CONTENT_TYPE, content_type);
+    match req.body {
+        OutboundBody::Empty => {}
+        OutboundBody::Bytes { content_type, data } => {
+            if !has_content_type {
+                builder = builder.header(CONTENT_TYPE, content_type);
+            }
+            builder = builder.body(data);
         }
-        builder = builder.body(data);
+        OutboundBody::File { path, content_type } => {
+            let file = tokio::fs::File::open(&path)
+                .await
+                .map_err(|e| file_err(&path, e))?;
+            let len = file.metadata().await.map_err(|e| file_err(&path, e))?.len();
+            if !has_content_type && let Some(ct) = content_type {
+                builder = builder.header(CONTENT_TYPE, ct);
+            }
+            // 流式 Body 本身不知道长度：显式给出 Content-Length，hyper 会尊重用户设置的该头并按定长发送
+            builder = builder
+                .header(CONTENT_LENGTH, len)
+                .body(reqwest::Body::from(file));
+        }
     }
 
     let resp = builder.send().await?;
@@ -362,7 +415,7 @@ mod tests {
     use crate::body::spill::HEAD_BYTES;
     use crate::model::{BodyKind, KeyValue, Method, RawFormat, RequestDraft};
     use std::io::Write;
-    use wiremock::matchers::{body_string, header, method, path, query_param};
+    use wiremock::matchers::{body_bytes, body_string, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn draft(m: Method, url: String) -> RequestDraft {
@@ -714,13 +767,93 @@ mod tests {
         assert_eq!(req.headers, vec![("X-A".to_string(), "1".to_string())]);
     }
 
-    #[test]
-    fn prepare_rejects_file_body_for_now() {
-        let mut d = draft(Method::Post, "https://x.com".into());
+    fn temp_upload_file(name: &str, payload: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("getcat-filebody-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, payload).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn file_body_is_streamed_with_content_length_and_type() {
+        // 300 KB：大于 ReaderStream 的单块（4 KiB），保证走多块流式路径
+        let payload: Vec<u8> = (0..300_000u32).map(|i| b'0' + (i % 10) as u8).collect();
+        let path = temp_upload_file("upload.json", &payload);
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(header("content-type", "application/json"))
+            .and(header("content-length", "300000"))
+            .and(body_bytes(payload.clone()))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Put, server.uri());
         d.body = BodyKind::File {
-            path: "/tmp/x".into(),
+            path: path.clone(),
+            content_type: Some(guess_content_type(&path).to_string()),
+        };
+        assert_eq!(run(&d).await.unwrap().meta.status, 200);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn user_content_type_overrides_file_guess() {
+        let path = temp_upload_file("upload.bin", b"xyz");
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(header("content-type", "text/plain"))
+            .and(body_bytes(b"xyz".to_vec()))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Post, server.uri());
+        d.headers = vec![KeyValue::new("Content-Type", "text/plain")];
+        d.body = BodyKind::File {
+            path: path.clone(),
+            content_type: Some("application/octet-stream".into()),
+        };
+        assert_eq!(run(&d).await.unwrap().meta.status, 200);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn missing_file_is_reported_as_file_body_error() {
+        let mut d = draft(Method::Post, "http://127.0.0.1:1/".into());
+        d.body = BodyKind::File {
+            path: "/nonexistent/getcat/upload.bin".into(),
             content_type: None,
         };
-        assert!(matches!(prepare(&d), Err(RequestError::Unsupported(_))));
+        let err = run(&d).await.unwrap_err();
+        assert!(matches!(err, RequestError::FileBody(_)), "{err:?}");
+        assert!(err.to_string().contains("upload.bin"));
+    }
+
+    #[test]
+    fn prepare_rejects_empty_file_path() {
+        let mut d = draft(Method::Post, "https://x.com".into());
+        d.body = BodyKind::File {
+            path: std::path::PathBuf::new(),
+            content_type: None,
+        };
+        assert!(matches!(prepare(&d), Err(RequestError::FileBody(_))));
+    }
+
+    #[test]
+    fn content_type_is_guessed_from_extension() {
+        use std::path::Path;
+        assert_eq!(guess_content_type(Path::new("a.JSON")), "application/json");
+        assert_eq!(guess_content_type(Path::new("a.xml")), "application/xml");
+        assert_eq!(guess_content_type(Path::new("a.txt")), "text/plain");
+        assert_eq!(guess_content_type(Path::new("a.png")), "image/png");
+        assert_eq!(guess_content_type(Path::new("a.jpeg")), "image/jpeg");
+        assert_eq!(
+            guess_content_type(Path::new("a")),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            guess_content_type(Path::new("a.weird")),
+            "application/octet-stream"
+        );
     }
 }
