@@ -1,5 +1,6 @@
 //! UI 公共小工具：颜色映射与数字格式化。
 
+pub mod body_view;
 pub mod kv_table;
 pub mod request_pane;
 pub mod response_pane;

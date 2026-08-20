@@ -9,15 +9,19 @@ use std::{
     io::{Read, Write},
     net::TcpListener,
     rc::Rc,
-    time::Duration,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
-use getcat_core::http::RequestError;
-use gpui::{AppContext, Entity, TestAppContext, VisualTestContext};
+use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
+use getcat_core::http::{BodyStore, RequestError};
+use getcat_core::model::ResponseMeta;
+use gpui::{AppContext, Entity, IntoElement, TestAppContext, VisualTestContext, point, px, size};
 
-use crate::state::request_tab::RequestTab;
-use crate::state::response::ResponseState;
+use crate::state::request_tab::{RequestTab, ResponseSection};
+use crate::state::response::{ResponseState, ResponseView};
 use crate::state::workspace::Workspace;
+use crate::ui::body_view::LINE_HEIGHT_PX;
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
     cx.update(|cx| {
@@ -247,4 +251,101 @@ fn elapsed_ticker_notifies_while_in_flight_and_stops_after_cancel(cx: &mut TestA
         after_cancel,
         "ticker must stop once the request is cancelled"
     );
+}
+
+/// B 档端到端（无 GUI）：超过 EDITOR_MAX_LINES 的 text/plain 响应不写编辑器、没有 Pretty 切换，
+/// 并且行视图与 Headers 列表都能真正绘制一帧（uniform_list + Scrollbar 的运行时路径）。
+#[gpui::test]
+fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+
+    let text: String = (0..EDITOR_MAX_LINES + 1)
+        .map(|i| format!("line {i}\n"))
+        .collect();
+    let body = BodyStore::Memory(Arc::from(text.as_bytes()));
+    let meta = ResponseMeta {
+        status: 200,
+        status_text: "OK".into(),
+        headers: vec![("content-type".into(), "text/plain".into())],
+        duration: Duration::from_millis(1),
+        body_len: text.len() as u64,
+        content_type: Some("text/plain".into()),
+    };
+    let view = ResponseView::prepare(meta, &body);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let g = t.generation;
+            t.apply_outcome(g, Ok((body.clone(), view)), window, cx);
+        })
+    });
+
+    cx.read(|app| {
+        let t = tab.read(app);
+        let ResponseState::Done { view, .. } = &t.response else {
+            panic!("expected Done");
+        };
+        // text/plain 没有美化文本 → 面板隐藏 Pretty/Raw 切换
+        assert!(!view.has_pretty());
+        assert!(!view.is_preview());
+        let doc = view.doc(true).expect("text body has a doc");
+        assert_eq!(doc.tier, ViewTier::Virtual);
+        assert_eq!(doc.doc.line_count(), EDITOR_MAX_LINES + 1);
+        // B 档不经过只读编辑器：编辑器仍为空，主线程没有搬运过 2 MB 文本
+        assert!(
+            t.response_editor_for("text")
+                .read(app)
+                .value()
+                .as_ref()
+                .is_empty()
+        );
+    });
+
+    // 真正绘制整个 Tab（Body 页签 → B 档行视图，再切到 Headers 页签 → Headers 列表）。
+    // 渲染闭包只对可见区间切片，20 万行必须在瞬间完成（每帧 O(n) 的实现会慢上几个数量级）。
+    let started = Instant::now();
+    draw_tab(&tab, cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Headers;
+            cx.notify();
+        })
+    });
+    draw_tab(&tab, cx);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "rendering must be O(visible lines), took {elapsed:?}"
+    );
+
+    // uniform_list 真的完成了布局：`contents` 是「行高 × 总行数」，`item` 是视口。
+    // 视口远小于内容 → 这一帧只渲染了可见的那几十行。
+    cx.read(|app| {
+        let t = tab.read(app);
+        let body = t
+            .body_scroll
+            .0
+            .borrow()
+            .last_item_size
+            .expect("body list was laid out");
+        assert_eq!(
+            body.contents.height,
+            px(LINE_HEIGHT_PX * (EDITOR_MAX_LINES + 1) as f32)
+        );
+        assert!(body.item.height < body.contents.height / 100.);
+        let headers = t
+            .headers_scroll
+            .0
+            .borrow()
+            .last_item_size
+            .expect("headers list was laid out");
+        assert_eq!(headers.contents.height, px(24.));
+    });
+}
+
+fn draw_tab(tab: &Entity<RequestTab>, cx: &mut VisualTestContext) {
+    let tab = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1000.), px(800.)), |_, _| {
+        tab.into_any_element()
+    });
 }

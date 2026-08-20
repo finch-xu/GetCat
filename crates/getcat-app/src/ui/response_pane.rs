@@ -1,5 +1,7 @@
-//! 响应面板：状态行、Pretty/Raw 与 Body/Headers 切换、只读编辑器、Headers 列表。
+//! 响应面板：状态行、Pretty/Raw 与 Body/Headers 切换、按档位分派的 Body 视图、虚拟化 Headers 列表。
 
+use getcat_core::body::tier::ViewTier;
+use getcat_core::http::RequestError;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
@@ -10,9 +12,9 @@ use gpui_component::{
 };
 
 use crate::state::request_tab::{RequestTab, ResponseSection};
-use crate::state::response::ResponseState;
+use crate::state::response::{ResponseState, ResponseView};
+use crate::ui::body_view::{render_header_rows, render_text_lines};
 use crate::ui::{format_bytes, format_duration, status_color};
-use getcat_core::http::RequestError;
 
 fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
     div()
@@ -26,12 +28,22 @@ fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+fn notice_bar(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    div()
+        .px_3()
+        .py_1()
+        .text_xs()
+        .bg(cx.theme().warning.opacity(0.15))
+        .text_color(cx.theme().warning)
+        .child(text.into())
+        .into_any_element()
+}
+
 impl RequestTab {
     pub fn render_response_pane(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_done = matches!(self.response, ResponseState::Done(_));
-        let headers_count = match &self.response {
-            ResponseState::Done(v) => v.meta.headers.len(),
-            _ => 0,
+        let (has_pretty, headers_count) = match &self.response {
+            ResponseState::Done { view, .. } => (view.has_pretty(), view.header_rows.len()),
+            _ => (false, 0),
         };
         let section = self.response_section;
 
@@ -51,7 +63,8 @@ impl RequestTab {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .when(is_done, |h| {
+                            // 只有存在美化文本时才提供 Pretty/Raw 切换
+                            .when(has_pretty, |h| {
                                 h.child(
                                     TabBar::new("pretty-raw")
                                         .segmented()
@@ -136,59 +149,48 @@ impl RequestTab {
                         .child(error.to_string()),
                 )
                 .into_any_element(),
-            ResponseState::Done(view) => match section {
-                ResponseSection::Body => v_flex()
-                    .size_full()
-                    .when(view.truncated, |v| {
-                        v.child(
-                            div()
-                                .px_3()
-                                .py_1()
-                                .text_xs()
-                                .bg(cx.theme().warning.opacity(0.15))
-                                .text_color(cx.theme().warning)
-                                .child(
-                                    "响应超过 5 MB，仅显示前 1 MB；完整的大响应查看器将在下一阶段提供",
-                                ),
-                        )
-                    })
-                    .child(
-                        div().flex_1().min_h_0().child(
-                            Editor::new(self.response_editor_for(view.kind.editor_language()))
-                                .aria_label("响应 Body")
-                                .font_family(cx.theme().mono_font_family.clone())
-                                .text_size(cx.theme().mono_font_size)
-                                .readonly(true)
-                                .size_full(),
-                        ),
-                    )
-                    .into_any_element(),
-                ResponseSection::Headers => div()
-                    .id("response-headers")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .p_3()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .children(view.meta.headers.iter().map(|(k, v)| {
-                                h_flex()
-                                    .gap_3()
-                                    .text_sm()
-                                    .font_family(cx.theme().mono_font_family.clone())
-                                    .child(
-                                        div()
-                                            .w(px(260.))
-                                            .flex_none()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(k.clone()),
-                                    )
-                                    .child(div().flex_1().min_w_0().child(v.clone()))
-                            })),
-                    )
-                    .into_any_element(),
+            ResponseState::Done { view, .. } => match section {
+                ResponseSection::Body => self.render_body_view(view, cx),
+                ResponseSection::Headers => {
+                    render_header_rows(view.header_rows.clone(), &self.headers_scroll, cx)
+                        .into_any_element()
+                }
             },
         }
+    }
+
+    /// 按档位分派：A 档只读 Editor；B/C 档 uniform_list 行视图；二进制只有摘要。
+    fn render_body_view(&self, view: &ResponseView, cx: &mut Context<Self>) -> AnyElement {
+        let Some(doc) = view.doc(self.pretty) else {
+            return empty_state(
+                format!(
+                    "二进制内容（{}），不提供文本预览",
+                    format_bytes(view.meta.body_len)
+                ),
+                cx,
+            );
+        };
+        if doc.doc.line_count() == 0 {
+            return empty_state("响应体为空", cx);
+        }
+        let body = match doc.tier {
+            ViewTier::Editor => Editor::new(self.response_editor_for(view.kind.editor_language()))
+                .aria_label("响应 Body")
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_size(cx.theme().mono_font_size)
+                .readonly(true)
+                .size_full()
+                .into_any_element(),
+            ViewTier::Virtual | ViewTier::Preview => {
+                render_text_lines("response-lines", doc.doc.clone(), &self.body_scroll, cx)
+                    .into_any_element()
+            }
+        };
+        v_flex()
+            .size_full()
+            .when_some(doc.tier.notice(), |v, text| v.child(notice_bar(text, cx)))
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
     }
 
     pub fn render_status_line(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -220,7 +222,7 @@ impl RequestTab {
                     })
                     .into_any_element()
             }
-            ResponseState::Done(view) => {
+            ResponseState::Done { view, .. } => {
                 let color = status_color(view.meta.status, cx);
                 h_flex()
                     .gap_3()

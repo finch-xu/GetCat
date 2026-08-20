@@ -1,16 +1,18 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use getcat_core::http::{self, HttpResponse, RequestError};
+use getcat_core::body::tier::ViewTier;
+use getcat_core::http::{self, BodyStore, HttpResponse, RequestError};
 use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft};
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use gpui::{
-    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription, Window, div, px,
+    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, ScrollStrategy,
+    SharedString, Styled, Subscription, UniformListScrollHandle, Window, div, px,
 };
 use gpui_component::IndexPath;
 use gpui_component::input::{EditorState, InputEvent, InputState};
@@ -21,7 +23,7 @@ use gpui_component::v_flex;
 use tokio::sync::mpsc;
 
 use crate::bridge;
-use crate::state::response::{ResponseState, ResponseView};
+use crate::state::response::{CancelFlag, ResponseState, ResponseView};
 use crate::ui::kv_table::{KvTable, KvTableEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +94,9 @@ pub struct RequestTab {
     pub request_section: RequestSection,
     pub response_section: ResponseSection,
     pub pretty: bool,
+    /// B/C 档行视图与 Headers 列表的滚动位置；新响应到达时回到顶部。
+    pub body_scroll: UniformListScrollHandle,
+    pub headers_scroll: UniformListScrollHandle,
     pub response: ResponseState,
     pub generation: u64,
     _subs: Vec<Subscription>,
@@ -166,6 +171,8 @@ impl RequestTab {
             request_section: RequestSection::Params,
             response_section: ResponseSection::Body,
             pretty: true,
+            body_scroll: UniformListScrollHandle::new(),
+            headers_scroll: UniformListScrollHandle::new(),
             response: ResponseState::Idle,
             generation: 0,
             _subs: subs,
@@ -261,13 +268,17 @@ impl RequestTab {
             return;
         }
         self.pretty = pretty;
-        if let ResponseState::Done(view) = &self.response {
-            let text = view.text(pretty);
+        if let ResponseState::Done { view, .. } = &self.response
+            && let Some(doc) = view.doc(pretty)
+            && doc.tier == ViewTier::Editor
+        {
+            let text = doc.shared_text();
             let editor = self
                 .response_editor_for(view.kind.editor_language())
                 .clone();
             editor.update(cx, |e, cx| e.set_value(text, window, cx));
         }
+        self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
 }
@@ -338,16 +349,32 @@ impl RequestTab {
             }
         });
 
-        // 完成任务：等待请求 → 后台准备视图 → 回主线程写入（generation 不匹配则丢弃）。
+        // 后台准备阶段的取消旗标：随 InFlight 一起 drop 即置位
+        let cancel = CancelFlag::new();
+        let cancelled = cancel.handle();
+
+        // 完成任务：等待请求 → 后台准备视图（可取消）→ 回主线程写入（generation 不匹配则丢弃）。
         let completion_task = cx.spawn_in(window, async move |this, cx| {
             let outcome: Result<HttpResponse, RequestError> = match request_task.await {
                 Ok(inner) => inner,
                 Err(e) => Err(RequestError::Other(e.to_string())),
             };
             let prepared = match outcome {
-                Ok(resp) => Ok(cx
-                    .background_spawn(async move { ResponseView::prepare(resp) })
-                    .await),
+                Ok(HttpResponse { meta, body }) => {
+                    let prepared = cx
+                        .background_spawn(async move {
+                            ResponseView::prepare_cancellable(meta, &body, || {
+                                cancelled.load(Ordering::Relaxed)
+                            })
+                            .map(|view| (body, view))
+                        })
+                        .await;
+                    match prepared {
+                        Some(pair) => Ok(pair),
+                        // 已取消：不回写任何东西
+                        None => return,
+                    }
+                }
                 Err(e) => Err(e),
             };
             let _ = this.update_in(cx, |this, window, cx| {
@@ -360,6 +387,7 @@ impl RequestTab {
             received: 0,
             total: None,
             _tasks: vec![progress_task, tick_task, completion_task],
+            _cancel: cancel,
         };
         cx.notify();
     }
@@ -369,7 +397,7 @@ impl RequestTab {
     pub(crate) fn apply_outcome(
         &mut self,
         generation: u64,
-        outcome: Result<ResponseView, RequestError>,
+        outcome: Result<(BodyStore, ResponseView), RequestError>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -377,13 +405,19 @@ impl RequestTab {
             return;
         }
         match outcome {
-            Ok(view) => {
-                let text = view.text(self.pretty);
-                let editor = self
-                    .response_editor_for(view.kind.editor_language())
-                    .clone();
-                editor.update(cx, |e, cx| e.set_value(text, window, cx));
-                self.response = ResponseState::Done(view);
+            Ok((body, view)) => {
+                // A 档：整段文本写入对应语言的只读编辑器；B/C 档由虚拟列表直接切片，不经过编辑器
+                if let Some(doc) = view.doc(self.pretty)
+                    && doc.tier == ViewTier::Editor
+                {
+                    let editor = self
+                        .response_editor_for(view.kind.editor_language())
+                        .clone();
+                    editor.update(cx, |e, cx| e.set_value(doc.shared_text(), window, cx));
+                }
+                self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                self.headers_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                self.response = ResponseState::Done { body, view };
                 self.response_section = ResponseSection::Body;
             }
             Err(error) => self.response = ResponseState::Failed { error },
