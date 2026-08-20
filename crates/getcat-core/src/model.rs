@@ -110,7 +110,9 @@ pub enum BodyKind {
         format: RawFormat,
         text: String,
     },
-    FormUrlEncoded(Vec<KeyValue>),
+    FormUrlEncoded {
+        fields: Vec<KeyValue>,
+    },
     File {
         path: PathBuf,
         content_type: Option<String>,
@@ -213,5 +215,19 @@ mod tests {
         assert_eq!(RawFormat::Json.content_type(), "application/json");
         assert_eq!(RawFormat::Text.content_type(), "text/plain");
         assert_eq!(RawFormat::Xml.content_type(), "application/xml");
+    }
+
+    #[test]
+    fn form_body_serde_roundtrip() {
+        let d = RequestDraft {
+            body: BodyKind::FormUrlEncoded {
+                fields: vec![KeyValue::new("a", "1")],
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains("\"kind\":\"form_url_encoded\""), "{}", json);
+        let back: RequestDraft = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, d);
     }
 }
