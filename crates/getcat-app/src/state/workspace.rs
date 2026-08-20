@@ -90,6 +90,8 @@ impl Workspace {
                             .icon(IconName::Close)
                             .tooltip("关闭 Tab")
                             .on_click(cx.listener(move |this, _, window, cx| {
+                                // 阻止冒泡到 Tab 的 on_click，否则关闭后会再触发 activate(ix)
+                                cx.stop_propagation();
                                 this.close_tab(ix, window, cx)
                             })),
                     )
