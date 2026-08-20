@@ -1,0 +1,59 @@
+[workspace]
+resolver = "3"
+members = ["crates/getcat-core", "crates/getcat-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.97"
+
+[workspace.dependencies]
+getcat-core = { path = "crates/getcat-core" }
+
+# GPUI 生态：不写 rev，与 gpui-component 的声明保持一致，版本由 Cargo.lock 锁定
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "runtime_shaders"] }
+gpui_tokio = { git = "https://github.com/zed-industries/zed" }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f", features = ["tree-sitter", "tree-sitter-html"] }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f" }
+
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "charset", "system-proxy", "stream", "gzip", "brotli", "zstd", "json", "multipart"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+url = "2.5.8"
+bytes = "1.12"
+futures = "0.3.34"
+memchr = "2.8"
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# dev
+wiremock = "0.6.5"
+flate2 = "1.1"
+
+[patch.crates-io]
+# arrayref 0.3.5–0.3.9 已在 crates.io 被 yank（tiny-skia -> resvg -> gpui-component 传递依赖）
+arrayref = { path = "vendor/arrayref" }
+
+[profile.dev]
+debug = "limited"
+
+[profile.dev.package]
+gpui = { opt-level = 3 }
+gpui_platform = { opt-level = 3 }
+gpui_macros = { opt-level = 3 }
+tree-sitter = { opt-level = 3 }
+ropey = { opt-level = 3 }
+resvg = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
+smol = { opt-level = 3 }
+sum_tree = { opt-level = 3 }
+
+[profile.release]
+lto = "thin"

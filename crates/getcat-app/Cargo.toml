@@ -1,0 +1,29 @@
+[package]
+name = "getcat-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "getcat"
+path = "src/main.rs"
+
+[features]
+# 开发期元素检查器：cargo run -p getcat-app --features inspector，应用内 ⌘⌥I（macOS）/ Ctrl+Shift+I 打开
+inspector = ["gpui-component/inspector"]
+
+[dependencies]
+getcat-core.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui_tokio.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["x11", "wayland"] }
