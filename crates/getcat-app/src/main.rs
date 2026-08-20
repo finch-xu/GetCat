@@ -30,6 +30,12 @@ fn main() {
         gpui_component::init(cx);
         bridge::init(cx);
 
+        // 落盘响应的临时目录随进程退出一起清理（守卫已逐个删除，这里兜底异常路径）
+        cx.on_app_quit(|_cx| async {
+            getcat_core::body::spill::cleanup_session_dir();
+        })
+        .detach();
+
         cx.bind_keys([
             KeyBinding::new(&primary("enter"), SendRequest, None),
             KeyBinding::new(&primary("t"), NewTab, None),

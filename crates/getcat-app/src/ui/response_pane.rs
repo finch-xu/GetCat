@@ -1,11 +1,13 @@
 //! 响应面板：状态行、Pretty/Raw 与 Body/Headers 切换、按档位分派的 Body 视图、虚拟化 Headers 列表。
 
 use getcat_core::body::tier::ViewTier;
-use getcat_core::http::RequestError;
+use getcat_core::http::{BodyStore, RequestError};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, Sizable, h_flex,
+    ActiveTheme, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex,
     input::Editor,
     tab::{Tab, TabBar},
     v_flex,
@@ -41,9 +43,9 @@ fn notice_bar(text: impl Into<SharedString>, cx: &App) -> AnyElement {
 
 impl RequestTab {
     pub fn render_response_pane(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (has_pretty, headers_count) = match &self.response {
-            ResponseState::Done { view, .. } => (view.has_pretty(), view.header_rows.len()),
-            _ => (false, 0),
+        let (is_done, has_pretty, headers_count) = match &self.response {
+            ResponseState::Done { view, .. } => (true, view.has_pretty(), view.header_rows.len()),
+            _ => (false, false, 0),
         };
         let section = self.response_section;
 
@@ -63,6 +65,27 @@ impl RequestTab {
                         h_flex()
                             .gap_3()
                             .items_center()
+                            .when_some(self.save_notice.clone(), |h, notice| {
+                                h.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .max_w(px(360.))
+                                        .truncate()
+                                        .child(notice),
+                                )
+                            })
+                            .when(is_done, |h| {
+                                h.child(
+                                    Button::new("save-body")
+                                        .ghost()
+                                        .xsmall()
+                                        .label("保存到文件")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.save_body(window, cx)
+                                        })),
+                                )
+                            })
                             // 只有存在美化文本时才提供 Pretty/Raw 切换
                             .when(has_pretty, |h| {
                                 h.child(
@@ -149,8 +172,8 @@ impl RequestTab {
                         .child(error.to_string()),
                 )
                 .into_any_element(),
-            ResponseState::Done { view, .. } => match section {
-                ResponseSection::Body => self.render_body_view(view, cx),
+            ResponseState::Done { body, view } => match section {
+                ResponseSection::Body => self.render_body_view(body, view, cx),
                 ResponseSection::Headers => {
                     render_header_rows(view.header_rows.clone(), &self.headers_scroll, cx)
                         .into_any_element()
@@ -159,37 +182,93 @@ impl RequestTab {
         }
     }
 
-    /// 按档位分派：A 档只读 Editor；B/C 档 uniform_list 行视图；二进制只有摘要。
-    fn render_body_view(&self, view: &ResponseView, cx: &mut Context<Self>) -> AnyElement {
+    /// 按档位分派：A 档只读 Editor；B 档 uniform_list 行视图；C 档摘要 + 前 1 MiB 行视图；二进制只有摘要。
+    fn render_body_view(
+        &self,
+        body: &BodyStore,
+        view: &ResponseView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(doc) = view.doc(self.pretty) else {
-            return empty_state(
-                format!(
-                    "二进制内容（{}），不提供文本预览",
-                    format_bytes(view.meta.body_len)
-                ),
-                cx,
-            );
-        };
-        if doc.doc.line_count() == 0 {
-            return empty_state("响应体为空", cx);
-        }
-        let body = match doc.tier {
-            ViewTier::Editor => Editor::new(self.response_editor_for(view.kind.editor_language()))
-                .aria_label("响应 Body")
-                .font_family(cx.theme().mono_font_family.clone())
-                .text_size(cx.theme().mono_font_size)
-                .readonly(true)
+            return v_flex()
                 .size_full()
-                .into_any_element(),
-            ViewTier::Virtual | ViewTier::Preview => {
-                render_text_lines("response-lines", doc.doc.clone(), &self.body_scroll, cx)
-                    .into_any_element()
+                .child(self.render_preview_summary(body, view, cx))
+                .child(empty_state(
+                    "二进制内容不提供文本预览，可用右上角「保存到文件」导出",
+                    cx,
+                ))
+                .into_any_element();
+        };
+        let lines = if doc.doc.line_count() == 0 {
+            empty_state("响应体为空", cx)
+        } else {
+            match doc.tier {
+                ViewTier::Editor => {
+                    Editor::new(self.response_editor_for(view.kind.editor_language()))
+                        .aria_label("响应 Body")
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(cx.theme().mono_font_size)
+                        .readonly(true)
+                        .size_full()
+                        .into_any_element()
+                }
+                ViewTier::Virtual | ViewTier::Preview => {
+                    render_text_lines("response-lines", doc.doc.clone(), &self.body_scroll, cx)
+                        .into_any_element()
+                }
             }
         };
         v_flex()
             .size_full()
             .when_some(doc.tier.notice(), |v, text| v.child(notice_bar(text, cx)))
-            .child(div().flex_1().min_h_0().child(body))
+            .when(view.is_preview(), |v| {
+                v.child(self.render_preview_summary(body, view, cx))
+            })
+            .child(div().flex_1().min_h_0().child(lines))
+            .into_any_element()
+    }
+
+    /// C 档 / 二进制的摘要块：大小、类型、耗时、临时文件路径与"用系统程序打开"。
+    fn render_preview_summary(
+        &self,
+        body: &BodyStore,
+        view: &ResponseView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let row = |label: &'static str, value: String| {
+            h_flex()
+                .gap_2()
+                .text_sm()
+                .child(div().w(px(72.)).flex_none().text_color(muted).child(label))
+                .child(div().flex_1().min_w_0().truncate().child(value))
+        };
+        v_flex()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(row("大小", format_bytes(view.meta.body_len)))
+            .child(row(
+                "类型",
+                view.meta
+                    .content_type
+                    .clone()
+                    .unwrap_or_else(|| view.kind.label().to_string()),
+            ))
+            .child(row("耗时", format_duration(view.meta.duration)))
+            .when_some(body.path(), |v, path| {
+                v.child(row("临时文件", path.display().to_string())).child(
+                    h_flex().pt_1().child(
+                        Button::new("open-with-system")
+                            .outline()
+                            .xsmall()
+                            .label("用系统程序打开")
+                            .on_click(cx.listener(|this, _, _, cx| this.open_body_with_system(cx))),
+                    ),
+                )
+            })
             .into_any_element()
     }
 

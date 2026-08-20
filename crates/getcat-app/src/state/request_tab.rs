@@ -1,9 +1,11 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use getcat_core::body::tier::ViewTier;
+use getcat_core::detect::ContentKind;
 use getcat_core::http::{self, BodyStore, HttpResponse, RequestError};
 use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft};
 use getcat_core::url::extract_path_params;
@@ -98,6 +100,8 @@ pub struct RequestTab {
     pub body_scroll: UniformListScrollHandle,
     pub headers_scroll: UniformListScrollHandle,
     pub response: ResponseState,
+    /// 最近一次"保存到文件"的结果提示；重新发送时清空。
+    pub save_notice: Option<SharedString>,
     pub generation: u64,
     _subs: Vec<Subscription>,
 }
@@ -174,6 +178,7 @@ impl RequestTab {
             body_scroll: UniformListScrollHandle::new(),
             headers_scroll: UniformListScrollHandle::new(),
             response: ResponseState::Idle,
+            save_notice: None,
             generation: 0,
             _subs: subs,
         }
@@ -299,6 +304,7 @@ impl RequestTab {
             }
         };
         self.url_error = None;
+        self.save_notice = None;
         self.generation += 1;
         let generation = self.generation;
 
@@ -436,6 +442,48 @@ impl RequestTab {
         };
         cx.notify();
     }
+
+    /// "保存到文件"：弹系统保存对话框，选中后在 tokio 上写入 / 拷贝，完成后在状态行显示结果。
+    pub fn save_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ResponseState::Done { body, view } = &self.response else {
+            return;
+        };
+        let body = body.clone();
+        let suggested = format!("response.{}", file_extension(view.kind));
+        let generation = self.generation;
+        let rx = cx.prompt_for_new_path(Path::new(""), Some(suggested.as_str()));
+        cx.spawn_in(window, async move |this, cx| {
+            // 对话框取消 / 出错都静默返回
+            let Ok(Ok(Some(dest))) = rx.await else {
+                return;
+            };
+            let result = match cx.update(|_, cx| bridge::save_body(cx, body, dest.clone())) {
+                Ok(task) => task.await,
+                Err(e) => Err(e),
+            };
+            let _ = this.update(cx, |this, cx| {
+                // 已重发：不再展示旧响应的保存结果
+                if this.generation != generation {
+                    return;
+                }
+                this.save_notice = Some(match result {
+                    Ok(()) => format!("已保存到 {}", dest.display()).into(),
+                    Err(e) => format!("保存失败：{e}").into(),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// "用系统程序打开"：只有落盘响应才有文件可开。
+    pub fn open_body_with_system(&self, cx: &mut Context<Self>) {
+        if let ResponseState::Done { body, .. } = &self.response
+            && let Some(path) = body.path()
+        {
+            cx.open_with_system(path);
+        }
+    }
 }
 
 impl Render for RequestTab {
@@ -452,6 +500,17 @@ impl Render for RequestTab {
                     .child(resizable_panel().child(self.render_response_pane(cx))),
             ),
         )
+    }
+}
+
+/// 保存对话框的建议扩展名。
+fn file_extension(kind: ContentKind) -> &'static str {
+    match kind {
+        ContentKind::Json => "json",
+        ContentKind::Xml => "xml",
+        ContentKind::Html => "html",
+        ContentKind::Text => "txt",
+        ContentKind::Binary => "bin",
     }
 }
 

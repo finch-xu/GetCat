@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::ResponseMeta;
@@ -348,4 +349,102 @@ fn draw_tab(tab: &Entity<RequestTab>, cx: &mut VisualTestContext) {
     cx.draw(point(px(0.), px(0.)), size(px(1000.), px(800.)), |_, _| {
         tab.into_any_element()
     });
+}
+
+pub(crate) fn meta(content_type: &str, body_len: u64) -> ResponseMeta {
+    ResponseMeta {
+        status: 200,
+        status_text: "OK".into(),
+        headers: vec![],
+        duration: Duration::from_millis(3),
+        body_len,
+        content_type: Some(content_type.into()),
+    }
+}
+
+/// 直接把一份准备好的响应灌进 Tab（绕过网络），generation 对齐。
+pub(crate) fn install_done(tab: &Entity<RequestTab>, body: BodyStore, cx: &mut VisualTestContext) {
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.generation += 1;
+            let g = t.generation;
+            let view = ResponseView::prepare(meta("application/json", body.len()), &body);
+            t.apply_outcome(g, Ok((body, view)), window, cx);
+        })
+    });
+}
+
+#[gpui::test]
+fn save_body_writes_memory_body_to_chosen_path(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    set_url_and_send(&tab, &fake_json_server(r#"{"a":1}"#), cx);
+    wait_until(cx, |cx| cx.read(|app| tab.read(app).response.is_done()));
+    let dest = std::env::temp_dir().join(format!("getcat-save-mem-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&dest);
+
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
+    assert!(cx.did_prompt_for_new_path());
+    let chosen = dest.clone();
+    cx.simulate_new_path_selection(move |_| Some(chosen));
+    wait_until(cx, |cx| cx.read(|app| tab.read(app).save_notice.is_some()));
+    cx.read(|app| {
+        let notice = tab.read(app).save_notice.clone().unwrap();
+        assert!(notice.starts_with("已保存到"), "{notice}");
+    });
+    assert_eq!(std::fs::read(&dest).unwrap(), br#"{"a":1}"#);
+    let _ = std::fs::remove_file(&dest);
+}
+
+#[gpui::test]
+fn save_body_copies_spilled_file(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let (guard, mut file) = SpillFile::create().unwrap();
+    std::io::Write::write_all(&mut file, b"0123456789").unwrap();
+    drop(file);
+    let body = BodyStore::Spilled {
+        file: Arc::new(guard),
+        len: 10,
+        head: Arc::from(&b"0123456789"[..]),
+    };
+    install_done(&tab, body, cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.response.is_done());
+        let ResponseState::Done { view, .. } = &t.response else {
+            unreachable!()
+        };
+        assert!(view.is_preview());
+    });
+    let dest = std::env::temp_dir().join(format!("getcat-save-spill-{}.bin", std::process::id()));
+    let _ = std::fs::remove_file(&dest);
+
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
+    let chosen = dest.clone();
+    cx.simulate_new_path_selection(move |_| Some(chosen));
+    wait_until(cx, |cx| cx.read(|app| tab.read(app).save_notice.is_some()));
+    assert_eq!(std::fs::read(&dest).unwrap(), b"0123456789");
+    let _ = std::fs::remove_file(&dest);
+}
+
+#[gpui::test]
+fn cancelled_save_dialog_leaves_no_notice(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    install_done(&tab, BodyStore::Memory(Arc::from(&b"{}"[..])), cx);
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
+    cx.simulate_new_path_selection(|_| None);
+    cx.run_until_parked();
+    cx.read(|app| assert!(tab.read(app).save_notice.is_none()));
+}
+
+#[gpui::test]
+fn save_body_does_nothing_when_not_done(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
+    assert!(!cx.did_prompt_for_new_path());
 }
