@@ -55,6 +55,18 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_checked_inside_long_whitespace_runs() {
+        let big = format!("[{}]", " ".repeat(2 * CHECK_INTERVAL));
+        let mut calls = 0;
+        let out = pretty_json_cancellable(big.as_bytes(), || {
+            calls += 1;
+            calls > 2
+        });
+        assert_eq!(out, None);
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
     fn cancellation_checked_every_interval() {
         let big = format!("[{}]", "1,".repeat(CHECK_INTERVAL)); // > 2 MiB
         let mut calls = 0;
