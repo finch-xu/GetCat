@@ -16,8 +16,7 @@ impl LineIndex {
         Self::build_cancellable(bytes, || false).expect("never cancelled")
     }
 
-    /// 开头检查一次 `should_cancel`，之后每 CHECK_INTERVAL 字节至少再检查一次；返回 None 表示已取消。
-    /// 检查点跟随换行符位置推进：整段无换行的输入只在开头检查一次（memchr 扫 64 MiB 仅需几毫秒）。
+    /// 每 CHECK_INTERVAL 字节至少检查一次取消（含偏移 0），与换行密度无关；返回 None 表示已取消。
     pub fn build_cancellable(
         bytes: &[u8],
         mut should_cancel: impl FnMut() -> bool,
@@ -26,29 +25,27 @@ impl LineIndex {
             bytes.len() <= u32::MAX as usize,
             "LineIndex supports at most 4 GiB of text"
         );
-        if should_cancel() {
-            return None;
-        }
-        // 经验值：美化后的 JSON 约每 16 字节一行；估少了会倍增，估多了浪费 4 字节/16 字节
         let mut starts: Vec<u32> = Vec::with_capacity(bytes.len() / 16 + 1);
-        if bytes.is_empty() {
-            return Some(LineIndex {
-                starts,
-                total_len: 0,
-            });
+        if !bytes.is_empty() {
+            starts.push(0);
         }
-        starts.push(0);
-        let mut next_check = CHECK_INTERVAL;
-        for pos in memchr::memchr_iter(b'\n', bytes) {
-            if pos >= next_check {
-                if should_cancel() {
-                    return None;
+        // 每 CHECK_INTERVAL 字节至少检查一次取消（含偏移 0），与换行密度无关。
+        let mut chunk_start = 0usize;
+        loop {
+            if should_cancel() {
+                return None;
+            }
+            if chunk_start >= bytes.len() {
+                break;
+            }
+            let chunk_end = (chunk_start + CHECK_INTERVAL).min(bytes.len());
+            for pos in memchr::memchr_iter(b'\n', &bytes[chunk_start..chunk_end]) {
+                let next = chunk_start + pos + 1;
+                if next < bytes.len() {
+                    starts.push(next as u32);
                 }
-                next_check = pos + CHECK_INTERVAL;
             }
-            if pos + 1 < bytes.len() {
-                starts.push((pos + 1) as u32);
-            }
+            chunk_start = chunk_end;
         }
         Some(LineIndex {
             starts,
@@ -139,5 +136,17 @@ mod tests {
             LineIndex::build_cancellable(&big, || false).unwrap().len(),
             2 * CHECK_INTERVAL + 1
         );
+    }
+
+    #[test]
+    fn cancellation_checked_even_without_newlines() {
+        let bytes = vec![b'x'; 2 * CHECK_INTERVAL + 1];
+        let mut calls = 0;
+        let out = LineIndex::build_cancellable(&bytes, || {
+            calls += 1;
+            calls > 2
+        });
+        assert_eq!(out, None);
+        assert_eq!(calls, 3);
     }
 }
