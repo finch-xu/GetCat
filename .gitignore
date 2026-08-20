@@ -25,3 +25,5 @@ docs/
 
 # SDD 流程的本地工作区（ledger、briefs、reports）
 .superpowers/
+
+.claude/
