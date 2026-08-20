@@ -16,6 +16,8 @@ pub enum RequestError {
     Tls(String),
     #[error("连接超时")]
     Timeout,
+    #[error("响应过大：{0} 字节（上限 64 MB）")]
+    TooLarge(u64),
     #[error("已取消")]
     Cancelled,
     #[error("网络错误：{0}")]
@@ -32,20 +34,36 @@ impl RequestError {
             RequestError::ConnectionRefused(_) => "连接被拒绝",
             RequestError::Tls(_) => "TLS 错误",
             RequestError::Timeout => "超时",
+            RequestError::TooLarge(_) => "响应过大",
             RequestError::Cancelled => "已取消",
             RequestError::Other(_) => "网络错误",
         }
     }
 }
 
+/// 完整错误链（含顶层）——只用于展示文本。
 fn error_chain(e: &dyn std::error::Error) -> String {
     let mut parts = vec![e.to_string()];
+    parts.extend(source_parts(e));
+    parts.join(": ")
+}
+
+/// 仅 source 链，**不含**顶层 `e.to_string()`——用于关键词分类。
+/// reqwest 会把 ` for url (<url>)` 拼进顶层文本，若拿它做关键词匹配，
+/// 请求 `https://dns.google/resolve` 会被误判成 DNS 失败、
+/// `http://localhost:1/tls-status` 会被误判成 TLS 错误。
+fn source_chain(e: &dyn std::error::Error) -> String {
+    source_parts(e).join(": ")
+}
+
+fn source_parts(e: &dyn std::error::Error) -> Vec<String> {
+    let mut parts = Vec::new();
     let mut cur = e.source();
     while let Some(s) = cur {
         parts.push(s.to_string());
         cur = s.source();
     }
-    parts.join(": ")
+    parts
 }
 
 impl From<reqwest::Error> for RequestError {
@@ -54,20 +72,24 @@ impl From<reqwest::Error> for RequestError {
             return RequestError::Timeout;
         }
         let chain = error_chain(&e);
-        let lower = chain.to_ascii_lowercase();
-        if lower.contains("certificate") || lower.contains("tls") || lower.contains("handshake") {
-            return RequestError::Tls(chain);
-        }
-        if lower.contains("dns")
-            || lower.contains("lookup")
-            || lower.contains("resolve")
-            || lower.contains("nodename")
-            || lower.contains("name or service not known")
-        {
-            return RequestError::Dns(chain);
-        }
-        if lower.contains("refused") {
-            return RequestError::ConnectionRefused(chain);
+        // 只有连接阶段的错误才做 Dns/Tls/Refused 细分，且只看 source 链的关键词。
+        if e.is_connect() {
+            let lower = source_chain(&e).to_ascii_lowercase();
+            if lower.contains("certificate") || lower.contains("tls") || lower.contains("handshake")
+            {
+                return RequestError::Tls(chain);
+            }
+            if lower.contains("dns")
+                || lower.contains("lookup")
+                || lower.contains("resolve")
+                || lower.contains("nodename")
+                || lower.contains("name or service not known")
+            {
+                return RequestError::Dns(chain);
+            }
+            if lower.contains("refused") {
+                return RequestError::ConnectionRefused(chain);
+            }
         }
         RequestError::Other(chain)
     }

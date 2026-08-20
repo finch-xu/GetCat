@@ -1,6 +1,12 @@
 //! 顶层工作区：Tab 列表、侧栏折叠、全局动作。
 
-use gpui::*;
+// 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入
+// gpui 重导出的 `#[proc_macro_attribute] test`，与标准库 `#[test]` 同名冲突，
+// 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
+use gpui::{
+    AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
+    Render, SharedString, Styled, Window, div, px,
+};
 use gpui_component::{
     ActiveTheme, IconName, Sizable,
     button::{Button, ButtonVariants},
@@ -57,12 +63,9 @@ impl Workspace {
             self.new_tab(window, cx);
             return;
         }
+        let len = self.tabs.len();
         self.tabs.remove(ix);
-        if self.active >= self.tabs.len() {
-            self.active = self.tabs.len() - 1;
-        } else if ix < self.active {
-            self.active -= 1;
-        }
+        self.active = active_after_close(self.active, ix, len);
         cx.notify();
     }
 
@@ -107,6 +110,19 @@ impl Workspace {
     }
 }
 
+/// 关闭 `closing` 后新的 active 下标；`len` 为关闭前的 Tab 数（≥ 2）。
+pub(crate) fn active_after_close(active: usize, closing: usize, len: usize) -> usize {
+    let new_len = len - 1;
+    if active >= new_len {
+        // 关掉的是末尾且它就是 active：夹到新的末尾。
+        new_len - 1
+    } else if closing < active {
+        active - 1
+    } else {
+        active
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.active_tab();
@@ -147,5 +163,34 @@ impl Render for Workspace {
                         ),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::active_after_close;
+
+    #[test]
+    fn closing_left_of_active_shifts_active_left() {
+        assert_eq!(active_after_close(2, 0, 4), 1);
+        assert_eq!(active_after_close(1, 0, 3), 0);
+    }
+
+    #[test]
+    fn closing_active_keeps_index_pointing_at_right_neighbour() {
+        assert_eq!(active_after_close(1, 1, 3), 1);
+        assert_eq!(active_after_close(0, 0, 2), 0);
+    }
+
+    #[test]
+    fn closing_last_active_clamps_to_new_last() {
+        assert_eq!(active_after_close(2, 2, 3), 1);
+        assert_eq!(active_after_close(1, 1, 2), 0);
+    }
+
+    #[test]
+    fn closing_right_of_active_leaves_active_alone() {
+        assert_eq!(active_after_close(0, 1, 3), 0);
+        assert_eq!(active_after_close(1, 2, 4), 1);
     }
 }

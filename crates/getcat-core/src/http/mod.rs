@@ -23,6 +23,9 @@ pub type Client = reqwest::Client;
 pub const USER_AGENT_VALUE: &str = concat!("GetCat/", env!("CARGO_PKG_VERSION"));
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(33);
+/// 响应体驻留内存的上限；超出即报 `RequestError::TooLarge`。
+/// Plan 2 落盘（`BodyStore::Spilled`）后，超限分支会改成溢出到磁盘而不是报错。
+pub const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboundBody {
@@ -153,6 +156,16 @@ pub async fn execute(
     req: HttpRequest,
     progress: Option<mpsc::Sender<Progress>>,
 ) -> Result<HttpResponse, RequestError> {
+    execute_with_limit(client, req, progress, MAX_BODY_BYTES).await
+}
+
+/// `execute` 的参数化版本：`max_body` 为响应体字节上限（测试用小值）。
+pub async fn execute_with_limit(
+    client: &Client,
+    req: HttpRequest,
+    progress: Option<mpsc::Sender<Progress>>,
+    max_body: u64,
+) -> Result<HttpResponse, RequestError> {
     let started = Instant::now();
     let mut builder = client.request(to_reqwest_method(req.method), req.url.clone());
 
@@ -189,12 +202,26 @@ pub async fn execute(
         .map(str::to_string);
     let total = resp.content_length();
 
-    let mut buf = BytesMut::with_capacity(total.unwrap_or(0).min(64 * 1024 * 1024) as usize);
+    // Content-Length 已超限：直接放弃，不读取 body。
+    // Plan 2 的落盘（BodyStore::Spilled）会替换这里的报错分支。
+    if let Some(len) = total
+        && len > max_body
+    {
+        return Err(RequestError::TooLarge(len));
+    }
+
+    let mut buf = BytesMut::with_capacity(total.unwrap_or(0).min(max_body) as usize);
     let mut stream = resp.bytes_stream();
     let mut last_report = Instant::now();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         buf.extend_from_slice(&chunk);
+        // 无 Content-Length（chunked / 压缩）或声明值不实时，仍需在累积中截断。
+        // drop(stream) 会关闭连接，不会把剩余字节读完。
+        // Plan 2 的落盘（BodyStore::Spilled）会替换这里的报错分支。
+        if buf.len() as u64 > max_body {
+            return Err(RequestError::TooLarge(buf.len() as u64));
+        }
         if let Some(tx) = &progress
             && last_report.elapsed() >= PROGRESS_INTERVAL
         {
@@ -399,6 +426,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn content_length_over_limit_is_rejected_without_reading_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b'a'; 1024]))
+            .mount(&server)
+            .await;
+        let client = build_client();
+        let err = execute_with_limit(
+            &client,
+            prepare(&draft(Method::Get, server.uri())).unwrap(),
+            None,
+            512,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, RequestError::TooLarge(1024)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn streaming_over_limit_is_aborted() {
+        // gzip 响应的 Content-Length 是压缩后的长度（且 reqwest 解压时 content_length() 为 None），
+        // 因此这里走的是流式累积中的截断分支。
+        let server = MockServer::start().await;
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&vec![b'a'; 4096]).unwrap();
+        let gz = enc.finish().unwrap();
+        assert!(
+            gz.len() < 512,
+            "compressed payload must pass the header check"
+        );
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(gz)
+                    .insert_header("content-encoding", "gzip"),
+            )
+            .mount(&server)
+            .await;
+        let client = build_client();
+        let err = execute_with_limit(
+            &client,
+            prepare(&draft(Method::Get, server.uri())).unwrap(),
+            None,
+            512,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, RequestError::TooLarge(n) if n > 512),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn connection_refused_is_classified() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -406,6 +487,22 @@ mod tests {
         let err = run(&draft(Method::Get, format!("http://127.0.0.1:{port}/")))
             .await
             .unwrap_err();
+        assert!(matches!(err, RequestError::ConnectionRefused(_)), "{err:?}");
+    }
+
+    /// 回归：reqwest 会把 ` for url (<url>)` 拼进顶层错误文本，URL 里的
+    /// "dns"/"tls"/"resolve" 等字样不得影响分类。
+    #[tokio::test]
+    async fn url_keywords_do_not_affect_classification() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let err = run(&draft(
+            Method::Get,
+            format!("http://127.0.0.1:{port}/dns/tls/resolve"),
+        ))
+        .await
+        .unwrap_err();
         assert!(matches!(err, RequestError::ConnectionRefused(_)), "{err:?}");
     }
 

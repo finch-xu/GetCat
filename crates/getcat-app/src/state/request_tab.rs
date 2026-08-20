@@ -271,6 +271,10 @@ impl RequestTab {
 
 impl RequestTab {
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 在途请求期间按钮显示"取消"，此时 ⌘⏎ / Enter 不应重复发送。
+        if self.response.is_in_flight() {
+            return;
+        }
         let draft = self.draft(cx);
         let req = match http::prepare(&draft) {
             Ok(r) => r,
@@ -389,6 +393,9 @@ pub fn tab_title(url: &str) -> SharedString {
         .map(|(_, rest)| rest)
         .unwrap_or(trimmed);
     let without_query = without_scheme.split('?').next().unwrap_or(without_scheme);
+    if without_query.is_empty() {
+        return "新请求".into();
+    }
     match without_query.find('/') {
         Some(ix) if ix + 1 < without_query.len() => without_query[ix..].to_string().into(),
         Some(ix) => without_query[..ix].to_string().into(),
@@ -413,5 +420,7 @@ mod tests {
         );
         assert_eq!(tab_title("api.example.com/").as_ref(), "api.example.com");
         assert_eq!(tab_title("not a url").as_ref(), "not a url");
+        assert_eq!(tab_title("https://").as_ref(), "新请求");
+        assert_eq!(tab_title("http://").as_ref(), "新请求");
     }
 }

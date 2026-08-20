@@ -137,6 +137,8 @@ impl RequestTab {
                     .into_any_element(),
                 BodyMode::Form => div()
                     .id("form-body")
+                    .flex_1()
+                    .min_h_0()
                     .overflow_y_scroll()
                     .child(self.form.clone())
                     .into_any_element(),

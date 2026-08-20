@@ -25,6 +25,7 @@ cargo test --workspace
 - Path 参数（URL 中 `{name}`）、Query 参数、Headers、Body（raw JSON/Text/XML、form-urlencoded）
 - 流式接收、实时进度、取消
 - 响应：状态/耗时/大小、Pretty/Raw、语法高亮、Headers 列表（文本视图上限 5 MB，超出显示前 1 MB）
+- 响应体最大 64 MB，超出报错“响应过大”；文本视图 5 MB 上限不变
 
 ## 快捷键
 
