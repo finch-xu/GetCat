@@ -56,9 +56,8 @@ pub struct ResponseView {
 }
 
 impl ResponseView {
-    /// 不可取消的同步入口；当前只有测试与后续 Task 6 的"重新美化 / 从磁盘载入完整响应"用到，
-    /// 生产路径一律走 `prepare_cancellable`。
-    #[allow(dead_code)]
+    /// 不可取消的同步入口；只在测试里用（生产路径一律走 `prepare_cancellable`）。
+    #[cfg(test)]
     pub fn prepare(meta: ResponseMeta, body: &BodyStore) -> ResponseView {
         Self::prepare_cancellable(meta, body, || false).expect("never cancelled")
     }
@@ -139,10 +138,8 @@ impl ResponseView {
         self.pretty.is_some()
     }
 
-    /// 落盘响应：raw 只是前 HEAD_BYTES 的预览。
-    /// Task 6（保存响应到文件 / 用系统程序打开）据此决定是否提供"查看完整响应"的入口；
-    /// 本任务只在测试中断言，UI 目前通过 `ViewTier::notice()` 提示。
-    #[allow(dead_code)]
+    /// 落盘响应：raw 只是前 HEAD_BYTES 的预览。`response_pane.rs` 据此决定是否显示
+    /// "查看完整响应"的入口提示。
     pub fn is_preview(&self) -> bool {
         matches!(
             self.raw,
@@ -194,9 +191,8 @@ pub enum ResponseState {
         _cancel: CancelFlag,
     },
     Done {
-        /// 保留原始存储：Task 6 的"保存到文件 / 用系统程序打开"需要它读回完整字节，
+        /// 保留原始存储：`save_body` / `open_body_with_system` 需要它读回完整字节，
         /// 且 `Spilled` 的临时文件守卫必须随 Done 状态一起存活，否则文件会被 drop 删除。
-        #[allow(dead_code)]
         body: BodyStore,
         view: ResponseView,
     },

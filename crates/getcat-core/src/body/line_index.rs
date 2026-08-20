@@ -47,6 +47,7 @@ impl LineIndex {
             }
             chunk_start = chunk_end;
         }
+        starts.shrink_to_fit();
         Some(LineIndex {
             starts,
             total_len: bytes.len(),

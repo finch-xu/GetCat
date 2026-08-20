@@ -325,6 +325,14 @@ pub(crate) async fn execute_with_threshold(
         if k.eq_ignore_ascii_case("content-type") {
             has_content_type = true;
         }
+        // Content-Length / Transfer-Encoding / Host 由 reqwest/hyper 根据实际 body 与连接
+        // 自行计算和设置；透传用户在这些头上填的值会导致长度不匹配或被 hyper 拒绝，因此丢弃。
+        if k.eq_ignore_ascii_case("content-length")
+            || k.eq_ignore_ascii_case("transfer-encoding")
+            || k.eq_ignore_ascii_case("host")
+        {
+            continue;
+        }
         builder = builder.header(k.as_str(), v.as_str());
     }
     match req.body {
@@ -339,7 +347,14 @@ pub(crate) async fn execute_with_threshold(
             let file = tokio::fs::File::open(&path)
                 .await
                 .map_err(|e| file_err(&path, e))?;
-            let len = file.metadata().await.map_err(|e| file_err(&path, e))?.len();
+            let meta = file.metadata().await.map_err(|e| file_err(&path, e))?;
+            if !meta.is_file() {
+                return Err(RequestError::FileBody(format!(
+                    "{}：不是普通文件",
+                    path.display()
+                )));
+            }
+            let len = meta.len();
             if !has_content_type && let Some(ct) = content_type {
                 builder = builder.header(CONTENT_TYPE, ct);
             }
@@ -477,6 +492,26 @@ mod tests {
             text: r#"{"a":1}"#.into(),
         };
         assert_eq!(run(&d).await.unwrap().meta.status, 201);
+    }
+
+    /// Content-Length / Transfer-Encoding / Host 由 reqwest/hyper 自行计算，用户手填的值
+    /// 不得透传：服务端按真实 body 长度（3 字节）匹配，若用户的 "1" 被透传就会请求失败。
+    #[tokio::test]
+    async fn user_content_length_header_is_not_forwarded() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(header("content-length", "3"))
+            .and(body_string("abc"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Post, server.uri());
+        d.headers = vec![KeyValue::new("Content-Length", "1")];
+        d.body = BodyKind::Raw {
+            format: RawFormat::Text,
+            text: "abc".into(),
+        };
+        assert_eq!(run(&d).await.unwrap().meta.status, 200);
     }
 
     #[tokio::test]
@@ -815,6 +850,20 @@ mod tests {
         };
         assert_eq!(run(&d).await.unwrap().meta.status, 200);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn directory_as_file_body_is_reported_as_file_body_error() {
+        let dir = std::env::temp_dir().join(format!("getcat-filebody-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut d = draft(Method::Post, "http://127.0.0.1:1/".into());
+        d.body = BodyKind::File {
+            path: dir.clone(),
+            content_type: None,
+        };
+        let err = run(&d).await.unwrap_err();
+        assert!(matches!(err, RequestError::FileBody(_)), "{err:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

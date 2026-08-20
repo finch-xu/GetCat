@@ -1,6 +1,6 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -501,7 +501,7 @@ impl RequestTab {
         cx.notify();
     }
 
-    /// 完成任务的最后一步，也是唯一写入 Done / Failed 的入口：
+    /// 请求结果的唯一写入口（取消由 `cancel()` 直接写 Failed）：
     /// generation 不匹配（已取消或已重发）则直接丢弃，过期响应不得覆盖新状态。
     pub(crate) fn apply_outcome(
         &mut self,
@@ -554,7 +554,8 @@ impl RequestTab {
         let body = body.clone();
         let suggested = format!("response.{}", file_extension(view.kind));
         let generation = self.generation;
-        let rx = cx.prompt_for_new_path(Path::new(""), Some(suggested.as_str()));
+        let home = std::env::home_dir().unwrap_or_default();
+        let rx = cx.prompt_for_new_path(&home, Some(suggested.as_str()));
         cx.spawn_in(window, async move |this, cx| {
             // 对话框取消 / 出错都静默返回
             let Ok(Ok(Some(dest))) = rx.await else {
