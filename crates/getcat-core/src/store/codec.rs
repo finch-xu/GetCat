@@ -1,6 +1,6 @@
 //! 版本化 JSON 文档：每个文件顶层带 `"version": N`；读取时按版本迁移，未知版本视为损坏。
 
-use std::{io, path::PathBuf};
+use std::{collections::BTreeMap, io, path::PathBuf};
 
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -42,9 +42,28 @@ pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, StoreError> {
             ));
         }
     }
+    let doc = sort_keys(doc);
     let mut bytes = serde_json::to_vec_pretty(&doc)?;
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+/// 递归按键的字典序重建每个对象，使输出与 `serde_json` 是否启用 `preserve_order`
+/// feature（例如通过 gpui → schemars 的 feature unification）无关，始终按字母序落盘。
+fn sort_keys(value: Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let sorted: BTreeMap<String, Value> =
+                map.into_iter().map(|(k, v)| (k, sort_keys(v))).collect();
+            let mut out = serde_json::Map::new();
+            for (k, v) in sorted {
+                out.insert(k, v);
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sort_keys).collect()),
+        other => other,
+    }
 }
 
 /// 读取：先取 `version`，交给 `migrate` 改写到当前结构，再反序列化。未知字段忽略、缺失字段取默认值。
@@ -69,7 +88,7 @@ fn migrate(version: u64, value: Value) -> Result<Value, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Method, RequestDraft, SavedRequest, WorkspaceState};
+    use crate::model::{KeyValue, Method, RequestDraft, SavedRequest, WorkspaceState};
 
     #[test]
     fn encode_stamps_version_and_decode_roundtrips() {
@@ -118,5 +137,33 @@ mod tests {
     #[test]
     fn encode_rejects_non_object_documents() {
         assert!(matches!(encode(&5u32), Err(StoreError::Json(_))));
+    }
+
+    /// 键必须按字母序落盘，与 `serde_json` 是否启用 `preserve_order` feature 无关
+    /// （真实 app 构建中 gpui → schemars 的 feature unification 会打开它）。
+    #[test]
+    fn encode_sorts_keys_deterministically_regardless_of_serde_json_features() {
+        let bytes = encode(&WorkspaceState::default()).unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let expected = "{\n  \"active\": null,\n  \"sidebar_collapsed\": false,\n  \"sidebar_width\": null,\n  \"tab_order\": [],\n  \"theme\": \"system\",\n  \"version\": 1\n}\n";
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn encode_sorts_nested_object_keys() {
+        let req = SavedRequest::new(
+            "x",
+            RequestDraft {
+                headers: vec![KeyValue::new("X-Test", "1")],
+                ..Default::default()
+            },
+        );
+        let bytes = encode(&req).unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let enabled_pos = text.find("\"enabled\"").expect("enabled key present");
+        let key_pos = text.find("\"key\"").expect("key key present");
+        let value_pos = text.find("\"value\"").expect("value key present");
+        assert!(enabled_pos < key_pos, "{text}");
+        assert!(key_pos < value_pos, "{text}");
     }
 }
