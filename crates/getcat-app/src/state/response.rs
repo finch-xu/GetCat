@@ -9,9 +9,7 @@ use getcat_core::model::ResponseMeta;
 use gpui::{SharedString, Task};
 
 /// 本阶段文本视图的体积上限；超过只显示前 PREVIEW_BYTES。
-#[allow(dead_code)]
 pub const MAX_TEXT_BYTES: usize = 5 * 1024 * 1024;
-#[allow(dead_code)]
 pub const PREVIEW_BYTES: usize = 1024 * 1024;
 
 pub struct ResponseView {
@@ -23,8 +21,7 @@ pub struct ResponseView {
 }
 
 impl ResponseView {
-    /// 在后台线程调用：所有 O(n) 工作都在这里完成。（Task 9 的 send 调用）
-    #[allow(dead_code)]
+    /// 在后台线程调用：所有 O(n) 工作都在这里完成。
     pub fn prepare(resp: HttpResponse) -> ResponseView {
         let bytes = resp.body.as_bytes();
         let kind = detect(resp.meta.content_type.as_deref(), resp.body.head(SNIFF_LEN));
@@ -74,11 +71,11 @@ impl ResponseView {
     }
 }
 
-// Idle 以外的变体由 Task 9 的发送流程构造，UI 已经渲染它们。
-#[allow(dead_code)]
 pub enum ResponseState {
     Idle,
     InFlight {
+        /// 请求发起时刻；进度状态行暂未展示耗时，保留给后续的实时计时。
+        #[allow(dead_code)]
         started: Instant,
         received: u64,
         total: Option<u64>,

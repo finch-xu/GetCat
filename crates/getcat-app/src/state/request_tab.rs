@@ -1,5 +1,8 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
+use std::time::Instant;
+
+use getcat_core::http::{self, HttpResponse, RequestError};
 use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft};
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
@@ -15,7 +18,10 @@ use gpui_component::resizable::{resizable_panel, v_resizable};
 use gpui_component::select::SelectState;
 use gpui_component::v_flex;
 
-use crate::state::response::ResponseState;
+use tokio::sync::mpsc;
+
+use crate::bridge;
+use crate::state::response::{ResponseState, ResponseView};
 use crate::ui::kv_table::{KvTable, KvTableEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +72,7 @@ impl BodyMode {
 const RESPONSE_LANGUAGES: [&str; 3] = ["json", "html", "text"];
 
 pub struct RequestTab {
-    /// Task 9 的在途请求用它区分 Tab。
+    /// Tab 的稳定标识；当前只由 Workspace 分配，展示与持久化在后续阶段使用。
     #[allow(dead_code)]
     pub id: u64,
     pub method: Entity<SelectState<Vec<&'static str>>>,
@@ -101,7 +107,7 @@ impl RequestTab {
         let headers = cx.new(|cx| KvTable::new("Header 名", "值", window, cx));
         let form = cx.new(|cx| KvTable::new("字段名", "值", window, cx));
 
-        let body_editors = RawFormat::ALL
+        let body_editors: Vec<(RawFormat, Entity<EditorState>)> = RawFormat::ALL
             .iter()
             .map(|f| {
                 let lang = f.editor_language();
@@ -132,13 +138,26 @@ impl RequestTab {
             })
             .collect();
 
-        let subs = vec![
+        let mut subs = vec![
             cx.subscribe_in(&url, window, Self::on_url_event),
             cx.subscribe_in(&params, window, |_, _, _: &KvTableEvent, _, cx| cx.notify()),
             cx.subscribe_in(&headers, window, |_, _, _: &KvTableEvent, _, cx| {
                 cx.notify()
             }),
         ];
+        // Body 编辑器里按 ⌘⏎ / Ctrl+Enter 同样发送请求。
+        for (_, editor) in &body_editors {
+            subs.push(
+                cx.subscribe_in(editor, window, |this, _, ev: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter {
+                        secondary: true, ..
+                    } = ev
+                    {
+                        this.send(window, cx);
+                    }
+                }),
+            );
+        }
 
         Self {
             id,
@@ -216,8 +235,7 @@ impl RequestTab {
         !extract_path_params(&self.url.read(cx).value()).is_empty()
     }
 
-    /// 从各输入组件快照出纯数据的 RequestDraft。（Task 9 的 send 使用）
-    #[allow(dead_code)]
+    /// 从各输入组件快照出纯数据的 RequestDraft。
     pub fn draft(&self, cx: &App) -> RequestDraft {
         let body = match self.body_mode {
             BodyMode::None => BodyKind::None,
@@ -264,8 +282,86 @@ impl RequestTab {
 }
 
 impl RequestTab {
-    pub fn send(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        // Task 9 实现真正的发送；此处仅保证 Task 7/8 可编译。
+    pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let draft = self.draft(cx);
+        let req = match http::prepare(&draft) {
+            Ok(r) => r,
+            Err(e) => {
+                self.url_error = Some(e.to_string());
+                cx.notify();
+                return;
+            }
+        };
+        self.url_error = None;
+        self.generation += 1;
+        let generation = self.generation;
+
+        let (tx, mut rx) = mpsc::channel::<http::Progress>(64);
+        let request_task = bridge::send(cx, req, tx);
+
+        // 进度任务：把 tokio 侧的进度事件写回 Entity（已节流到 ≤ 30 Hz）。
+        let progress_task = cx.spawn_in(window, async move |this, cx| {
+            while let Some(p) = rx.recv().await {
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.generation != generation {
+                            return false;
+                        }
+                        if let ResponseState::InFlight {
+                            received, total, ..
+                        } = &mut this.response
+                        {
+                            *received = p.received;
+                            *total = p.total;
+                            cx.notify();
+                        }
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        });
+
+        // 完成任务：等待请求 → 后台准备视图 → 回主线程写入（generation 不匹配则丢弃）。
+        let completion_task = cx.spawn_in(window, async move |this, cx| {
+            let outcome: Result<HttpResponse, RequestError> = match request_task.await {
+                Ok(inner) => inner,
+                Err(e) => Err(RequestError::Other(e.to_string())),
+            };
+            let prepared = match outcome {
+                Ok(resp) => Ok(cx
+                    .background_spawn(async move { ResponseView::prepare(resp) })
+                    .await),
+                Err(e) => Err(e),
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                match prepared {
+                    Ok(view) => {
+                        let text = view.text(this.pretty);
+                        let editor = this
+                            .response_editor_for(view.kind.editor_language())
+                            .clone();
+                        editor.update(cx, |e, cx| e.set_value(text, window, cx));
+                        this.response = ResponseState::Done(view);
+                        this.response_section = ResponseSection::Body;
+                    }
+                    Err(error) => this.response = ResponseState::Failed { error },
+                }
+                cx.notify();
+            });
+        });
+
+        self.response = ResponseState::InFlight {
+            started: Instant::now(),
+            received: 0,
+            total: None,
+            _tasks: vec![progress_task, completion_task],
+        };
         cx.notify();
     }
 
