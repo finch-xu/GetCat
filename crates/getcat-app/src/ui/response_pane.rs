@@ -12,6 +12,7 @@ use gpui_component::{
 use crate::state::request_tab::{RequestTab, ResponseSection};
 use crate::state::response::ResponseState;
 use crate::ui::{format_bytes, format_duration, status_color};
+use getcat_core::http::RequestError;
 
 fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
     div()
@@ -113,6 +114,9 @@ impl RequestTab {
                 };
                 empty_state(text, cx)
             }
+            ResponseState::Failed {
+                error: RequestError::Cancelled,
+            } => empty_state("请求已取消", cx),
             ResponseState::Failed { error } => v_flex()
                 .size_full()
                 .items_center()
@@ -195,16 +199,27 @@ impl RequestTab {
                 .text_color(muted)
                 .child("尚未发送")
                 .into_any_element(),
-            ResponseState::InFlight { received, .. } => h_flex()
+            ResponseState::InFlight {
+                started, received, ..
+            } => h_flex()
+                .gap_3()
                 .text_sm()
                 .text_color(muted)
-                .child(format!("发送中… {}", format_bytes(*received)))
+                .child(format!("发送中… {}", format_duration(started.elapsed())))
+                .child(format_bytes(*received))
                 .into_any_element(),
-            ResponseState::Failed { .. } => h_flex()
-                .text_sm()
-                .text_color(cx.theme().danger)
-                .child("请求失败")
-                .into_any_element(),
+            ResponseState::Failed { error } => {
+                let cancelled = matches!(error, RequestError::Cancelled);
+                h_flex()
+                    .text_sm()
+                    .text_color(if cancelled { muted } else { cx.theme().danger })
+                    .child(if cancelled {
+                        "已取消"
+                    } else {
+                        "请求失败"
+                    })
+                    .into_any_element()
+            }
             ResponseState::Done(view) => {
                 let color = status_color(view.meta.status, cx);
                 h_flex()

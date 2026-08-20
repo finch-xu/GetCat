@@ -44,6 +44,16 @@ impl Workspace {
         self.tabs[self.active].clone()
     }
 
+    #[cfg(test)]
+    pub fn tab_count(&self) -> usize {
+        self.tabs.len()
+    }
+
+    #[cfg(test)]
+    pub fn active_index(&self) -> usize {
+        self.active
+    }
+
     pub fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.next_id;
         self.next_id += 1;

@@ -74,12 +74,11 @@ impl ResponseView {
 pub enum ResponseState {
     Idle,
     InFlight {
-        /// 请求发起时刻；进度状态行暂未展示耗时，保留给后续的实时计时。
-        #[allow(dead_code)]
+        /// 请求发起时刻；状态行每 TICK_INTERVAL 重绘一次以显示实时耗时。
         started: Instant,
         received: u64,
         total: Option<u64>,
-        /// 持有进度任务与完成任务；状态被替换即 drop → 底层 tokio 任务 abort。
+        /// 持有进度任务、计时任务与完成任务；状态被替换即 drop → 底层 tokio 任务 abort。
         _tasks: Vec<Task<()>>,
     },
     Done(ResponseView),
@@ -91,6 +90,19 @@ pub enum ResponseState {
 impl ResponseState {
     pub fn is_in_flight(&self) -> bool {
         matches!(self, ResponseState::InFlight { .. })
+    }
+
+    #[cfg(test)]
+    pub fn is_done(&self) -> bool {
+        matches!(self, ResponseState::Done(_))
+    }
+
+    #[cfg(test)]
+    pub fn error(&self) -> Option<&RequestError> {
+        match self {
+            ResponseState::Failed { error } => Some(error),
+            _ => None,
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use getcat_core::http::{self, HttpResponse, RequestError};
 use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft};
@@ -70,6 +70,9 @@ impl BodyMode {
 
 /// 响应编辑器按语言各一个（gpui-component 的 EditorState 创建后不能换语言）。
 const RESPONSE_LANGUAGES: [&str; 3] = ["json", "html", "text"];
+
+/// 在途时状态行重绘的间隔（实时耗时）。
+const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 pub struct RequestTab {
     /// Tab 的稳定标识；当前只由 Workspace 分配，展示与持久化在后续阶段使用。
@@ -316,6 +319,25 @@ impl RequestTab {
             }
         });
 
+        // 计时任务：每 TICK_INTERVAL 触发一次重绘，让状态行的耗时实时更新；generation 变化即退出。
+        let tick_task = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(TICK_INTERVAL).await;
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.generation != generation {
+                            return false;
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        });
+
         // 完成任务：等待请求 → 后台准备视图 → 回主线程写入（generation 不匹配则丢弃）。
         let completion_task = cx.spawn_in(window, async move |this, cx| {
             let outcome: Result<HttpResponse, RequestError> = match request_task.await {
@@ -329,22 +351,7 @@ impl RequestTab {
                 Err(e) => Err(e),
             };
             let _ = this.update_in(cx, |this, window, cx| {
-                if this.generation != generation {
-                    return;
-                }
-                match prepared {
-                    Ok(view) => {
-                        let text = view.text(this.pretty);
-                        let editor = this
-                            .response_editor_for(view.kind.editor_language())
-                            .clone();
-                        editor.update(cx, |e, cx| e.set_value(text, window, cx));
-                        this.response = ResponseState::Done(view);
-                        this.response_section = ResponseSection::Body;
-                    }
-                    Err(error) => this.response = ResponseState::Failed { error },
-                }
-                cx.notify();
+                this.apply_outcome(generation, prepared, window, cx)
             });
         });
 
@@ -352,15 +359,47 @@ impl RequestTab {
             started: Instant::now(),
             received: 0,
             total: None,
-            _tasks: vec![progress_task, completion_task],
+            _tasks: vec![progress_task, tick_task, completion_task],
         };
         cx.notify();
     }
 
-    /// 取消进行中的请求：递增 generation 让在途任务的回调失效，并 drop 掉任务本身。
+    /// 完成任务的最后一步，也是唯一写入 Done / Failed 的入口：
+    /// generation 不匹配（已取消或已重发）则直接丢弃，过期响应不得覆盖新状态。
+    pub(crate) fn apply_outcome(
+        &mut self,
+        generation: u64,
+        outcome: Result<ResponseView, RequestError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.generation != generation {
+            return;
+        }
+        match outcome {
+            Ok(view) => {
+                let text = view.text(self.pretty);
+                let editor = self
+                    .response_editor_for(view.kind.editor_language())
+                    .clone();
+                editor.update(cx, |e, cx| e.set_value(text, window, cx));
+                self.response = ResponseState::Done(view);
+                self.response_section = ResponseSection::Body;
+            }
+            Err(error) => self.response = ResponseState::Failed { error },
+        }
+        cx.notify();
+    }
+
+    /// 取消进行中的请求：递增 generation 让在途任务的回调失效，drop 掉任务本身，状态显示"已取消"。
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
+        if !self.response.is_in_flight() {
+            return;
+        }
         self.generation += 1;
-        self.response = ResponseState::Idle;
+        self.response = ResponseState::Failed {
+            error: RequestError::Cancelled,
+        };
         cx.notify();
     }
 }
