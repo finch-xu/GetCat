@@ -2254,6 +2254,7 @@ dependencies = [
  "flate2",
  "futures",
  "memchr",
+ "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",

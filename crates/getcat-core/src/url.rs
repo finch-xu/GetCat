@@ -1,5 +1,6 @@
 //! 把 RequestDraft 的 URL、Path 参数、Query 参数合成最终 `url::Url`。
 
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use url::Url;
 
 use crate::model::{KeyValue, RequestDraft};
@@ -28,11 +29,36 @@ pub fn extract_path_params(url: &str) -> Vec<String> {
     names
 }
 
+/// 路径段编码集：除 RFC 3986 unreserved（字母数字与 `-._~`）外全部百分号编码，
+/// 因此参数值中的 `/`、`?`、`#`、`{}` 都不会改变 URL 结构。
+const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
+/// 对原始 URL 做单遍扫描：每个 `{name}` 只根据 `params` 查找一次，
+/// 替换结果不再参与后续匹配，因此参数值里出现 `{other}` 也不会被二次替换。
 fn substitute_path_params(url: &str, params: &[KeyValue]) -> String {
-    let mut out = url.to_string();
-    for p in params.iter().filter(|p| p.enabled && !p.key.is_empty()) {
-        out = out.replace(&format!("{{{}}}", p.key), &p.value);
+    let mut out = String::with_capacity(url.len());
+    let mut rest = url;
+    while let Some(start) = rest.find('{') {
+        let Some(len) = rest[start + 1..].find('}') else {
+            break;
+        };
+        let name = &rest[start + 1..start + 1 + len];
+        let token_end = start + 1 + len + 1;
+        out.push_str(&rest[..start]);
+        match params
+            .iter()
+            .find(|p| p.enabled && !p.key.is_empty() && p.key == name)
+        {
+            Some(p) => out.push_str(&utf8_percent_encode(&p.value, PATH_SEGMENT).to_string()),
+            None => out.push_str(&rest[start..token_end]),
+        }
+        rest = &rest[token_end..];
     }
+    out.push_str(rest);
     out
 }
 
@@ -142,5 +168,19 @@ mod tests {
         );
         assert!(extract_path_params("https://x.com/plain").is_empty());
         assert!(extract_path_params("https://x.com/{unclosed").is_empty());
+    }
+
+    #[test]
+    fn path_param_values_are_encoded_as_single_segment() {
+        let mut d = draft("https://x.com/files/{name}");
+        d.path_params = vec![KeyValue::new("name", "a/b c")];
+        assert_eq!(build_url(&d).unwrap().path(), "/files/a%2Fb%20c");
+    }
+
+    #[test]
+    fn path_param_values_are_not_resubstituted() {
+        let mut d = draft("https://x.com/users/{id}");
+        d.path_params = vec![KeyValue::new("id", "{post}"), KeyValue::new("post", "999")];
+        assert_eq!(build_url(&d).unwrap().path(), "/users/%7Bpost%7D");
     }
 }
