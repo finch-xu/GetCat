@@ -98,6 +98,7 @@ impl RequestTab {
                             .selected_index(mode.index())
                             .on_click(cx.listener(|this, ix: &usize, _, cx| {
                                 this.body_mode = BodyMode::from_index(*ix);
+                                this.refresh_body_hint(cx);
                                 cx.notify();
                             }))
                             .child("none")
@@ -114,6 +115,7 @@ impl RequestTab {
                                 .on_click(cx.listener(|this, ix: &usize, _, cx| {
                                     this.raw_format =
                                         RawFormat::ALL.get(*ix).copied().unwrap_or(RawFormat::Json);
+                                    this.refresh_body_hint(cx);
                                     cx.notify();
                                 }))
                                 .children(

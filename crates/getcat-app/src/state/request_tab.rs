@@ -243,8 +243,18 @@ impl RequestTab {
         if editor != self.editor_for(self.raw_format) {
             return;
         }
-        let len = editor.read(cx).text().len();
-        let hint = body_hint_for(len);
+        self.refresh_body_hint(cx);
+    }
+
+    /// 按当前 body_mode / raw_format 重新计算超大文本提示：不在 raw 模式时清空；
+    /// 切换 raw_format 或 body_mode 后都要调用，否则会残留上一个编辑器的提示，
+    /// 或者漏掉一个通过 `set_value`（不发 Change 事件）灌入内容的编辑器。
+    pub(crate) fn refresh_body_hint(&mut self, cx: &mut Context<Self>) {
+        let hint = if self.body_mode == BodyMode::Raw {
+            body_hint_for(self.editor_for(self.raw_format).read(cx).text().len())
+        } else {
+            None
+        };
         if hint != self.body_hint {
             self.body_hint = hint;
             cx.notify();
@@ -283,6 +293,8 @@ impl RequestTab {
     }
 
     pub fn clear_file(&mut self, cx: &mut Context<Self>) {
+        // body_mode 保持 File 不变：清除只是"未选文件"，draft() 据此报告"未选择文件"，
+        // 而不是悄悄退回 none/raw 让用户以为 Body 被清空了。
         self.file_path = None;
         self.file_size = None;
         cx.notify();

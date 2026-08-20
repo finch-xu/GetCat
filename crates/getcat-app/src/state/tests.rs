@@ -528,3 +528,37 @@ fn oversized_raw_body_shows_file_hint(cx: &mut TestAppContext) {
         })
     });
 }
+
+/// P2-3：切换 raw_format / body_mode 必须重新计算提示，否则会残留上一个编辑器的提示，
+/// 或者漏掉一个只通过 `set_value`（不发 Change 事件）灌入内容的编辑器。
+#[gpui::test]
+fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let big = "a".repeat(BODY_HINT_BYTES + 1);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.body_mode = BodyMode::Raw;
+            // JSON 编辑器灌入超大内容，但不经过事件处理器（模拟程序化写入 / 未触发 Change）
+            let json_editor = t.editor_for(RawFormat::Json).clone();
+            json_editor.update(cx, |e, cx| e.set_value(big, window, cx));
+            t.refresh_body_hint(cx);
+            assert!(t.body_hint.as_ref().unwrap().contains("10 MB"));
+
+            // 切到 Text 格式：该编辑器是空的，提示应清空
+            t.raw_format = RawFormat::Text;
+            t.refresh_body_hint(cx);
+            assert!(t.body_hint.is_none());
+
+            // 切回 JSON：重新看到超大内容的提示
+            t.raw_format = RawFormat::Json;
+            t.refresh_body_hint(cx);
+            assert!(t.body_hint.as_ref().unwrap().contains("10 MB"));
+
+            // 离开 raw 模式：提示必须清空
+            t.body_mode = BodyMode::None;
+            t.refresh_body_hint(cx);
+            assert!(t.body_hint.is_none());
+        })
+    });
+}
