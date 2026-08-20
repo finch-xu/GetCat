@@ -23,12 +23,20 @@ pub struct ResponseView {
 impl ResponseView {
     /// 在后台线程调用：所有 O(n) 工作都在这里完成。
     pub fn prepare(resp: HttpResponse) -> ResponseView {
-        let bytes = resp.body.as_bytes();
         let kind = detect(resp.meta.content_type.as_deref(), resp.body.head(SNIFF_LEN));
+        // 落盘响应暂时只用内存中的 head 当作"超长截断"预览；Task 5 换成 C 档摘要视图
+        let (bytes, spilled) = match resp.body.memory() {
+            Some(b) => (b, false),
+            None => (resp.body.head(PREVIEW_BYTES), true),
+        };
 
         if !kind.is_text() {
             return ResponseView {
-                raw: format!("二进制内容（{} 字节），当前版本暂不支持预览", bytes.len()).into(),
+                raw: format!(
+                    "二进制内容（{} 字节），当前版本暂不支持预览",
+                    resp.body.len()
+                )
+                .into(),
                 pretty: None,
                 truncated: false,
                 kind,
@@ -36,8 +44,9 @@ impl ResponseView {
             };
         }
 
-        if bytes.len() > MAX_TEXT_BYTES {
-            let preview = String::from_utf8_lossy(&bytes[..PREVIEW_BYTES]).into_owned();
+        if spilled || bytes.len() > MAX_TEXT_BYTES {
+            let preview =
+                String::from_utf8_lossy(&bytes[..bytes.len().min(PREVIEW_BYTES)]).into_owned();
             return ResponseView {
                 raw: preview.into(),
                 pretty: None,

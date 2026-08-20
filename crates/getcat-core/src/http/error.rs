@@ -16,8 +16,8 @@ pub enum RequestError {
     Tls(String),
     #[error("连接超时")]
     Timeout,
-    #[error("响应过大：{0} 字节（上限 64 MB）")]
-    TooLarge(u64),
+    #[error("临时文件写入失败：{0}")]
+    Spill(String),
     #[error("已取消")]
     Cancelled,
     #[error("网络错误：{0}")]
@@ -34,7 +34,7 @@ impl RequestError {
             RequestError::ConnectionRefused(_) => "连接被拒绝",
             RequestError::Tls(_) => "TLS 错误",
             RequestError::Timeout => "超时",
-            RequestError::TooLarge(_) => "响应过大",
+            RequestError::Spill(_) => "落盘失败",
             RequestError::Cancelled => "已取消",
             RequestError::Other(_) => "网络错误",
         }

@@ -3,6 +3,7 @@
 mod error;
 
 use std::{
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -10,11 +11,13 @@ use std::{
 use bytes::BytesMut;
 use futures::StreamExt;
 use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use url::Url;
 
 pub use error::RequestError;
 
+use crate::body::spill::{HEAD_BYTES, SpillFile};
 use crate::model::{BodyKind, Method, RequestDraft, ResponseMeta};
 use crate::url::build_url;
 
@@ -23,8 +26,7 @@ pub type Client = reqwest::Client;
 pub const USER_AGENT_VALUE: &str = concat!("GetCat/", env!("CARGO_PKG_VERSION"));
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(33);
-/// 响应体驻留内存的上限；超出即报 `RequestError::TooLarge`。
-/// Plan 2 落盘（`BodyStore::Spilled`）后，超限分支会改成溢出到磁盘而不是报错。
+/// 响应体驻留内存的阈值；超过即落盘为 `BodyStore::Spilled`，没有总上限。
 pub const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,16 +43,24 @@ pub struct HttpRequest {
     pub body: OutboundBody,
 }
 
-/// 响应体存储。Plan 2 会增加落盘变体。
+/// 响应体存储。
 #[derive(Debug, Clone)]
 pub enum BodyStore {
+    /// ≤ MAX_BODY_BYTES：全部在内存
     Memory(Arc<[u8]>),
+    /// > MAX_BODY_BYTES：内容在临时文件，内存只保留前 HEAD_BYTES
+    Spilled {
+        file: Arc<SpillFile>,
+        len: u64,
+        head: Arc<[u8]>,
+    },
 }
 
 impl BodyStore {
     pub fn len(&self) -> u64 {
         match self {
             BodyStore::Memory(b) => b.len() as u64,
+            BodyStore::Spilled { len, .. } => *len,
         }
     }
 
@@ -58,15 +68,119 @@ impl BodyStore {
         self.len() == 0
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn is_spilled(&self) -> bool {
+        matches!(self, BodyStore::Spilled { .. })
+    }
+
+    /// 全部字节；仅 Memory 有。
+    pub fn memory(&self) -> Option<&[u8]> {
         match self {
-            BodyStore::Memory(b) => b,
+            BodyStore::Memory(b) => Some(&b[..]),
+            BodyStore::Spilled { .. } => None,
         }
     }
 
+    /// 前 `n` 字节：Memory 取切片；Spilled 取 head 的切片（最多 HEAD_BYTES）。
     pub fn head(&self, n: usize) -> &[u8] {
-        let bytes = self.as_bytes();
+        let bytes: &[u8] = match self {
+            BodyStore::Memory(b) => b,
+            BodyStore::Spilled { head, .. } => head,
+        };
         &bytes[..bytes.len().min(n)]
+    }
+
+    /// 落盘文件路径；仅 Spilled 有。
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            BodyStore::Memory(_) => None,
+            BodyStore::Spilled { file, .. } => Some(file.path()),
+        }
+    }
+}
+
+/// 接收端：先进内存，超过阈值时把已收内容写入临时文件并继续追加。
+enum Sink {
+    Memory(BytesMut),
+    Disk {
+        file: tokio::fs::File,
+        guard: SpillFile,
+        head: Vec<u8>,
+        len: u64,
+    },
+}
+
+fn spill_err(e: std::io::Error) -> RequestError {
+    RequestError::Spill(e.to_string())
+}
+
+impl Sink {
+    fn with_capacity(expected: Option<u64>, threshold: u64) -> Sink {
+        Sink::Memory(BytesMut::with_capacity(
+            expected.unwrap_or(0).min(threshold) as usize,
+        ))
+    }
+
+    fn len(&self) -> u64 {
+        match self {
+            Sink::Memory(buf) => buf.len() as u64,
+            Sink::Disk { len, .. } => *len,
+        }
+    }
+
+    async fn push(&mut self, chunk: &[u8], threshold: u64) -> Result<(), RequestError> {
+        let must_spill = matches!(
+            self,
+            Sink::Memory(buf) if (buf.len() + chunk.len()) as u64 > threshold
+        );
+        if must_spill {
+            let Sink::Memory(buf) = std::mem::replace(self, Sink::Memory(BytesMut::new())) else {
+                unreachable!("checked above");
+            };
+            let (guard, file) = SpillFile::create().map_err(spill_err)?;
+            let mut file = tokio::fs::File::from_std(file);
+            file.write_all(&buf).await.map_err(spill_err)?;
+            let head = buf[..buf.len().min(HEAD_BYTES)].to_vec();
+            *self = Sink::Disk {
+                file,
+                guard,
+                head,
+                len: buf.len() as u64,
+            };
+        }
+        match self {
+            Sink::Memory(buf) => buf.extend_from_slice(chunk),
+            Sink::Disk {
+                file, head, len, ..
+            } => {
+                file.write_all(chunk).await.map_err(spill_err)?;
+                if head.len() < HEAD_BYTES {
+                    let take = chunk.len().min(HEAD_BYTES - head.len());
+                    head.extend_from_slice(&chunk[..take]);
+                }
+                *len += chunk.len() as u64;
+            }
+        }
+        Ok(())
+    }
+
+    async fn finish(self) -> Result<BodyStore, RequestError> {
+        match self {
+            Sink::Memory(buf) => Ok(BodyStore::Memory(Arc::from(buf.freeze().as_ref()))),
+            Sink::Disk {
+                mut file,
+                guard,
+                head,
+                len,
+            } => {
+                file.flush().await.map_err(spill_err)?;
+                drop(file);
+                Ok(BodyStore::Spilled {
+                    file: Arc::new(guard),
+                    len,
+                    head: head.into(),
+                })
+            }
+        }
     }
 }
 
@@ -156,15 +270,15 @@ pub async fn execute(
     req: HttpRequest,
     progress: Option<mpsc::Sender<Progress>>,
 ) -> Result<HttpResponse, RequestError> {
-    execute_with_limit(client, req, progress, MAX_BODY_BYTES).await
+    execute_with_threshold(client, req, progress, MAX_BODY_BYTES).await
 }
 
-/// `execute` 的参数化版本：`max_body` 为响应体字节上限（测试用小值）。
-pub async fn execute_with_limit(
+/// `execute` 的参数化版本：`spill_threshold` 为驻留内存的字节上限（测试用小值触发落盘）。
+pub(crate) async fn execute_with_threshold(
     client: &Client,
     req: HttpRequest,
     progress: Option<mpsc::Sender<Progress>>,
-    max_body: u64,
+    spill_threshold: u64,
 ) -> Result<HttpResponse, RequestError> {
     let started = Instant::now();
     let mut builder = client.request(to_reqwest_method(req.method), req.url.clone());
@@ -202,31 +316,17 @@ pub async fn execute_with_limit(
         .map(str::to_string);
     let total = resp.content_length();
 
-    // Content-Length 已超限：直接放弃，不读取 body。
-    // Plan 2 的落盘（BodyStore::Spilled）会替换这里的报错分支。
-    if let Some(len) = total
-        && len > max_body
-    {
-        return Err(RequestError::TooLarge(len));
-    }
-
-    let mut buf = BytesMut::with_capacity(total.unwrap_or(0).min(max_body) as usize);
+    let mut sink = Sink::with_capacity(total, spill_threshold);
     let mut stream = resp.bytes_stream();
     let mut last_report = Instant::now();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        buf.extend_from_slice(&chunk);
-        // 无 Content-Length（chunked / 压缩）或声明值不实时，仍需在累积中截断。
-        // drop(stream) 会关闭连接，不会把剩余字节读完。
-        // Plan 2 的落盘（BodyStore::Spilled）会替换这里的报错分支。
-        if buf.len() as u64 > max_body {
-            return Err(RequestError::TooLarge(buf.len() as u64));
-        }
+        sink.push(&chunk, spill_threshold).await?;
         if let Some(tx) = &progress
             && last_report.elapsed() >= PROGRESS_INTERVAL
         {
             let _ = tx.try_send(Progress {
-                received: buf.len() as u64,
+                received: sink.len(),
                 total,
                 elapsed: started.elapsed(),
             });
@@ -236,29 +336,30 @@ pub async fn execute_with_limit(
     let duration = started.elapsed();
     if let Some(tx) = &progress {
         let _ = tx.try_send(Progress {
-            received: buf.len() as u64,
+            received: sink.len(),
             total,
             elapsed: duration,
         });
     }
 
-    let body: Arc<[u8]> = Arc::from(buf.freeze().as_ref());
+    let body = sink.finish().await?;
     Ok(HttpResponse {
         meta: ResponseMeta {
             status: status.as_u16(),
             status_text: status.canonical_reason().unwrap_or("").to_string(),
             headers,
             duration,
-            body_len: body.len() as u64,
+            body_len: body.len(),
             content_type,
         },
-        body: BodyStore::Memory(body),
+        body,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::body::spill::HEAD_BYTES;
     use crate::model::{BodyKind, KeyValue, Method, RawFormat, RequestDraft};
     use std::io::Write;
     use wiremock::matchers::{body_string, header, method, path, query_param};
@@ -295,7 +396,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.meta.status, 200);
         assert_eq!(resp.meta.status_text, "OK");
-        assert_eq!(resp.body.as_bytes(), b"hi");
+        assert_eq!(resp.body.memory().unwrap(), b"hi");
         assert_eq!(resp.meta.body_len, 2);
         assert_eq!(resp.meta.content_type.as_deref(), Some("text/plain"));
         assert!(
@@ -396,7 +497,7 @@ mod tests {
             .mount(&server)
             .await;
         let resp = run(&draft(Method::Get, server.uri())).await.unwrap();
-        assert_eq!(resp.body.as_bytes(), b"hello gzip");
+        assert_eq!(resp.body.memory().unwrap(), b"hello gzip");
     }
 
     #[tokio::test]
@@ -425,37 +526,78 @@ mod tests {
         assert_eq!(last.received, size as u64);
     }
 
-    #[tokio::test]
-    async fn content_length_over_limit_is_rejected_without_reading_body() {
+    async fn run_with_threshold(d: &RequestDraft, threshold: u64) -> HttpResponse {
+        let client = build_client();
+        execute_with_threshold(&client, prepare(d).unwrap(), None, threshold)
+            .await
+            .unwrap()
+    }
+
+    async fn serve_bytes(body: Vec<u8>) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b'a'; 1024]))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
             .mount(&server)
             .await;
-        let client = build_client();
-        let err = execute_with_limit(
-            &client,
-            prepare(&draft(Method::Get, server.uri())).unwrap(),
-            None,
-            512,
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(err, RequestError::TooLarge(1024)), "{err:?}");
+        server
     }
 
     #[tokio::test]
-    async fn streaming_over_limit_is_aborted() {
-        // gzip 响应的 Content-Length 是压缩后的长度（且 reqwest 解压时 content_length() 为 None），
-        // 因此这里走的是流式累积中的截断分支。
+    async fn body_at_or_below_threshold_stays_in_memory() {
+        for size in [1023usize, 1024] {
+            let server = serve_bytes(vec![b'a'; size]).await;
+            let resp = run_with_threshold(&draft(Method::Get, server.uri()), 1024).await;
+            assert!(!resp.body.is_spilled(), "{size} bytes must stay in memory");
+            assert_eq!(resp.body.memory().unwrap().len(), size);
+            assert_eq!(resp.body.path(), None);
+            assert_eq!(resp.meta.body_len, size as u64);
+        }
+    }
+
+    #[tokio::test]
+    async fn body_over_threshold_is_spilled_to_disk_with_head() {
+        let mut body = vec![b'a'; 1025];
+        body[0] = b'{';
+        body[1024] = b'z';
+        let server = serve_bytes(body.clone()).await;
+        let resp = run_with_threshold(&draft(Method::Get, server.uri()), 1024).await;
+        assert!(resp.body.is_spilled());
+        assert!(resp.body.memory().is_none());
+        assert_eq!(resp.body.len(), 1025);
+        assert_eq!(resp.meta.body_len, 1025);
+        assert_eq!(resp.body.head(4), b"{aaa");
+        // 1025 < HEAD_BYTES：head 就是全文
+        assert_eq!(resp.body.head(usize::MAX), &body[..]);
+        let path = resp.body.path().unwrap().to_path_buf();
+        assert_eq!(std::fs::read(&path).unwrap(), body);
+        drop(resp);
+        assert!(
+            !path.exists(),
+            "spill file must be deleted when the last BodyStore is dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn spilled_head_is_capped_at_head_bytes() {
+        let size = HEAD_BYTES + 1;
+        let server = serve_bytes(vec![b'b'; size]).await;
+        let resp = run_with_threshold(&draft(Method::Get, server.uri()), 4096).await;
+        assert!(resp.body.is_spilled());
+        assert_eq!(resp.body.head(usize::MAX).len(), HEAD_BYTES);
+        assert_eq!(resp.body.len(), size as u64);
+        assert_eq!(
+            std::fs::metadata(resp.body.path().unwrap()).unwrap().len(),
+            size as u64
+        );
+    }
+
+    #[tokio::test]
+    async fn chunked_gzip_body_over_threshold_is_spilled() {
+        // gzip 响应无可用 Content-Length（reqwest 解压后 content_length() 为 None），走流式累积中的落盘分支
         let server = MockServer::start().await;
         let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         enc.write_all(&vec![b'a'; 4096]).unwrap();
         let gz = enc.finish().unwrap();
-        assert!(
-            gz.len() < 512,
-            "compressed payload must pass the header check"
-        );
         Mock::given(method("GET"))
             .respond_with(
                 ResponseTemplate::new(200)
@@ -464,19 +606,43 @@ mod tests {
             )
             .mount(&server)
             .await;
+        let resp = run_with_threshold(&draft(Method::Get, server.uri()), 512).await;
+        assert!(resp.body.is_spilled());
+        assert_eq!(resp.body.len(), 4096);
+        assert_eq!(resp.body.head(usize::MAX), &vec![b'a'; 4096][..]);
+    }
+
+    #[tokio::test]
+    async fn cloned_body_stores_share_one_spill_file() {
+        let server = serve_bytes(vec![b'c'; 2048]).await;
+        let resp = run_with_threshold(&draft(Method::Get, server.uri()), 1024).await;
+        let path = resp.body.path().unwrap().to_path_buf();
+        let second = resp.body.clone();
+        drop(resp);
+        assert!(path.exists(), "still referenced by the clone");
+        drop(second);
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn progress_reports_received_bytes_for_spilled_bodies() {
+        let server = serve_bytes(vec![b'd'; 8192]).await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
         let client = build_client();
-        let err = execute_with_limit(
+        let resp = execute_with_threshold(
             &client,
             prepare(&draft(Method::Get, server.uri())).unwrap(),
-            None,
-            512,
+            Some(tx),
+            1024,
         )
         .await
-        .unwrap_err();
-        assert!(
-            matches!(err, RequestError::TooLarge(n) if n > 512),
-            "{err:?}"
-        );
+        .unwrap();
+        assert!(resp.body.is_spilled());
+        let mut last = None;
+        while let Ok(p) = rx.try_recv() {
+            last = Some(p);
+        }
+        assert_eq!(last.expect("progress").received, 8192);
     }
 
     #[tokio::test]
