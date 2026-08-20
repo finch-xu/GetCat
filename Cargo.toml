@@ -32,6 +32,11 @@ anyhow = "1.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
+# 持久化：纯文件存储（spec §9）。ulid 3.0 的构造函数是 Ulid::generate()
+directories = "6.0.0"
+tempfile = "3.27.0"
+ulid = { version = "3.0.0", features = ["serde"] }
+
 # dev
 wiremock = "0.6.5"
 flate2 = "1.1"
