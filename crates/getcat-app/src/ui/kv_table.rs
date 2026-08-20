@@ -223,6 +223,9 @@ impl Render for KvTable {
                     .items_center()
                     .child(
                         div().w(px(28.)).flex().justify_center().child(
+                            // 可访问名称：gpui-component Checkbox 只有可见 label 会进入 a11y 树（tooltip 不算），
+                            // 而每行加可见文字会让表格变宽、噪音大。Plan 2 决定保留现状；后续方向是给上游
+                            // Checkbox 加 aria_label，或自绘带 role(Checkbox) 的开关（见 Plan 1 Ruling 2 更正）。
                             Checkbox::new(("kv-enabled", ix))
                                 .checked(row.enabled)
                                 .tooltip("启用此行")
