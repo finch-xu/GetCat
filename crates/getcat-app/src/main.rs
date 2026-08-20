@@ -2,6 +2,11 @@ use gpui::*;
 use gpui_component::{ActiveTheme, Root, v_flex};
 use gpui_component_assets::Assets;
 
+#[allow(dead_code)]
+mod state;
+#[allow(dead_code)]
+mod ui;
+
 struct Hello;
 
 impl Render for Hello {
