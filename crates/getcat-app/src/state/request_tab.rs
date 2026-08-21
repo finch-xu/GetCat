@@ -740,6 +740,9 @@ impl RequestTab {
         let switched = self.response_section != ResponseSection::Body;
         self.response_section = ResponseSection::Body;
         self.notice = None;
+        // 立即聚焦：调用返回时焦点就该在编辑器上（"已在 Body"路径紧接着就要 `dispatch_action`，
+        // 切换路径也靠这一次让状态同步可见）。切换路径下面还会再聚焦一次，两次各有各的必要：
+        // 这一帧编辑器还没进分发树，`window.draw` 会把不在树里的焦点丢掉。
         editor.update(cx, |e, cx| e.focus(window, cx));
         if switched {
             // `dispatch_action` 按「上一帧渲染出的分发树」找焦点节点，而刚从 Headers 切回 Body 时编辑器这一帧才出现。
@@ -811,7 +814,9 @@ impl Render for RequestTab {
         // 两个方向各用一个 id：ResizablePanelGroup 按 id 记住拖出来的尺寸，上下与左右互不串扰
         let (group, request_size) = match self.split {
             SplitDirection::Vertical => (v_resizable("request-response-v"), px(300.)),
-            SplitDirection::Horizontal => (h_resizable("request-response-h"), px(480.)),
+            // 左右分栏的请求区初始宽度要给响应区留出可用空间：最小窗口 800 px 减去
+            // 240 px 侧栏后只剩 560 px，480 px 会让响应区只剩 ~80 px。
+            SplitDirection::Horizontal => (h_resizable("request-response-h"), px(360.)),
         };
         v_flex().size_full().child(self.render_url_bar(cx)).child(
             div().flex_1().min_h_0().min_w_0().child(

@@ -64,7 +64,14 @@ pub(crate) fn sweep_dir(temp: &Path, max_age: Duration) -> usize {
         if !is_session_dir || name == own {
             continue;
         }
-        let Ok(meta) = entry.metadata() else { continue };
+        // 读不到 metadata（条目刚被别的进程删掉、或权限不足）：跳过，不是错误
+        let meta = match entry.metadata() {
+            Ok(meta) => meta,
+            Err(e) => {
+                tracing::debug!(dir = %entry.path().display(), error = %e, "cannot stat candidate spill directory");
+                continue;
+            }
+        };
         if !meta.is_dir() {
             continue;
         }
@@ -81,6 +88,11 @@ pub(crate) fn sweep_dir(temp: &Path, max_age: Duration) -> usize {
             Ok(()) => {
                 removed += 1;
                 tracing::info!(dir = %path.display(), "removed stale spill directory");
+            }
+            // 共享 /tmp 上别的用户留下的 getcat-<pid> 我们本来就删不掉：降为 debug，
+            // 其余错误（磁盘故障、目录被占用）仍然值得 warn
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                tracing::debug!(dir = %path.display(), error = %e, "no permission to remove stale spill directory")
             }
             Err(e) => {
                 tracing::warn!(dir = %path.display(), error = %e, "failed to remove stale spill directory")

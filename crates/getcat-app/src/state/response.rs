@@ -154,7 +154,7 @@ impl ResponseView {
 }
 
 /// 后台准备失败时的用户可见前缀（完整文案 `后台处理异常：<panic 信息>`）。
-pub const PREPARE_PANIC_PREFIX: &str = "后台处理异常";
+pub(crate) const PREPARE_PANIC_PREFIX: &str = "后台处理异常";
 
 /// 后台线程的总入口：`catch_unwind` 包住全部 O(n) 工作（spec §11：后台 panic 不得传播到主线程）。
 /// - `None`：已取消，调用方什么都不回写；

@@ -65,7 +65,7 @@ pub enum BodyStore {
 }
 
 impl BodyStore {
-    /// 驻留内存的响应体；`Vec<u8>` / `&'static [u8]` 零拷贝接管（测试与桥接用，免去调用方导入 `bytes`）。
+    /// 驻留内存的响应体；`Vec<u8>` / `&'static [u8]` 零拷贝接管（测试用，免去调用方导入 `bytes`）。
     pub fn in_memory(bytes: impl Into<Bytes>) -> BodyStore {
         BodyStore::Memory(bytes.into())
     }

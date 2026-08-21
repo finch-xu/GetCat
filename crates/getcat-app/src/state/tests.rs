@@ -29,8 +29,8 @@ use gpui_component::{ActiveTheme, input::InputEvent};
 use tempfile::TempDir;
 
 use crate::state::request_tab::{
-    BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, EMPTY_BODY_SEARCH_NOTICE, NO_RESPONSE_NOTICE,
-    RequestTab, ResponseSection, VIRTUAL_SEARCH_NOTICE,
+    BINARY_SEARCH_NOTICE, BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, EMPTY_BODY_SEARCH_NOTICE,
+    NO_RESPONSE_NOTICE, RequestTab, ResponseSection, VIRTUAL_SEARCH_NOTICE,
 };
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::store;
@@ -430,11 +430,21 @@ pub(crate) fn meta(content_type: &str, body_len: u64) -> ResponseMeta {
 
 /// 直接把一份准备好的响应灌进 Tab（绕过网络），generation 对齐。
 pub(crate) fn install_done(tab: &Entity<RequestTab>, body: BodyStore, cx: &mut VisualTestContext) {
+    install_done_with(tab, "application/json", body, cx);
+}
+
+/// `install_done` 的带 content-type 版本（二进制 / 纯文本响应的分档由它决定）。
+pub(crate) fn install_done_with(
+    tab: &Entity<RequestTab>,
+    content_type: &str,
+    body: BodyStore,
+    cx: &mut VisualTestContext,
+) {
+    let view = ResponseView::prepare(meta(content_type, body.len()), &body);
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             t.generation += 1;
             let g = t.generation;
-            let view = ResponseView::prepare(meta("application/json", body.len()), &body);
             t.apply_outcome(g, Ok((body, view)), window, cx);
         })
     });
@@ -1323,6 +1333,34 @@ fn find_in_response_without_a_response_notices(cx: &mut TestAppContext) {
         tab.update(cx, |t, cx| {
             t.find_in_response(window, cx);
             assert_eq!(t.notice.as_deref(), Some(NO_RESPONSE_NOTICE));
+        })
+    });
+}
+
+/// 二进制响应连 raw 文档都不准备（`view.doc()` 是 None）：只提示，不抢焦点、不切回 Body。
+#[gpui::test]
+fn find_in_response_on_a_binary_body_notices(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    install_done_with(
+        &tab,
+        "image/png",
+        BodyStore::in_memory(&b"\x89PNG\0"[..]),
+        cx,
+    );
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Headers;
+            t.find_in_response(window, cx);
+            assert_eq!(t.notice.as_deref(), Some(BINARY_SEARCH_NOTICE));
+            // 提前返回：既不切回 Body，也不把焦点交给（二进制用的）text 编辑器
+            assert_eq!(t.response_section, ResponseSection::Headers);
+            assert!(
+                !t.response_editor_for("text")
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
         })
     });
 }
