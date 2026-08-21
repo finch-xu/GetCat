@@ -55,15 +55,14 @@ impl Workspace {
 
     /// 从启动读取的结果重建：按 workspace.json 的顺序恢复 Tab，没有草稿则新建一个空 Tab。
     pub fn restore(loaded: Loaded, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // `errors` 已经在 `disk::load_file` / `load_dir` 里 `warn!` 过一次；这里不重复记录，
+        // 只是保留字段供 UI 将来展示（目前只用于测试断言 `loaded.errors.is_empty()`）。
         let Loaded {
             workspace: state,
             drafts,
             requests,
-            errors,
+            errors: _,
         } = loaded;
-        for err in &errors {
-            tracing::warn!(path = %err.path.display(), "skipped on load: {}", err.message);
-        }
         let mut saved = requests;
         sort_saved(&mut saved);
         let state = state.unwrap_or_default();
@@ -400,12 +399,16 @@ impl Workspace {
     }
 
     /// 以给定名字保存为一条新请求（空名字回退为 Tab 标题）；返回新 id。
+    /// 对话框确认时该 Tab 可能已被关闭（草稿已删除）：此时不写任何文件，返回 `None`。
     pub(crate) fn finish_save(
         &mut self,
         tab: Entity<RequestTab>,
         name: String,
         cx: &mut Context<Self>,
-    ) -> Ulid {
+    ) -> Option<Ulid> {
+        if !self.tabs.contains(&tab) {
+            return None;
+        }
         let trimmed = name.trim();
         let name: String = if trimmed.is_empty() {
             tab.read(cx).title(cx).to_string()
@@ -422,7 +425,7 @@ impl Workspace {
             t.save_draft_now(cx);
         });
         cx.notify();
-        id
+        Some(id)
     }
 
     /// 插入或替换列表项、保持排序，并写文件。

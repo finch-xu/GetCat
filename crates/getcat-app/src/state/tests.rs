@@ -624,6 +624,29 @@ fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
     });
 }
 
+/// F1：draft() 的 Raw 分支直接从编辑器的 Rope 拷贝一次文本，不经过 `value()`（SharedString）
+/// 这道额外的中间拷贝；这里只断言最终结果，实现细节由 request_tab.rs 里的调用决定。
+#[gpui::test]
+fn raw_body_draft_reads_editor_text_directly(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.body_mode = BodyMode::Raw;
+            t.raw_format = RawFormat::Json;
+            let editor = t.editor_for(RawFormat::Json).clone();
+            editor.update(cx, |e, cx| e.set_value(r#"{"a":1}"#, window, cx));
+            assert_eq!(
+                t.draft(cx).body,
+                BodyKind::Raw {
+                    format: RawFormat::Json,
+                    text: r#"{"a":1}"#.into(),
+                }
+            );
+        })
+    });
+}
+
 #[gpui::test]
 fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
     let cx = init(cx);
@@ -704,9 +727,15 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
             tab.update(cx, |t, cx| {
                 t.load_draft(&draft, window, cx);
                 assert_eq!(t.draft(cx), draft);
-                assert!(!t.dirty, "programmatic load must not dirty the tab");
             })
         });
+        // 置脏可能来自订阅回调，在事件循环跑空之后再看才靠得住，
+        // 而不是在同一个 cx.update 闭包里立刻读 t.dirty。
+        cx.run_until_parked();
+        assert!(
+            !cx.read(|app| tab.read(app).dirty),
+            "programmatic load must not dirty the tab"
+        );
     }
 }
 
@@ -963,11 +992,13 @@ fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) 
     change_url(&tab, "https://api.test/users", cx);
     cx.read(|app| assert!(tab.read(app).dirty));
 
-    let id = cx.update(|_, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.finish_save(tab.clone(), "  用户列表 ".into(), cx)
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "  用户列表 ".into(), cx)
+            })
         })
-    });
+        .expect("tab still open");
     assert!(store.flush());
     let req = read_request(&store, id).expect("requests/<ulid>.json written");
     assert_eq!(req.name, "用户列表");
@@ -988,14 +1019,34 @@ fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) 
     assert_eq!((draft.saved_id, draft.dirty), (Some(id), false));
 }
 
+/// F3：保存对话框在用户关闭 Tab 之后才确认——`finish_save` 必须是 no-op，
+/// 不能凭空写出请求文件，也不能复活已随 close_tab 删除的草稿文件。
+#[gpui::test]
+fn finish_save_on_closed_tab_is_noop(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    let tab = cx.read(|app| ws.read(app).tab_at(1));
+    let tab_id = cx.read(|app| tab.read(app).id);
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(1, window, cx)));
+
+    let result =
+        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "x".into(), cx)));
+    assert!(result.is_none());
+    assert!(store.flush());
+    assert_eq!(request_files(&store), 0);
+    assert!(read_draft(&store, tab_id).is_none());
+}
+
 #[gpui::test]
 fn save_active_overwrites_existing_without_prompt(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/v1", cx);
-    let id =
-        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "接口".into(), cx)));
+    let id = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "接口".into(), cx)))
+        .unwrap();
     // 真实时钟前进，让 updated_at 可区分
     std::thread::sleep(Duration::from_millis(2));
     change_url(&tab, "https://api.test/v2", cx);
@@ -1021,8 +1072,9 @@ fn empty_name_falls_back_to_tab_title(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/users/42", cx);
-    let id =
-        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "   ".into(), cx)));
+    let id = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "   ".into(), cx)))
+        .unwrap();
     assert!(store.flush());
     assert_eq!(read_request(&store, id).unwrap().name, "/users/42");
 }
@@ -1033,8 +1085,9 @@ fn open_saved_opens_tab_then_focuses_existing(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/items/7", cx);
-    let id =
-        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "条目".into(), cx)));
+    let id = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "条目".into(), cx)))
+        .unwrap();
     // 关掉这个 Tab（自动补一个空 Tab），再从侧栏打开
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(0, window, cx)));
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.open_saved(id, window, cx)));
@@ -1076,8 +1129,9 @@ fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/gone", cx);
-    let id =
-        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "待删".into(), cx)));
+    let id = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "待删".into(), cx)))
+        .unwrap();
     assert!(store.flush());
     assert_eq!(request_files(&store), 1);
 
@@ -1104,21 +1158,25 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let first_tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&first_tab, "https://api.test/first", cx);
-    let first = cx.update(|_, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.finish_save(first_tab.clone(), "第一".into(), cx)
+    let first = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(first_tab.clone(), "第一".into(), cx)
+            })
         })
-    });
+        .unwrap();
     // 真实时钟前进，保证 updated_at 不同
     std::thread::sleep(Duration::from_millis(2));
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
     let second_tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&second_tab, "https://api.test/second", cx);
-    let second = cx.update(|_, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.finish_save(second_tab.clone(), "第二".into(), cx)
+    let second = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(second_tab.clone(), "第二".into(), cx)
+            })
         })
-    });
+        .unwrap();
     cx.read(|app| {
         let saved = ws.read(app).saved();
         let ids: Vec<Ulid> = saved.iter().map(|r| r.id).collect();

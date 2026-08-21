@@ -372,11 +372,7 @@ impl RequestTab {
             BodyMode::None => BodyKind::None,
             BodyMode::Raw => BodyKind::Raw {
                 format: self.raw_format,
-                text: self
-                    .editor_for(self.raw_format)
-                    .read(cx)
-                    .value()
-                    .to_string(),
+                text: self.editor_for(self.raw_format).read(cx).text().to_string(),
             },
             BodyMode::Form => BodyKind::FormUrlEncoded {
                 fields: self.form.read(cx).values(cx),

@@ -75,6 +75,8 @@ impl Layout {
 
 /// 原子写：同目录临时文件 → 写入 → fsync → rename 覆盖。
 /// 崩溃最多留下一个 `.tmp*` 临时文件；目标文件要么是完整的旧版，要么是完整的新版。
+/// Unix 上显式把权限收紧到 0600（仅当前用户可读写），不依赖调用方的 umask：
+/// 请求 Body / Header 里的 `Authorization` 等以明文落盘（spec §9.4）。
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let dir = path
         .parent()
@@ -82,6 +84,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     let mut tmp = NamedTempFile::new_in(dir)?;
     tmp.write_all(bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tmp.as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
     tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
@@ -255,6 +263,17 @@ mod tests {
         let nested = layout.root().join("deep").join("x.json");
         write_atomic(&nested, b"{}").unwrap();
         assert_eq!(std::fs::read(&nested).unwrap(), b"{}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_fixes_permissions_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, layout) = layout();
+        let path = layout.workspace_path();
+        write_atomic(&path, b"{}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
     }
 
     #[test]

@@ -25,7 +25,7 @@ pub struct Store {
 
 impl Store {
     /// 平台数据目录（spec §9.2）：macOS `~/Library/Application Support/GetCat`，
-    /// Linux `$XDG_DATA_HOME/GetCat`（默认 `~/.local/share/GetCat`），Windows `%APPDATA%\GetCat\data`。
+    /// Linux `$XDG_DATA_HOME/getcat`（默认 `~/.local/share/getcat`），Windows `%APPDATA%\GetCat\data`。
     pub fn default_root() -> Option<PathBuf> {
         directories::ProjectDirs::from("", "", "GetCat").map(|dirs| dirs.data_dir().to_path_buf())
     }
@@ -128,7 +128,8 @@ mod tests {
     #[test]
     fn default_root_ends_with_getcat() {
         let root = Store::default_root().expect("home dir available");
-        assert_eq!(root.file_name().unwrap(), "GetCat");
+        let name = root.file_name().unwrap().to_str().unwrap();
+        assert!(name.eq_ignore_ascii_case("getcat"), "{name}");
     }
 
     #[test]

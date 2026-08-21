@@ -35,7 +35,7 @@ cargo test --workspace
 | 平台 | 目录 |
 |---|---|
 | macOS | `~/Library/Application Support/GetCat/` |
-| Linux | `$XDG_DATA_HOME/GetCat/`（默认 `~/.local/share/GetCat/`） |
+| Linux | `$XDG_DATA_HOME/getcat/`（默认 `~/.local/share/getcat/`） |
 | Windows | `%APPDATA%\GetCat\data\` |
 
 ```
@@ -47,7 +47,7 @@ drafts/<tab-id>.json    # 一个 Tab 一个草稿（含未保存修改）
 - 每个文件顶层带 `"version": 1`，美化 JSON，可手工编辑。
 - 写入走独立线程：同一文件 500 ms 内的多次改动只落盘最后一份；写入先写同目录临时文件再原子替换，崩溃不会留下半个文件。
 - 启动时解析失败的文件会被改名为 `<原名>.corrupt-<unix毫秒>` 并跳过（日志 `warn`）；数据目录不可写时窗口顶部显示横幅，其余功能照常（只读）。
-- 不存历史记录、不存响应。Header 中的 `Authorization` 等以明文落盘（与 Postman / Insomnia 本地库一致）。
+- 不存历史记录、不存响应。Header 中的 `Authorization` 等以明文落盘（与 Postman / Insomnia 本地库一致）（Unix 上数据文件权限为 0600，仅当前用户可读）。
 
 ## 测试
 
