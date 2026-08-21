@@ -4,6 +4,7 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, SystemTime},
 };
 
 /// 落盘响应保留在内存中的前缀长度（用于 C 档预览与内容类型嗅探）。
@@ -27,6 +28,66 @@ fn cleanup_dir(dir: &Path) {
     {
         tracing::warn!(dir = %dir.display(), error = %e, "failed to remove spill directory");
     }
+}
+
+/// 启动清扫时，其它进程遗留的会话目录被视为过期的年龄。
+pub const STALE_SESSION_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// 删除系统临时目录下其它进程遗留的 `getcat-<pid>` 目录（上次崩溃 / 被 kill 时守卫与 `on_app_quit` 都没机会跑）。
+/// 只删 mtime 早于 `max_age` 的目录：刚启动的另一个实例目录很新，不会被误删。不做 pid 存活探测
+/// （没有无依赖的跨平台做法，且 pid 会被复用）。返回删除的目录数。
+pub fn sweep_stale_session_dirs(max_age: Duration) -> usize {
+    sweep_dir(&std::env::temp_dir(), max_age)
+}
+
+/// `sweep_stale_session_dirs` 的可测版本：对给定根目录清扫。
+pub(crate) fn sweep_dir(temp: &Path, max_age: Duration) -> usize {
+    let own = format!("getcat-{}", std::process::id());
+    let entries = match fs::read_dir(temp) {
+        Ok(entries) => entries,
+        Err(e) => {
+            if e.kind() != io::ErrorKind::NotFound {
+                tracing::warn!(dir = %temp.display(), error = %e, "cannot scan temp dir for stale spill dirs");
+            }
+            return 0;
+        }
+    };
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // 只认 getcat-<纯数字 pid>；本进程的目录永远不碰
+        let is_session_dir = name
+            .strip_prefix("getcat-")
+            .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()));
+        if !is_session_dir || name == own {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_dir() {
+            continue;
+        }
+        let stale = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age >= max_age);
+        if !stale {
+            continue;
+        }
+        let path = entry.path();
+        match fs::remove_dir_all(&path) {
+            Ok(()) => {
+                removed += 1;
+                tracing::info!(dir = %path.display(), "removed stale spill directory");
+            }
+            Err(e) => {
+                tracing::warn!(dir = %path.display(), error = %e, "failed to remove stale spill directory")
+            }
+        }
+    }
+    removed
 }
 
 /// 会话目录创建/复用时的权限。Unix 下限制为仅属主可读写执行，避免同机其他用户
@@ -116,6 +177,7 @@ impl Drop for SpillFile {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::time::Duration;
 
     #[test]
     fn spill_file_is_removed_on_drop() {
@@ -161,5 +223,48 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(file_mode & 0o777, 0o600, "spill file must be 0600");
+    }
+
+    fn fake_temp_root(tag: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("getcat-sweep-test-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn sweep_removes_only_stale_foreign_session_dirs() {
+        let root = fake_temp_root("stale");
+        let foreign = root.join("getcat-424242");
+        fs::create_dir(&foreign).unwrap();
+        fs::write(foreign.join("000001.body"), b"x").unwrap();
+        let own = root.join(format!("getcat-{}", std::process::id()));
+        fs::create_dir(&own).unwrap();
+        let unrelated = root.join("getcat-filebody-424242");
+        fs::create_dir(&unrelated).unwrap();
+        let file_not_dir = root.join("getcat-777");
+        fs::write(&file_not_dir, b"not a dir").unwrap();
+
+        // 年龄阈值 0：任何外来目录都算过期；本进程的、名字不合格的、不是目录的都不碰
+        assert_eq!(sweep_dir(&root, Duration::ZERO), 1);
+        assert!(!foreign.exists());
+        assert!(own.exists());
+        assert!(unrelated.exists());
+        assert!(file_not_dir.exists());
+        // 第二次没有可删的
+        assert_eq!(sweep_dir(&root, Duration::ZERO), 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sweep_keeps_recent_dirs_and_tolerates_missing_root() {
+        let root = fake_temp_root("recent");
+        let fresh = root.join("getcat-515151");
+        fs::create_dir(&fresh).unwrap();
+        assert_eq!(sweep_dir(&root, STALE_SESSION_AGE), 0);
+        assert!(fresh.exists());
+        assert_eq!(sweep_dir(&root.join("does-not-exist"), Duration::ZERO), 0);
+        let _ = fs::remove_dir_all(&root);
     }
 }

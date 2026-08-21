@@ -35,6 +35,17 @@ fn main() {
         gpui_component::init(cx);
         bridge::init(cx);
 
+        // 上次崩溃 / 被 kill 时来不及清理的落盘目录：后台清扫 24 h 以上的 getcat-<pid>（不碰本进程的）
+        cx.background_spawn(async {
+            let removed = getcat_core::body::spill::sweep_stale_session_dirs(
+                getcat_core::body::spill::STALE_SESSION_AGE,
+            );
+            if removed > 0 {
+                tracing::info!(removed, "stale spill directories removed");
+            }
+        })
+        .detach();
+
         // 落盘响应的临时目录随进程退出一起清理（守卫已逐个删除，这里兜底异常路径）
         cx.on_app_quit(|_cx| async {
             getcat_core::body::spill::cleanup_session_dir();
