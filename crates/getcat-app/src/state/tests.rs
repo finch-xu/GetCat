@@ -74,6 +74,11 @@ pub(crate) fn read_draft(store: &Store, id: TabId) -> Option<TabDraft> {
     decode(&bytes).ok()
 }
 
+pub(crate) fn read_workspace(store: &Store) -> Option<WorkspaceState> {
+    let bytes = std::fs::read(store.layout().workspace_path()).ok()?;
+    decode(&bytes).ok()
+}
+
 pub(crate) fn set_url_and_send(tab: &Entity<RequestTab>, url: &str, cx: &mut VisualTestContext) {
     let url = url.to_string();
     cx.update(|window, cx| {
@@ -875,4 +880,59 @@ fn flush_drafts_writes_every_tab_immediately(cx: &mut TestAppContext) {
         read_draft(&store, id).unwrap().draft.url,
         "https://api.test/unflushed"
     );
+}
+
+#[gpui::test]
+fn workspace_changes_are_persisted(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.new_tab(window, cx);
+            ws.activate(0, cx);
+            ws.toggle_sidebar(cx);
+            ws.set_theme(ThemePref::Dark, window, cx);
+        })
+    });
+    assert!(store.flush());
+    let state = read_workspace(&store).expect("workspace.json written");
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(
+            state.tab_order,
+            vec![ws.tab_at(0).read(app).id, ws.tab_at(1).read(app).id]
+        );
+        assert_eq!(state.active, Some(ws.tab_at(0).read(app).id));
+        assert!(app.theme().mode.is_dark());
+    });
+    assert!(state.sidebar_collapsed);
+    assert_eq!(state.theme, ThemePref::Dark);
+    assert_eq!(state.sidebar_width, None);
+
+    // 关闭 Tab 后顺序与激活项随之更新
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(0, window, cx)));
+    assert!(store.flush());
+    let state = read_workspace(&store).unwrap();
+    let remaining = cx.read(|app| ws.read(app).tab_at(0).read(app).id);
+    assert_eq!(state.tab_order, vec![remaining]);
+    assert_eq!(state.active, Some(remaining));
+}
+
+#[gpui::test]
+fn cycle_theme_walks_system_light_dark(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            assert_eq!(ws.theme(), ThemePref::System);
+            ws.cycle_theme(window, cx);
+            assert_eq!(ws.theme(), ThemePref::Light);
+            assert!(!cx.theme().mode.is_dark());
+            ws.cycle_theme(window, cx);
+            assert_eq!(ws.theme(), ThemePref::Dark);
+            assert!(cx.theme().mode.is_dark());
+            ws.cycle_theme(window, cx);
+            assert_eq!(ws.theme(), ThemePref::System);
+        })
+    });
 }

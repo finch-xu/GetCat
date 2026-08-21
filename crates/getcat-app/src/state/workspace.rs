@@ -22,7 +22,6 @@ use gpui_component::{
 
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
-use crate::ui::sidebar::render_sidebar;
 use crate::{CloseTab, NewTab, SendRequest, ToggleSidebar};
 
 /// 侧栏默认宽度（spec §7.1）。
@@ -146,7 +145,6 @@ impl Workspace {
         self.sidebar_width
     }
 
-    #[cfg(test)]
     pub fn theme(&self) -> ThemePref {
         self.theme
     }
@@ -160,6 +158,7 @@ impl Workspace {
         });
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
+        self.persist_workspace(cx);
         cx.notify();
     }
 
@@ -180,12 +179,14 @@ impl Workspace {
         let len = self.tabs.len();
         self.tabs.remove(ix);
         self.active = active_after_close(self.active, ix, len);
+        self.persist_workspace(cx);
         cx.notify();
     }
 
     pub fn activate(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix < self.tabs.len() && ix != self.active {
             self.active = ix;
+            self.persist_workspace(cx);
             cx.notify();
         }
     }
@@ -194,6 +195,56 @@ impl Workspace {
     pub fn flush_drafts(&self, cx: &mut Context<Self>) {
         for tab in &self.tabs {
             tab.update(cx, |t, cx| t.save_draft_now(cx));
+        }
+    }
+
+    /// 当前布局的快照（spec §9.1 工作区状态）。
+    pub(crate) fn workspace_state(&self, cx: &App) -> WorkspaceState {
+        WorkspaceState {
+            tab_order: self.tabs.iter().map(|t| t.read(cx).id).collect(),
+            active: self.tabs.get(self.active).map(|t| t.read(cx).id),
+            sidebar_width: self.sidebar_width,
+            sidebar_collapsed: self.sidebar_collapsed,
+            theme: self.theme,
+        }
+    }
+
+    /// 布局 / 顺序改动 → 写 workspace.json（写入线程合并 500 ms 内的多次改动）。
+    pub(crate) fn persist_workspace(&self, cx: &App) {
+        if let Some(store) = store(cx) {
+            store.write_workspace(self.workspace_state(cx));
+        }
+    }
+
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.persist_workspace(cx);
+        cx.notify();
+    }
+
+    pub fn set_theme(&mut self, pref: ThemePref, window: &mut Window, cx: &mut Context<Self>) {
+        if self.theme == pref {
+            return;
+        }
+        self.theme = pref;
+        apply_theme(pref, window, cx);
+        self.persist_workspace(cx);
+        cx.notify();
+    }
+
+    /// 侧栏按钮：系统 → 浅色 → 深色 → 系统。
+    pub fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_theme(self.theme.next(), window, cx);
+    }
+
+    /// 拖拽分隔条松手：记录侧栏宽度并写回。
+    fn on_sidebar_resized(&mut self, state: &Entity<ResizableState>, cx: &mut Context<Self>) {
+        let Some(width) = state.read(cx).sizes().first().copied().map(f32::from) else {
+            return;
+        };
+        if self.sidebar_width != Some(width) {
+            self.sidebar_width = Some(width);
+            self.persist_workspace(cx);
         }
     }
 
@@ -325,10 +376,7 @@ impl Render for Workspace {
                 let ix = this.active;
                 this.close_tab(ix, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
-                this.sidebar_collapsed = !this.sidebar_collapsed;
-                cx.notify();
-            }))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
                 this.active_tab().update(cx, |tab, cx| tab.send(window, cx))
             }))
@@ -337,12 +385,15 @@ impl Render for Workspace {
                 div().flex_1().min_h_0().w_full().child(
                     h_resizable("workspace")
                         .with_state(&self.sidebar_state)
+                        .on_resize(cx.listener(|this, state: &Entity<ResizableState>, _, cx| {
+                            this.on_sidebar_resized(state, cx)
+                        }))
                         .child(
                             resizable_panel()
                                 .size(sidebar_width)
                                 .size_range(px(180.)..px(420.))
                                 .visible(!self.sidebar_collapsed)
-                                .child(render_sidebar(cx)),
+                                .child(self.render_sidebar(cx)),
                         )
                         .child(
                             resizable_panel().child(
