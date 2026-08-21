@@ -26,7 +26,7 @@ use gpui_component::v_flex;
 use tokio::sync::mpsc;
 
 use crate::bridge;
-use crate::state::response::{CancelFlag, ResponseState, ResponseView};
+use crate::state::response::{CancelFlag, ResponseState, ResponseView, prepare_guarded};
 use crate::state::store::store;
 use crate::ui::kv_table::{KvTable, KvTableEvent};
 
@@ -614,16 +614,14 @@ impl RequestTab {
             };
             let prepared = match outcome {
                 Ok(HttpResponse { meta, body }) => {
-                    let prepared = cx
+                    // prepare_guarded 把后台 panic 转成 Err（spec §11），取消仍是 None
+                    let guarded = cx
                         .background_spawn(async move {
-                            ResponseView::prepare_cancellable(meta, &body, || {
-                                cancelled.load(Ordering::Relaxed)
-                            })
-                            .map(|view| (body, view))
+                            prepare_guarded(meta, body, || cancelled.load(Ordering::Relaxed))
                         })
                         .await;
-                    match prepared {
-                        Some(pair) => Ok(pair),
+                    match guarded {
+                        Some(result) => result,
                         // 已取消：不回写任何东西
                         None => return,
                     }

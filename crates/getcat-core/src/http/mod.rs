@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderName, HeaderValue};
 use tokio::io::AsyncWriteExt;
@@ -54,8 +54,8 @@ pub struct HttpRequest {
 /// 响应体存储。
 #[derive(Debug, Clone)]
 pub enum BodyStore {
-    /// ≤ MAX_BODY_BYTES：全部在内存
-    Memory(Arc<[u8]>),
+    /// ≤ MAX_BODY_BYTES：全部在内存。`Bytes` 由接收缓冲 `freeze()` 而来，不再整体拷贝一次。
+    Memory(Bytes),
     /// > MAX_BODY_BYTES：内容在临时文件，内存只保留前 HEAD_BYTES
     Spilled {
         file: Arc<SpillFile>,
@@ -65,6 +65,11 @@ pub enum BodyStore {
 }
 
 impl BodyStore {
+    /// 驻留内存的响应体；`Vec<u8>` / `&'static [u8]` 零拷贝接管（测试与桥接用，免去调用方导入 `bytes`）。
+    pub fn in_memory(bytes: impl Into<Bytes>) -> BodyStore {
+        BodyStore::Memory(bytes.into())
+    }
+
     pub fn len(&self) -> u64 {
         match self {
             BodyStore::Memory(b) => b.len() as u64,
@@ -173,7 +178,7 @@ impl Sink {
 
     async fn finish(self) -> Result<BodyStore, RequestError> {
         match self {
-            Sink::Memory(buf) => Ok(BodyStore::Memory(Arc::from(buf.freeze().as_ref()))),
+            Sink::Memory(buf) => Ok(BodyStore::Memory(buf.freeze())),
             Sink::Disk {
                 mut file,
                 guard,

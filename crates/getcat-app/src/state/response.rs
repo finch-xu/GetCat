@@ -1,6 +1,8 @@
 //! 响应状态机与"已准备好可直接渲染"的响应视图（三档选档在后台线程完成）。
 
 use std::{
+    any::Any,
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -10,7 +12,7 @@ use std::{
 
 use getcat_core::body::pretty::pretty_json_cancellable;
 use getcat_core::body::spill::HEAD_BYTES;
-use getcat_core::body::text::TextDoc;
+use getcat_core::body::text::{TextDoc, trim_partial_utf8};
 use getcat_core::body::tier::{ViewTier, select_tier};
 use getcat_core::detect::{ContentKind, SNIFF_LEN, detect};
 use getcat_core::http::{BodyStore, RequestError};
@@ -108,8 +110,8 @@ impl ResponseView {
                 })
             }
             None => {
-                // 落盘：不美化，只对前 HEAD_BYTES 建索引（C 档）
-                let head = body.head(HEAD_BYTES).to_vec();
+                // 落盘：不美化，只对前 HEAD_BYTES 建索引（C 档）；切口可能落在一个多字节字符中间，先裁掉残缺的尾巴
+                let head = trim_partial_utf8(body.head(HEAD_BYTES)).to_vec();
                 let raw = PreparedDoc::new(
                     TextDoc::from_bytes_cancellable(head, &mut should_cancel)?,
                     true,
@@ -148,6 +150,44 @@ impl ResponseView {
                 ..
             })
         )
+    }
+}
+
+/// 后台准备失败时的用户可见前缀（完整文案 `后台处理异常：<panic 信息>`）。
+pub const PREPARE_PANIC_PREFIX: &str = "后台处理异常";
+
+/// 后台线程的总入口：`catch_unwind` 包住全部 O(n) 工作（spec §11：后台 panic 不得传播到主线程）。
+/// - `None`：已取消，调用方什么都不回写；
+/// - `Some(Err(Other("后台处理异常：…")))`：准备阶段 panic，Tab 显示为失败而不是永远停在"发送中"。
+pub(crate) fn prepare_guarded(
+    meta: ResponseMeta,
+    body: BodyStore,
+    should_cancel: impl FnMut() -> bool,
+) -> Option<Result<(BodyStore, ResponseView), RequestError>> {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        ResponseView::prepare_cancellable(meta, &body, should_cancel)
+    }));
+    match outcome {
+        Ok(Some(view)) => Some(Ok((body, view))),
+        Ok(None) => None,
+        Err(payload) => {
+            let message = panic_message(payload.as_ref());
+            tracing::error!("response preparation panicked: {message}");
+            Some(Err(RequestError::Other(format!(
+                "{PREPARE_PANIC_PREFIX}：{message}"
+            ))))
+        }
+    }
+}
+
+/// `panic!` 的载荷通常是 `&str` 或 `String`；其它类型给一个固定文案。
+fn panic_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
     }
 }
 
@@ -239,7 +279,7 @@ mod tests {
     }
 
     fn mem(body: &[u8]) -> BodyStore {
-        BodyStore::Memory(Arc::from(body))
+        BodyStore::in_memory(body.to_vec())
     }
 
     fn prepare(ct: Option<&str>, body: &[u8]) -> ResponseView {
@@ -350,5 +390,47 @@ mod tests {
         assert!(!handle.load(Ordering::Relaxed));
         drop(flag);
         assert!(handle.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn spilled_head_is_trimmed_at_a_utf8_boundary() {
+        let (guard, _file) = SpillFile::create().unwrap();
+        let full = "名名".as_bytes();
+        let body = BodyStore::Spilled {
+            file: Arc::new(guard),
+            len: 100 * 1024 * 1024,
+            // head 的切口落在第二个字中间
+            head: Arc::from(&full[..full.len() - 1]),
+        };
+        let v = ResponseView::prepare(meta(Some("text/plain"), 100 * 1024 * 1024), &body);
+        assert_eq!(v.raw.as_ref().unwrap().doc.text(), "名");
+    }
+
+    #[test]
+    fn prepare_guarded_turns_a_panic_into_failed() {
+        let body = mem(br#"{"a":1}"#);
+        let result = prepare_guarded(meta(Some("application/json"), 7), body, || {
+            panic!("boom in background")
+        });
+        match result {
+            Some(Err(RequestError::Other(msg))) => {
+                assert!(msg.starts_with(PREPARE_PANIC_PREFIX), "{msg}");
+                assert!(msg.contains("boom in background"), "{msg}");
+            }
+            other => panic!(
+                "expected Some(Err(Other)), got {:?}",
+                other.map(|r| r.map(|_| ()))
+            ),
+        }
+        // 正常路径与取消路径不受影响
+        assert!(matches!(
+            prepare_guarded(
+                meta(Some("application/json"), 7),
+                mem(br#"{"a":1}"#),
+                || false
+            ),
+            Some(Ok(_))
+        ));
+        assert!(prepare_guarded(meta(None, 2), mem(b"{}"), || true).is_none());
     }
 }

@@ -327,7 +327,7 @@ fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
     let text: String = (0..EDITOR_MAX_LINES + 1)
         .map(|i| format!("line {i}\n"))
         .collect();
-    let body = BodyStore::Memory(Arc::from(text.as_bytes()));
+    let body = BodyStore::in_memory(text.as_bytes().to_vec());
     let meta = ResponseMeta {
         status: 200,
         status_text: "OK".into(),
@@ -497,7 +497,7 @@ fn save_body_copies_spilled_file(cx: &mut TestAppContext) {
 fn cancelled_save_dialog_leaves_no_notice(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
-    install_done(&tab, BodyStore::Memory(Arc::from(&b"{}"[..])), cx);
+    install_done(&tab, BodyStore::in_memory(&b"{}"[..]), cx);
     cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
     cx.simulate_new_path_selection(|_| None);
     cx.run_until_parked();
