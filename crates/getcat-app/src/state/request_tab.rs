@@ -107,6 +107,8 @@ pub(crate) const DRAFT_DEBOUNCE: Duration = Duration::from_millis(300);
 pub const VIRTUAL_SEARCH_NOTICE: &str = "纯文本视图暂不支持搜索：可「保存到文件」后用编辑器查找";
 pub const NO_RESPONSE_NOTICE: &str = "没有可搜索的响应";
 pub const BINARY_SEARCH_NOTICE: &str = "二进制内容不提供搜索";
+/// A 档但正文为空：`render_body_view` 这时画的是「响应体为空」占位而不是编辑器，聚焦一个没渲染的元素没有任何反馈。
+pub const EMPTY_BODY_SEARCH_NOTICE: &str = "响应体为空，无可搜索内容";
 
 /// 上次"保存到文件"选择的目录（进程内记忆，不落盘）；下一次保存对话框从这里打开。
 pub(crate) struct LastSaveDir(pub Option<PathBuf>);
@@ -722,6 +724,11 @@ impl RequestTab {
             cx.notify();
             return;
         }
+        if doc.doc.line_count() == 0 {
+            self.notice = Some(EMPTY_BODY_SEARCH_NOTICE.into());
+            cx.notify();
+            return;
+        }
         let editor = self
             .response_editor_for(view.kind.editor_language())
             .clone();
@@ -729,10 +736,17 @@ impl RequestTab {
         self.response_section = ResponseSection::Body;
         self.notice = None;
         editor.update(cx, |e, cx| e.focus(window, cx));
-        // `dispatch_action` 在"上一帧渲染出的分发树"里找焦点节点。刚从 Headers 切回 Body 时编辑器这一帧才出现，
-        // 要等画完再派发，否则找不到节点、动作被静默丢弃。
         if switched {
-            window.on_next_frame(|window, cx| window.dispatch_action(Box::new(Search), cx));
+            // `dispatch_action` 按「上一帧渲染出的分发树」找焦点节点，而刚从 Headers 切回 Body 时编辑器这一帧才出现。
+            // gpui 的帧处理把 `pending_next_frame_callbacks` 跑在 `window.draw` 之前
+            // （zed e0931d5 `crates/gpui/src/window.rs:1592-1621`），所以第一层 `on_next_frame` 里 `rendered_frame`
+            // 仍是 Headers 那一帧，派发会退回根节点被丢弃；要再嵌一层，等 Body 真的画出来之后再聚焦并派发。
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| {
+                    editor.update(cx, |e, cx| e.focus(window, cx));
+                    window.dispatch_action(Box::new(Search), cx);
+                });
+            });
         } else {
             window.dispatch_action(Box::new(Search), cx);
         }

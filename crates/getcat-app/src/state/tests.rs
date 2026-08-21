@@ -29,8 +29,8 @@ use gpui_component::{ActiveTheme, input::InputEvent};
 use tempfile::TempDir;
 
 use crate::state::request_tab::{
-    BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, NO_RESPONSE_NOTICE, RequestTab, ResponseSection,
-    VIRTUAL_SEARCH_NOTICE,
+    BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, EMPTY_BODY_SEARCH_NOTICE, NO_RESPONSE_NOTICE,
+    RequestTab, ResponseSection, VIRTUAL_SEARCH_NOTICE,
 };
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::store;
@@ -1315,6 +1315,26 @@ fn find_in_response_without_a_response_notices(cx: &mut TestAppContext) {
         tab.update(cx, |t, cx| {
             t.find_in_response(window, cx);
             assert_eq!(t.notice.as_deref(), Some(NO_RESPONSE_NOTICE));
+        })
+    });
+}
+
+/// 空 Body 虽然被判为 A 档，但画的是「响应体为空」占位而非编辑器：只提示，不抢焦点。
+#[gpui::test]
+fn find_in_response_on_an_empty_body_notices(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    install_done(&tab, BodyStore::in_memory(&b""[..]), cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.find_in_response(window, cx);
+            assert_eq!(t.notice.as_deref(), Some(EMPTY_BODY_SEARCH_NOTICE));
+            assert!(
+                !t.response_editor_for("json")
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
         })
     });
 }
