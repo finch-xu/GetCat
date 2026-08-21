@@ -549,7 +549,11 @@ impl Workspace {
                 .min_w_0()
                 .child(div().font_weight(FontWeight::SEMIBOLD).child("GetCat"))
                 .child(
+                    // flex 子项默认 min-width:auto，不会收缩到内容宽度以下，truncate 因此失效：
+                    // 必须显式 min_w_0()；flex_1() 让副标题占满 "GetCat" 之后的剩余宽度。
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .text_color(cx.theme().muted_foreground)
                         .truncate()
                         .child(self.title_bar_subtitle(cx)),
