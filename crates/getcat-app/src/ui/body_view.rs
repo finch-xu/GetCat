@@ -5,8 +5,9 @@ use std::sync::Arc;
 use getcat_core::body::text::{TextDoc, clip_line};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, IntoElement, ListHorizontalSizingBehavior, ParentElement, SharedString, Styled,
-    UniformListScrollHandle, div, px, uniform_list,
+    App, InteractiveElement, IntoElement, ListHorizontalSizingBehavior, ParentElement, Role,
+    SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle, div, px,
+    uniform_list,
 };
 use gpui_component::{
     ActiveTheme, h_flex,
@@ -70,7 +71,11 @@ pub fn render_text_lines(
     .font_family(cx.theme().mono_font_family.clone())
     .text_size(cx.theme().mono_font_size);
 
+    // uniform_list 只实现 InteractiveElement（没有 role）；外层组让屏幕阅读器知道这里是响应正文
     div()
+        .id("response-lines-region")
+        .role(Role::Group)
+        .aria_label("响应正文（纯文本视图）")
         .relative()
         .size_full()
         .child(list)
@@ -112,6 +117,9 @@ pub fn render_header_rows(
     .font_family(cx.theme().mono_font_family.clone());
 
     div()
+        .id("response-headers-region")
+        .role(Role::Group)
+        .aria_label("响应头列表")
         .relative()
         .size_full()
         .child(list)

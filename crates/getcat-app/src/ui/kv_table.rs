@@ -2,7 +2,12 @@
 
 use getcat_core::model::KeyValue;
 use gpui::prelude::FluentBuilder as _;
-use gpui::*;
+// 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
+// `#[test]` 属性宏并与标准库同名冲突。编译器报"找不到 X"时把 X 加进这里，不要改回通配符。
+use gpui::{
+    App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
+    Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+};
 use gpui_component::{
     ActiveTheme, Disableable, IconName, Sizable,
     button::{Button, ButtonVariants},
@@ -11,6 +16,11 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     v_flex,
 };
+
+/// 每行控件的可访问名称带行号，屏幕阅读器才分得清"第 3 行的参数名"和"第 4 行的参数名"。
+pub fn row_aria_label(ix: usize, what: &str) -> String {
+    format!("{what}（第 {} 行）", ix + 1)
+}
 
 pub enum KvTableEvent {
     Changed,
@@ -239,31 +249,38 @@ impl Render for KvTable {
                     .gap_2()
                     .items_center()
                     .child(
-                        div().w(px(28.)).flex().justify_center().child(
-                            // 可访问名称：gpui-component Checkbox 只有可见 label 会进入 a11y 树（tooltip 不算），
-                            // 而每行加可见文字会让表格变宽、噪音大。Plan 2 决定保留现状；后续方向是给上游
-                            // Checkbox 加 aria_label，或自绘带 role(Checkbox) 的开关（见 Plan 1 Ruling 2 更正）。
-                            Checkbox::new(("kv-enabled", ix))
-                                .checked(row.enabled)
-                                .tooltip("启用此行")
-                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                    this.toggle_row(ix, *checked, cx)
-                                })),
-                        ),
+                        // 可访问名称：gpui-component Checkbox 只有可见 label 会进入 a11y 树（tooltip 不算），
+                        // 每行加可见文字又会让表格变宽。折中：外面包一个带 role + aria_label 的组，
+                        // 屏幕阅读器先读"启用（第 N 行）"再读复选框。上游加 Checkbox::aria_label 后可去掉包装。
+                        div()
+                            .id(("kv-enabled-cell", ix))
+                            .role(Role::Group)
+                            .aria_label(row_aria_label(ix, "启用"))
+                            .w(px(28.))
+                            .flex()
+                            .justify_center()
+                            .child(
+                                Checkbox::new(("kv-enabled", ix))
+                                    .checked(row.enabled)
+                                    .tooltip(row_aria_label(ix, "启用"))
+                                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                        this.toggle_row(ix, *checked, cx)
+                                    })),
+                            ),
                     )
                     .child(
                         div().flex_1().child(
                             Input::new(&row.key)
                                 .small()
                                 .readonly(locked)
-                                .aria_label(self.key_placeholder.clone()),
+                                .aria_label(row_aria_label(ix, &self.key_placeholder)),
                         ),
                     )
                     .child(
                         div().flex_1().child(
                             Input::new(&row.value)
                                 .small()
-                                .aria_label(self.value_placeholder.clone()),
+                                .aria_label(row_aria_label(ix, &self.value_placeholder)),
                         ),
                     )
                     .child(
@@ -272,7 +289,7 @@ impl Render for KvTable {
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::Close)
-                                .tooltip("删除此行")
+                                .tooltip(row_aria_label(ix, "删除"))
                                 .disabled(locked)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.remove_row(ix, window, cx)
@@ -280,5 +297,16 @@ impl Render for KvTable {
                         ),
                     )
             }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_aria_label;
+
+    #[test]
+    fn row_aria_labels_carry_the_row_number() {
+        assert_eq!(row_aria_label(0, "参数名"), "参数名（第 1 行）");
+        assert_eq!(row_aria_label(2, "删除"), "删除（第 3 行）");
     }
 }

@@ -12,8 +12,8 @@ use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, UniformListScrollHandle, Window,
-    div, px,
+    ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    UniformListScrollHandle, Window, div, px,
 };
 use gpui_component::{
     ActiveTheme, IconName, Root, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
@@ -692,7 +692,11 @@ impl Render for Workspace {
         // 需要消费方自己在某处渲染（story crate 的 StoryRoot::render 就是这么接的）；
         // 否则 window.open_dialog 只会更新状态，画面上什么都不会出现。
         let dialog_layer = Root::render_dialog_layer(window, cx);
+        // 根元素持有焦点（track_focus）：给它 id + role，否则 gpui 会在日志里提示聚焦元素缺少 role
         div()
+            .id("workspace")
+            .role(Role::Group)
+            .aria_label("GetCat 工作区")
             .key_context("Workspace")
             .track_focus(&self.focus_handle)
             .size_full()

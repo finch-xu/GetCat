@@ -45,7 +45,11 @@ impl RequestTab {
                     .child(
                         // gpui-component 的 Select 外层无条件 size_full()，必须用定宽 flex_none 容器约束，
                         // 否则它会撑满整行，把 URL 输入框挤没。
+                        // 可访问名称：ui 层 Select 没有透传 base 的 accessibility_label，外层组给它一个名字。
                         div()
+                            .id("method-select")
+                            .role(Role::Group)
+                            .aria_label("请求方法")
                             .w(px(120.))
                             .flex_none()
                             .child(Select::new(&self.method).text_color(method_color(method, cx))),
