@@ -28,7 +28,11 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          components: rustfmt, clippy
+          # rustfmt / clippy 只在 macOS 的 Format、Clippy 两步用到
+          components: ${{ runner.os == 'macOS' && 'rustfmt, clippy' || '' }}
+          # 该 action 默认注入 RUSTFLAGS=-D warnings，会让 build/test 也把警告当错误；
+          # warnings-as-errors 交给显式的 Clippy 步骤承担
+          rustflags: ""
 
       # gpui on Linux needs Wayland / X11 / xkbcommon / fontconfig headers and a Vulkan loader
       # (same list as gpui-component's script/install-linux.sh, minus webkit which we do not use)
