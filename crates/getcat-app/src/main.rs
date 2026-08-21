@@ -12,7 +12,14 @@ use crate::state::workspace::Workspace;
 
 actions!(
     getcat,
-    [SendRequest, NewTab, CloseTab, ToggleSidebar, SaveRequest]
+    [
+        SendRequest,
+        NewTab,
+        CloseTab,
+        ToggleSidebar,
+        SaveRequest,
+        FindInResponse
+    ]
 );
 
 fn primary(key: &str) -> String {
@@ -58,6 +65,7 @@ fn main() {
             KeyBinding::new(&primary("w"), CloseTab, None),
             KeyBinding::new(&primary("b"), ToggleSidebar, None),
             KeyBinding::new(&primary("s"), SaveRequest, None),
+            KeyBinding::new(&primary("f"), FindInResponse, None),
         ]);
 
         let options = WindowOptions {

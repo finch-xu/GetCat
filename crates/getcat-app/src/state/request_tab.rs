@@ -18,7 +18,7 @@ use gpui::{
     Window, div, px,
 };
 use gpui_component::IndexPath;
-use gpui_component::input::{EditorState, InputEvent, InputState};
+use gpui_component::input::{EditorState, InputEvent, InputState, Search};
 use gpui_component::resizable::{resizable_panel, v_resizable};
 use gpui_component::select::{SelectEvent, SelectState};
 use gpui_component::v_flex;
@@ -102,6 +102,11 @@ pub fn body_hint_for(len: usize) -> Option<SharedString> {
 /// 编辑后到投递草稿的去抖：主线程只在窗口结束时做一次 `draft()` 快照（rope → String 拷贝），
 /// 序列化与落盘都在写入线程；写入线程再按 500 ms 合并同一 Tab 的重复写入。
 pub(crate) const DRAFT_DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// ⌘F 在 B / C 档（没有编辑器）时的提示。
+pub const VIRTUAL_SEARCH_NOTICE: &str = "纯文本视图暂不支持搜索：可「保存到文件」后用编辑器查找";
+pub const NO_RESPONSE_NOTICE: &str = "没有可搜索的响应";
+pub const BINARY_SEARCH_NOTICE: &str = "二进制内容不提供搜索";
 
 /// 上次"保存到文件"选择的目录（进程内记忆，不落盘）；下一次保存对话框从这里打开。
 pub(crate) struct LastSaveDir(pub Option<PathBuf>);
@@ -697,6 +702,40 @@ impl RequestTab {
         self.response = ResponseState::Failed {
             error: RequestError::Cancelled,
         };
+        cx.notify();
+    }
+
+    /// ⌘F / 工具栏搜索按钮：A 档把焦点交给只读编辑器并打开它的搜索面板；B / C 档没有编辑器，只提示。
+    pub fn find_in_response(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ResponseState::Done { view, .. } = &self.response else {
+            self.notice = Some(NO_RESPONSE_NOTICE.into());
+            cx.notify();
+            return;
+        };
+        let Some(doc) = view.doc(self.pretty) else {
+            self.notice = Some(BINARY_SEARCH_NOTICE.into());
+            cx.notify();
+            return;
+        };
+        if doc.tier != ViewTier::Editor {
+            self.notice = Some(VIRTUAL_SEARCH_NOTICE.into());
+            cx.notify();
+            return;
+        }
+        let editor = self
+            .response_editor_for(view.kind.editor_language())
+            .clone();
+        let switched = self.response_section != ResponseSection::Body;
+        self.response_section = ResponseSection::Body;
+        self.notice = None;
+        editor.update(cx, |e, cx| e.focus(window, cx));
+        // `dispatch_action` 在"上一帧渲染出的分发树"里找焦点节点。刚从 Headers 切回 Body 时编辑器这一帧才出现，
+        // 要等画完再派发，否则找不到节点、动作被静默丢弃。
+        if switched {
+            window.on_next_frame(|window, cx| window.dispatch_action(Box::new(Search), cx));
+        } else {
+            window.dispatch_action(Box::new(Search), cx);
+        }
         cx.notify();
     }
 

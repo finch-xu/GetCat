@@ -22,12 +22,15 @@ use getcat_core::model::{
     TabId, ThemePref, Ulid, WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
-use gpui::{AppContext, Entity, IntoElement, TestAppContext, VisualTestContext, point, px, size};
+use gpui::{
+    AppContext, Entity, Focusable, IntoElement, TestAppContext, VisualTestContext, point, px, size,
+};
 use gpui_component::{ActiveTheme, input::InputEvent};
 use tempfile::TempDir;
 
 use crate::state::request_tab::{
-    BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, RequestTab, ResponseSection,
+    BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, NO_RESPONSE_NOTICE, RequestTab, ResponseSection,
+    VIRTUAL_SEARCH_NOTICE,
 };
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::store;
@@ -1253,5 +1256,65 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
             .last_item_size
             .expect("saved list was laid out");
         assert_eq!(laid_out.contents.height, px(SAVED_ROW_HEIGHT * 2.));
+    });
+}
+
+#[gpui::test]
+fn find_in_response_focuses_the_editor_on_editor_tier(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    install_done(&tab, BodyStore::in_memory(&br#"{"a":1}"#[..]), cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Headers;
+            t.find_in_response(window, cx);
+            assert_eq!(t.response_section, ResponseSection::Body);
+            assert!(
+                t.response_editor_for("json")
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window),
+                "the read-only editor must take focus so its search panel can open"
+            );
+            assert!(t.notice.is_none());
+        })
+    });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn find_in_response_only_notices_on_virtual_tier(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let text: String = (0..EDITOR_MAX_LINES + 1)
+        .map(|i| format!("line {i}\n"))
+        .collect();
+    let body = BodyStore::in_memory(text.as_bytes().to_vec());
+    let view = ResponseView::prepare(meta("text/plain", body.len()), &body);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let g = t.generation;
+            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.find_in_response(window, cx);
+            assert_eq!(t.notice.as_deref(), Some(VIRTUAL_SEARCH_NOTICE));
+            assert!(
+                !t.response_editor_for("text")
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
+        })
+    });
+}
+
+#[gpui::test]
+fn find_in_response_without_a_response_notices(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.find_in_response(window, cx);
+            assert_eq!(t.notice.as_deref(), Some(NO_RESPONSE_NOTICE));
+        })
     });
 }

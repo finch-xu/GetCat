@@ -5,7 +5,7 @@ use getcat_core::http::{BodyStore, RequestError};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, Sizable,
+    ActiveTheme, IconName, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     input::Editor,
@@ -77,6 +77,16 @@ impl RequestTab {
                             })
                             .when(is_done, |h| {
                                 h.child(
+                                    Button::new("find-in-response")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Search)
+                                        .tooltip("响应内搜索（⌘F / Ctrl F）")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.find_in_response(window, cx)
+                                        })),
+                                )
+                                .child(
                                     Button::new("save-body")
                                         .ghost()
                                         .xsmall()

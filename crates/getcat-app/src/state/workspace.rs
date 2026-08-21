@@ -24,7 +24,7 @@ use gpui_component::{
 
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
-use crate::{CloseTab, NewTab, SaveRequest, SendRequest, ToggleSidebar};
+use crate::{CloseTab, FindInResponse, NewTab, SaveRequest, SendRequest, ToggleSidebar};
 
 /// 侧栏默认宽度（spec §7.1）。
 pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.;
@@ -639,6 +639,10 @@ impl Render for Workspace {
             .on_action(
                 cx.listener(|this, _: &SaveRequest, window, cx| this.save_active(window, cx)),
             )
+            .on_action(cx.listener(|this, _: &FindInResponse, window, cx| {
+                this.active_tab()
+                    .update(cx, |tab, cx| tab.find_in_response(window, cx))
+            }))
             .when_some(banner(cx), |d, text| d.child(render_banner(text, cx)))
             .child(
                 div().flex_1().min_h_0().w_full().child(
