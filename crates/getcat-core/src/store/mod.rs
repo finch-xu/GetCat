@@ -13,7 +13,7 @@ use std::{
 pub use codec::{FORMAT_VERSION, StoreError};
 pub use disk::{
     DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, WORKSPACE_FILE, copy_atomic, load_all,
-    write_atomic,
+    mark_user_file, write_atomic,
 };
 pub use writer::{COALESCE_WINDOW, FLUSH_TIMEOUT, StoreWriter};
 

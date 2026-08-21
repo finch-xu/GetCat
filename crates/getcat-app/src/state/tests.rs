@@ -556,6 +556,13 @@ fn save_body_is_atomic_and_remembers_the_directory(cx: &mut TestAppContext) {
     });
     wait_until(cx, |cx| cx.read(|app| tab.read(app).notice.is_some()));
     assert_eq!(std::fs::read(&second).unwrap(), br#"{"v":2}"#);
+    // 用户"另存为"目标不应继承 write_atomic/copy_atomic 临时文件的 0600（Ruling P4-1）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&second).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644, "{mode:o}");
+    }
 }
 
 #[gpui::test]

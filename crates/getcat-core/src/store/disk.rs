@@ -111,6 +111,20 @@ pub fn copy_atomic(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// 把用户显式选择的落盘目标（"另存为"）从 `write_atomic`/`copy_atomic` 留下的 0600
+/// 收紧回常规权限：数据目录内部文件保持 0600（可能含明文 `Authorization` 等），但用户选择的
+/// 目标文件应当遵循平常的文件权限预期（能被其他程序 / 用户按 umask 默认访问）。
+/// Unix 上设为 0644；非 unix 平台上是 no-op（权限模型不同，交由系统默认处理）。
+#[cfg_attr(not(unix), allow(unused_variables))]
+pub fn mark_user_file(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
+    }
+    Ok(())
+}
+
 pub fn remove_if_exists(path: &Path) -> io::Result<()> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -290,6 +304,19 @@ mod tests {
         write_atomic(&path, b"{}").unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mark_user_file_sets_0644() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, layout) = layout();
+        let path = layout.root().join("saved.bin");
+        std::fs::write(&path, b"x").unwrap();
+        std::fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        mark_user_file(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644, "{mode:o}");
     }
 
     #[test]
