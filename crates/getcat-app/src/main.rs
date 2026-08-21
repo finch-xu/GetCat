@@ -97,6 +97,9 @@ fn main() {
                             true
                         }
                     });
+                    // `flush_on_exit` 必须留在闭包的**同步**部分：gpui 的 SHUTDOWN_TIMEOUT 只有
+                    // 200 ms，而写入器 flush 最多等 2 s——只有在返回 future 之前执行完，
+                    // 退出前的最后一次落盘才来得及。
                     cx.on_app_quit({
                         let workspace = workspace.clone();
                         move |cx| {
@@ -111,7 +114,11 @@ fn main() {
             // AsyncApp::update 在本版本直接返回闭包结果（不再包一层 Result）
             match opened_window {
                 Ok(_) => cx.update(|cx| cx.activate(true)),
-                Err(e) => tracing::error!("failed to open window: {e}"),
+                // 开窗失败没有任何可交互的界面，只记日志会留下一个无窗僵尸进程：显式退出
+                Err(e) => {
+                    tracing::error!("failed to open window: {e}");
+                    cx.update(|cx| cx.quit());
+                }
             }
         })
         .detach();
