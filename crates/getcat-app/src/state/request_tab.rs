@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use getcat_core::body::tier::ViewTier;
+use getcat_core::body::tier::{ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
 use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft, TabDraft, TabId, Ulid};
@@ -90,7 +90,13 @@ const TICK_INTERVAL: Duration = Duration::from_millis(100);
 pub const BODY_HINT_BYTES: usize = 10 * 1024 * 1024;
 
 pub fn body_hint_for(len: usize) -> Option<SharedString> {
-    (len > BODY_HINT_BYTES).then(|| "文本 Body 超过 10 MB，建议改用文件 Body 流式上传".into())
+    (len > BODY_HINT_BYTES).then(|| {
+        format!(
+            "文本 Body 超过 {}，建议改用文件 Body 流式上传",
+            mib_label(BODY_HINT_BYTES as u64)
+        )
+        .into()
+    })
 }
 
 /// 编辑后到投递草稿的去抖：主线程只在窗口结束时做一次 `draft()` 快照（rope → String 拷贝），
@@ -108,7 +114,8 @@ pub struct RequestTab {
     pub dirty: bool,
     pub method: Entity<SelectState<Vec<&'static str>>>,
     pub url: Entity<InputState>,
-    pub url_error: Option<String>,
+    /// 发送前校验失败的内联提示（URL 非法 / Header 非法 / 未选文件），显示在 URL 栏下方（spec §11）。
+    pub prepare_error: Option<String>,
     pub path_params: Entity<KvTable>,
     pub params: Entity<KvTable>,
     pub headers: Entity<KvTable>,
@@ -214,7 +221,7 @@ impl RequestTab {
             dirty: false,
             method,
             url,
-            url_error: None,
+            prepare_error: None,
             path_params,
             params,
             headers,
@@ -251,7 +258,7 @@ impl RequestTab {
                 let names = extract_path_params(&self.url.read(cx).value());
                 self.path_params
                     .update(cx, |t, cx| t.sync_keys(&names, window, cx));
-                self.url_error = None;
+                self.prepare_error = None;
                 self.mark_dirty(cx);
             }
             InputEvent::PressEnter { .. } => self.send(window, cx),
@@ -505,7 +512,7 @@ impl RequestTab {
                 }
             }
         }
-        self.url_error = None;
+        self.prepare_error = None;
         self.refresh_body_hint(cx);
         cx.notify();
     }
@@ -538,12 +545,12 @@ impl RequestTab {
         let req = match http::prepare(&draft) {
             Ok(r) => r,
             Err(e) => {
-                self.url_error = Some(e.to_string());
+                self.prepare_error = Some(e.to_string());
                 cx.notify();
                 return;
             }
         };
-        self.url_error = None;
+        self.prepare_error = None;
         self.save_notice = None;
         self.generation += 1;
         let generation = self.generation;
@@ -761,18 +768,19 @@ pub fn tab_title(url: &str) -> SharedString {
     if trimmed.is_empty() {
         return "新请求".into();
     }
-    let without_scheme = trimmed
+    // 先去 query 再去 scheme：`localhost:8080/cb?to=https://x` 的 `://` 在 query 里
+    let without_query = trimmed.split('?').next().unwrap_or(trimmed);
+    let without_scheme = without_query
         .split_once("://")
         .map(|(_, rest)| rest)
-        .unwrap_or(trimmed);
-    let without_query = without_scheme.split('?').next().unwrap_or(without_scheme);
-    if without_query.is_empty() {
+        .unwrap_or(without_query);
+    if without_scheme.is_empty() {
         return "新请求".into();
     }
-    match without_query.find('/') {
-        Some(ix) if ix + 1 < without_query.len() => without_query[ix..].to_string().into(),
-        Some(ix) => without_query[..ix].to_string().into(),
-        None => without_query.to_string().into(),
+    match without_scheme.find('/') {
+        Some(ix) if ix + 1 < without_scheme.len() => without_scheme[ix..].to_string().into(),
+        Some(ix) => without_scheme[..ix].to_string().into(),
+        None => without_scheme.to_string().into(),
     }
 }
 
@@ -815,5 +823,8 @@ mod tests {
         assert_eq!(tab_title("not a url").as_ref(), "not a url");
         assert_eq!(tab_title("https://").as_ref(), "新请求");
         assert_eq!(tab_title("http://").as_ref(), "新请求");
+        // query 里的 "://" 不是 scheme
+        assert_eq!(tab_title("localhost:8080/cb?to=https://x").as_ref(), "/cb");
+        assert_eq!(tab_title("x.com?a=1").as_ref(), "x.com");
     }
 }

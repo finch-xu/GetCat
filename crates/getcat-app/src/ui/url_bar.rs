@@ -67,7 +67,7 @@ impl RequestTab {
                     )
                     .child(action_button),
             )
-            .when_some(self.url_error.clone(), |v, err| {
+            .when_some(self.prepare_error.clone(), |v, err| {
                 v.child(div().text_xs().text_color(cx.theme().danger).child(err))
             })
     }

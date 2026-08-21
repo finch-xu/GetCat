@@ -62,13 +62,24 @@ fn substitute_path_params(url: &str, params: &[KeyValue]) -> String {
     out
 }
 
+/// `://` 之前是否是一个真正的 scheme（RFC 3986：字母开头，只含字母数字与 `+-.`）。
+/// `localhost:8080/cb?to=https://x` 的 `://` 在 query 里，前面含 `:` `/` `?`，不算。
+fn has_scheme(url: &str) -> bool {
+    let Some((scheme, _)) = url.split_once("://") else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
 pub fn build_url(draft: &RequestDraft) -> Result<Url, UrlError> {
     let raw = draft.url.trim();
     if raw.is_empty() {
         return Err(UrlError::Empty);
     }
     let substituted = substitute_path_params(raw, &draft.path_params);
-    let with_scheme = if substituted.contains("://") {
+    let with_scheme = if has_scheme(&substituted) {
         substituted
     } else {
         format!("http://{substituted}")
@@ -182,5 +193,19 @@ mod tests {
         let mut d = draft("https://x.com/users/{id}");
         d.path_params = vec![KeyValue::new("id", "{post}"), KeyValue::new("post", "999")];
         assert_eq!(build_url(&d).unwrap().path(), "/users/%7Bpost%7D");
+    }
+
+    #[test]
+    fn scheme_in_query_does_not_count_as_url_scheme() {
+        let u = build_url(&draft("localhost:8080/cb?to=https://x")).unwrap();
+        assert_eq!(u.scheme(), "http");
+        assert_eq!(u.host_str(), Some("localhost"));
+        assert_eq!(u.port(), Some(8080));
+        assert_eq!(u.query(), Some("to=https://x"));
+        assert!(has_scheme("https://a.b"));
+        assert!(has_scheme("h2+c.x://a"));
+        assert!(!has_scheme("localhost:8080/cb?to=https://x"));
+        assert!(!has_scheme("1abc://x"));
+        assert!(!has_scheme("example.com/a"));
     }
 }

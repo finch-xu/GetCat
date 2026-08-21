@@ -120,8 +120,10 @@ impl Workspace {
         ws
     }
 
+    /// 当前 Tab。`tabs` 永不为空（关掉最后一个会立刻新建）；`active` 若越界则夹到末尾而不是 panic。
     pub fn active_tab(&self) -> Entity<RequestTab> {
-        self.tabs[self.active].clone()
+        let ix = self.active.min(self.tabs.len().saturating_sub(1));
+        self.tabs[ix].clone()
     }
 
     #[cfg(test)]
@@ -551,7 +553,7 @@ pub(crate) fn active_after_close(active: usize, closing: usize, len: usize) -> u
     let new_len = len - 1;
     if active >= new_len {
         // 关掉的是末尾且它就是 active：夹到新的末尾。
-        new_len - 1
+        new_len.saturating_sub(1)
     } else if closing < active {
         active - 1
     } else {
@@ -744,5 +746,11 @@ mod tests {
     fn closing_right_of_active_leaves_active_alone() {
         assert_eq!(active_after_close(0, 1, 3), 0);
         assert_eq!(active_after_close(1, 2, 4), 1);
+    }
+
+    #[test]
+    fn closing_the_only_tab_is_total() {
+        // close_tab 在 len == 1 时走"先删再新建"，不会调到这里；但函数本身不得 panic
+        assert_eq!(active_after_close(0, 0, 1), 0);
     }
 }
