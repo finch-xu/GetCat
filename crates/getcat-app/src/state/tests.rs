@@ -559,12 +559,17 @@ fn save_body_is_atomic_and_remembers_the_directory(cx: &mut TestAppContext) {
     });
     wait_until(cx, |cx| cx.read(|app| tab.read(app).notice.is_some()));
     assert_eq!(std::fs::read(&second).unwrap(), br#"{"v":2}"#);
-    // 用户"另存为"目标不应继承 write_atomic/copy_atomic 临时文件的 0600（Ruling P4-1）
+    // 用户"另存为"目标按系统 umask 创建，不继承数据目录内部文件的 0600（Ruling P4-3）。
+    // 与同目录里 File::create 出来的探针文件比较，断言就与当前 umask 无关。
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        let probe = dir.path().join("umask-probe");
+        std::fs::File::create(&probe).unwrap();
+        let expected = std::fs::metadata(&probe).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_file(&probe).unwrap();
         let mode = std::fs::metadata(&second).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o644, "{mode:o}");
+        assert_eq!(mode & 0o777, expected, "{mode:o} != {expected:o}");
     }
 }
 

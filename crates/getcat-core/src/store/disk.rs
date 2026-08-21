@@ -73,55 +73,93 @@ impl Layout {
     }
 }
 
+/// 落盘目标的权限意图。临时文件在**创建时**就带上目标权限，避免出现"先 0644 后收紧"的窗口。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FilePerms {
+    /// 数据目录内部文件：固定 0600，不依赖调用方 umask（可能含明文 `Authorization` 等）。
+    Private,
+    /// 用户显式选择的"另存为"目标：按 0666 请求，由内核套 umask（通常得到 0644）。
+    User,
+}
+
+/// 按权限意图在 `dir` 里建临时文件。
+/// Unix 上把 mode 交给 `open(2)`，内核会自动套 umask：`Private` 的 0600 不受影响，
+/// `User` 的 0666 会变成 `0o666 & !umask`，与 `File::create` 的结果一致。
+/// 非 unix 平台没有 mode 概念，一律用默认。
+fn temp_file_in(dir: &Path, perms: FilePerms) -> io::Result<NamedTempFile> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = match perms {
+            FilePerms::Private => 0o600,
+            FilePerms::User => 0o666,
+        };
+        tempfile::Builder::new()
+            .permissions(fs::Permissions::from_mode(mode))
+            .tempfile_in(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = perms;
+        NamedTempFile::new_in(dir)
+    }
+}
+
 /// 原子写：同目录临时文件 → 写入 → fsync → rename 覆盖。
 /// 崩溃最多留下一个 `.tmp*` 临时文件；目标文件要么是完整的旧版，要么是完整的新版。
-/// Unix 上显式把权限收紧到 0600（仅当前用户可读写），不依赖调用方的 umask：
+/// Unix 上权限固定 0600（仅当前用户可读写），不依赖调用方的 umask：
 /// 请求 Body / Header 里的 `Authorization` 等以明文落盘（spec §9.4）。
+///
+/// 已知取舍：只 fsync 文件本身、不 fsync 父目录，掉电时 rename 可能尚未持久化
+/// （目标退回旧版内容，不会半新半旧）。桌面应用可接受，故不做。
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_with(path, bytes, FilePerms::Private)
+}
+
+/// 与 `write_atomic` 相同，但目标是用户显式选择的"另存为"路径：权限按系统 umask
+/// 创建（通常 0644），而不是数据目录内部的 0600。
+pub fn write_atomic_user(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_with(path, bytes, FilePerms::User)
+}
+
+fn write_atomic_with(path: &Path, bytes: &[u8], perms: FilePerms) -> io::Result<()> {
     let dir = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
     fs::create_dir_all(dir)?;
-    let mut tmp = NamedTempFile::new_in(dir)?;
+    let mut tmp = temp_file_in(dir, perms)?;
     tmp.write_all(bytes)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tmp.as_file()
-            .set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
     tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
 /// 原子拷贝：把 `src` 整个复制到 `dest` 同目录的临时文件，fsync 后 rename 覆盖。
-/// 给"保存响应到文件"的落盘拷贝用：中途失败（磁盘满、源文件消失）不会留下半个 `dest`。
+/// 中途失败（磁盘满、源文件消失）不会留下半个 `dest`。权限同 `write_atomic`（0600）。
+///
+/// 已知取舍：与 `write_atomic` 一样只 fsync 文件本身、不 fsync 父目录，
+/// 掉电时 rename 可能尚未持久化（`dest` 退回旧内容或不存在）。
 pub fn copy_atomic(src: &Path, dest: &Path) -> io::Result<()> {
+    copy_atomic_with(src, dest, FilePerms::Private)
+}
+
+/// 与 `copy_atomic` 相同，但目标是用户显式选择的"另存为"路径：权限按系统 umask
+/// 创建（通常 0644）。给"保存响应到文件"用——用户选的目标不该继承数据目录的 0600。
+pub fn copy_atomic_user(src: &Path, dest: &Path) -> io::Result<()> {
+    copy_atomic_with(src, dest, FilePerms::User)
+}
+
+fn copy_atomic_with(src: &Path, dest: &Path, perms: FilePerms) -> io::Result<()> {
     let dir = dest
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
     // 先打开源文件：源不存在时不要在目标目录留下任何痕迹
     let mut reader = fs::File::open(src)?;
     fs::create_dir_all(dir)?;
-    let mut tmp = NamedTempFile::new_in(dir)?;
+    let mut tmp = temp_file_in(dir, perms)?;
     io::copy(&mut reader, &mut tmp)?;
     tmp.as_file().sync_all()?;
     tmp.persist(dest).map_err(|e| e.error)?;
-    Ok(())
-}
-
-/// 把用户显式选择的落盘目标（"另存为"）从 `write_atomic`/`copy_atomic` 留下的 0600
-/// 收紧回常规权限：数据目录内部文件保持 0600（可能含明文 `Authorization` 等），但用户选择的
-/// 目标文件应当遵循平常的文件权限预期（能被其他程序 / 用户按 umask 默认访问）。
-/// Unix 上设为 0644；非 unix 平台上是 no-op（权限模型不同，交由系统默认处理）。
-#[cfg_attr(not(unix), allow(unused_variables))]
-pub fn mark_user_file(path: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
-    }
     Ok(())
 }
 
@@ -306,17 +344,49 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600, "{mode:o}");
     }
 
+    /// 同目录里用 `File::create` 建一个探针文件，返回它的权限位。
+    /// 与探针比较可以让断言与当前 umask 无关：任何 umask 下"按 umask 创建"都等于它。
+    #[cfg(unix)]
+    fn umask_mode(dir: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        let probe = dir.join("umask-probe");
+        std::fs::File::create(&probe).unwrap();
+        let mode = std::fs::metadata(&probe).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_file(&probe).unwrap();
+        mode
+    }
+
     #[cfg(unix)]
     #[test]
-    fn mark_user_file_sets_0644() {
+    fn user_variants_follow_the_umask() {
         use std::os::unix::fs::PermissionsExt;
         let (_dir, layout) = layout();
-        let path = layout.root().join("saved.bin");
-        std::fs::write(&path, b"x").unwrap();
-        std::fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-        mark_user_file(&path).unwrap();
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o644, "{mode:o}");
+        let expected = umask_mode(layout.root());
+
+        let written = layout.root().join("written.bin");
+        write_atomic_user(&written, b"x").unwrap();
+        let mode = std::fs::metadata(&written).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, expected, "{mode:o} != {expected:o}");
+
+        let src = layout.root().join("src.bin");
+        std::fs::write(&src, b"x").unwrap();
+        let copied = layout.root().join("copied.bin");
+        copy_atomic_user(&src, &copied).unwrap();
+        let mode = std::fs::metadata(&copied).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, expected, "{mode:o} != {expected:o}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_atomic_keeps_data_dir_files_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, layout) = layout();
+        let src = layout.root().join("src.bin");
+        std::fs::write(&src, b"x").unwrap();
+        let dest = layout.requests_dir().join("dest.bin");
+        copy_atomic(&src, &dest).unwrap();
+        let mode = std::fs::metadata(&dest).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
     }
 
     #[test]

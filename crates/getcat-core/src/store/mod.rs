@@ -12,8 +12,8 @@ use std::{
 
 pub use codec::{FORMAT_VERSION, StoreError};
 pub use disk::{
-    DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, WORKSPACE_FILE, copy_atomic, load_all,
-    mark_user_file, write_atomic,
+    DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, WORKSPACE_FILE, copy_atomic,
+    copy_atomic_user, load_all, write_atomic, write_atomic_user,
 };
 pub use writer::{COALESCE_WINDOW, FLUSH_TIMEOUT, StoreWriter};
 
