@@ -1377,3 +1377,24 @@ fn toggle_split_applies_to_all_tabs_and_persists(cx: &mut TestAppContext) {
         )
     });
 }
+
+#[gpui::test]
+fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users/1", cx);
+    cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app).as_ref(), "/users/1"));
+    // 整个 Workspace（含 TitleBar）在 TestPlatform 下能画出一帧：TitleBar 会查询 window_decorations /
+    // is_fullscreen / window_controls，这些在测试窗口上都有实现或默认值。
+    // 先 blur：聚焦中的 Input 渲染时会去拿真实平台窗口句柄（TestWindow 未实现），与
+    // sidebar_lists_newest_first_and_draws_rows 同样的原因。
+    cx.update(|window, _| window.blur());
+    let ws_element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        ws_element.into_any_element()
+    });
+    // 新建的空 Tab 成为激活 Tab：副标题跟着变
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app).as_ref(), "新请求"));
+}

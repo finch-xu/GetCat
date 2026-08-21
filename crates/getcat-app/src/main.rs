@@ -4,7 +4,7 @@ mod ui;
 
 use getcat_core::store::{Layout, Loaded, Store, StoreError, load_all};
 use gpui::*;
-use gpui_component::Root;
+use gpui_component::{Root, TitleBar};
 use gpui_component_assets::Assets;
 
 use crate::state::store::{flush_on_exit, install};
@@ -68,13 +68,17 @@ fn main() {
             KeyBinding::new(&primary("f"), FindInResponse, None),
         ]);
 
+        // 客户端自绘标题栏（spec §7.2）：TitleBar::window_options() 提供透明 titlebar、红绿灯位置与
+        // app_owns_titlebar_drag；Linux 额外申请客户端装饰（与 gpui-component story 同款），
+        // 得不到时 gpui 回退到服务端装饰、TitleBar 自动不画控制按钮。
         let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("GetCat".into()),
-                ..Default::default()
-            }),
             window_bounds: Some(WindowBounds::centered(size(px(1280.), px(820.)), cx)),
-            ..Default::default()
+            window_min_size: Some(size(px(800.), px(520.))),
+            #[cfg(target_os = "linux")]
+            window_background: WindowBackgroundAppearance::Transparent,
+            #[cfg(target_os = "linux")]
+            window_decorations: Some(WindowDecorations::Client),
+            ..TitleBar::window_options()
         };
         cx.spawn(async move |cx| {
             // 启动读取在后台线程完成（spec §9.4）；数据目录不可写时仍以只读方式恢复已有数据，只显示横幅
@@ -82,6 +86,8 @@ fn main() {
             let opened_window = cx.update(|cx| {
                 install(cx, opened);
                 cx.open_window(options, |window, cx| {
+                    // TitlebarOptions.title 为 None（标题由 TitleBar 自绘）；OS 层的窗口标题给 Dock / 任务栏 / 屏幕阅读器
+                    window.set_window_title("GetCat");
                     let workspace = cx.new(|cx| Workspace::restore(loaded, window, cx));
                     // 关窗与退出都先把每个 Tab 的草稿快照投递出去，再等待写入线程清空队列（≤ 2 s）
                     window.on_window_should_close(cx, {

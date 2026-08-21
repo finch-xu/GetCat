@@ -11,11 +11,12 @@ use getcat_core::model::{
 use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, Styled, Subscription, UniformListScrollHandle, Window, div, px,
+    App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, UniformListScrollHandle, Window,
+    div, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Root, Sizable, Theme, ThemeMode, WindowExt,
+    ActiveTheme, IconName, Root, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
     button::{Button, ButtonVariants},
     dialog::{DialogAction, DialogClose, DialogFooter},
     h_flex,
@@ -533,6 +534,29 @@ impl Workspace {
         input_for_focus.update(cx, |s, cx| s.focus(window, cx));
     }
 
+    /// 标题栏副标题：当前 Tab 的标题（已保存请求名或 URL 末段）。
+    pub(crate) fn title_bar_subtitle(&self, cx: &App) -> SharedString {
+        self.active_tab().read(cx).title(cx)
+    }
+
+    /// 自绘标题栏（spec §7.2）：应用名 + 当前 Tab 标题；拖动 / 双击 / 平台控制按钮由 TitleBar 处理。
+    fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        TitleBar::new().child(
+            h_flex()
+                .items_center()
+                .gap_2()
+                .text_sm()
+                .min_w_0()
+                .child(div().font_weight(FontWeight::SEMIBOLD).child("GetCat"))
+                .child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .truncate()
+                        .child(self.title_bar_subtitle(cx)),
+                ),
+        )
+    }
+
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let titles: Vec<(SharedString, bool)> = self
             .tabs
@@ -692,6 +716,7 @@ impl Render for Workspace {
                 this.active_tab()
                     .update(cx, |tab, cx| tab.find_in_response(window, cx))
             }))
+            .child(self.render_title_bar(cx))
             .when_some(banner(cx), |d, text| d.child(render_banner(text, cx)))
             .child(
                 div().flex_1().min_h_0().w_full().child(
