@@ -451,9 +451,9 @@ fn save_body_writes_memory_body_to_chosen_path(cx: &mut TestAppContext) {
     assert!(cx.did_prompt_for_new_path());
     let chosen = dest.clone();
     cx.simulate_new_path_selection(move |_| Some(chosen));
-    wait_until(cx, |cx| cx.read(|app| tab.read(app).save_notice.is_some()));
+    wait_until(cx, |cx| cx.read(|app| tab.read(app).notice.is_some()));
     cx.read(|app| {
-        let notice = tab.read(app).save_notice.clone().unwrap();
+        let notice = tab.read(app).notice.clone().unwrap();
         assert!(notice.starts_with("已保存到"), "{notice}");
     });
     assert_eq!(std::fs::read(&dest).unwrap(), br#"{"a":1}"#);
@@ -488,7 +488,7 @@ fn save_body_copies_spilled_file(cx: &mut TestAppContext) {
     cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
     let chosen = dest.clone();
     cx.simulate_new_path_selection(move |_| Some(chosen));
-    wait_until(cx, |cx| cx.read(|app| tab.read(app).save_notice.is_some()));
+    wait_until(cx, |cx| cx.read(|app| tab.read(app).notice.is_some()));
     assert_eq!(std::fs::read(&dest).unwrap(), b"0123456789");
     let _ = std::fs::remove_file(&dest);
 }
@@ -501,7 +501,7 @@ fn cancelled_save_dialog_leaves_no_notice(cx: &mut TestAppContext) {
     cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
     cx.simulate_new_path_selection(|_| None);
     cx.run_until_parked();
-    cx.read(|app| assert!(tab.read(app).save_notice.is_none()));
+    cx.read(|app| assert!(tab.read(app).notice.is_none()));
 }
 
 #[gpui::test]
@@ -510,6 +510,52 @@ fn save_body_does_nothing_when_not_done(cx: &mut TestAppContext) {
     let tab = new_tab(cx);
     cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
     assert!(!cx.did_prompt_for_new_path());
+}
+
+#[gpui::test]
+fn save_body_is_atomic_and_remembers_the_directory(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    install_done(&tab, BodyStore::in_memory(&br#"{"v":2}"#[..]), cx);
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("response.json");
+    std::fs::write(&dest, b"old content").unwrap();
+
+    // 第一次：对话框从默认目录打开（不是我们的临时目录）
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
+    let chosen = dest.clone();
+    let expected_dir = dir.path().to_path_buf();
+    cx.simulate_new_path_selection(move |opened_in| {
+        assert_ne!(opened_in, expected_dir.as_path());
+        Some(chosen)
+    });
+    wait_until(cx, |cx| cx.read(|app| tab.read(app).notice.is_some()));
+    assert_eq!(std::fs::read(&dest).unwrap(), br#"{"v":2}"#);
+    // 原子写：目录里只有目标文件，没有 .tmp* 残留
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["response.json"]);
+
+    // 第二次：对话框从上次保存的目录打开
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.notice = None;
+            cx.notify();
+        })
+    });
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.save_body(window, cx)));
+    let second = dir.path().join("again.json");
+    let chosen = second.clone();
+    let expected_dir = dir.path().to_path_buf();
+    cx.simulate_new_path_selection(move |opened_in| {
+        assert_eq!(opened_in, expected_dir.as_path());
+        Some(chosen)
+    });
+    wait_until(cx, |cx| cx.read(|app| tab.read(app).notice.is_some()));
+    assert_eq!(std::fs::read(&second).unwrap(), br#"{"v":2}"#);
 }
 
 #[gpui::test]

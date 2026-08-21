@@ -95,6 +95,22 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// 原子拷贝：把 `src` 整个复制到 `dest` 同目录的临时文件，fsync 后 rename 覆盖。
+/// 给"保存响应到文件"的落盘拷贝用：中途失败（磁盘满、源文件消失）不会留下半个 `dest`。
+pub fn copy_atomic(src: &Path, dest: &Path) -> io::Result<()> {
+    let dir = dest
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
+    // 先打开源文件：源不存在时不要在目标目录留下任何痕迹
+    let mut reader = fs::File::open(src)?;
+    fs::create_dir_all(dir)?;
+    let mut tmp = NamedTempFile::new_in(dir)?;
+    io::copy(&mut reader, &mut tmp)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(dest).map_err(|e| e.error)?;
+    Ok(())
+}
+
 pub fn remove_if_exists(path: &Path) -> io::Result<()> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -387,5 +403,35 @@ mod tests {
             Ok(()) => eprintln!("running with elevated permissions; skipping unwritable check"),
             Err(other) => panic!("expected Unwritable, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn copy_atomic_copies_replaces_and_leaves_no_temp_files() {
+        let (_dir, layout) = layout();
+        let src = layout.root().join("src.bin");
+        std::fs::write(&src, b"0123456789").unwrap();
+        let dest = layout.requests_dir().join("out.bin");
+        std::fs::write(&dest, b"old").unwrap();
+        copy_atomic(&src, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"0123456789");
+        assert_eq!(entries(&layout.requests_dir()), vec!["out.bin"]);
+        // 目标目录不存在时创建
+        let nested = layout.root().join("deep").join("out.bin");
+        copy_atomic(&src, &nested).unwrap();
+        assert_eq!(std::fs::read(&nested).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn copy_atomic_with_missing_source_leaves_destination_untouched() {
+        let (_dir, layout) = layout();
+        let dest = layout.root().join("keep.bin");
+        std::fs::write(&dest, b"keep").unwrap();
+        let err = copy_atomic(&layout.root().join("nope.bin"), &dest).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"keep");
+        assert_eq!(
+            entries(layout.root()),
+            vec!["drafts", "keep.bin", "requests"]
+        );
     }
 }

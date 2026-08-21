@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use getcat_core::http::{
     self, BodyStore, Client, HttpRequest, HttpResponse, Progress, RequestError,
 };
+use getcat_core::store::{copy_atomic, write_atomic};
 use gpui::{App, Global, Task};
 use gpui_tokio::Tokio;
 use tokio::sync::mpsc;
@@ -29,16 +30,17 @@ pub fn send(
     })
 }
 
-/// 在 tokio 上把响应体写到 `dest`：Memory 直接写，Spilled 拷贝临时文件。
-/// 返回的 Task 被 drop 即中止写入（目标文件可能残缺，由用户重试）。
+/// 在 tokio 的阻塞线程池上把响应体**原子**写到 `dest`：Memory 走 `write_atomic`，Spilled 走 `copy_atomic`
+/// （同目录临时文件 → fsync → rename）。中途失败不会留下半个目标文件；
+/// drop 返回的 Task 只是不再等待结果（阻塞任务本身无法打断），目标路径仍然要么完整要么不变。
 pub fn save_body(cx: &App, body: BodyStore, dest: PathBuf) -> Task<anyhow::Result<()>> {
     Tokio::spawn_result(cx, async move {
-        match body {
-            BodyStore::Memory(bytes) => tokio::fs::write(&dest, &bytes[..]).await?,
-            BodyStore::Spilled { file, .. } => {
-                tokio::fs::copy(file.path(), &dest).await?;
-            }
-        }
+        tokio::task::spawn_blocking(move || match &body {
+            BodyStore::Memory(bytes) => write_atomic(&dest, bytes),
+            // `body` 持有 Arc<SpillFile>，拷贝期间临时文件不会被删除
+            BodyStore::Spilled { file, .. } => copy_atomic(file.path(), &dest),
+        })
+        .await??;
         Ok(())
     })
 }

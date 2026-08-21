@@ -65,7 +65,7 @@ impl RequestTab {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .when_some(self.save_notice.clone(), |h, notice| {
+                            .when_some(self.notice.clone(), |h, notice| {
                                 h.child(
                                     div()
                                         .text_xs()

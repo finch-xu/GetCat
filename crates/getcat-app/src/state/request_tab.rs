@@ -1,6 +1,6 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -13,9 +13,9 @@ use getcat_core::url::extract_path_params;
 // 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use gpui::{
-    App, AppContext, Context, Entity, IntoElement, ParentElement, PathPromptOptions, Render,
-    ScrollStrategy, SharedString, Styled, Subscription, Task, UniformListScrollHandle, Window, div,
-    px,
+    App, AppContext, Context, Entity, Global, IntoElement, ParentElement, PathPromptOptions,
+    Render, ScrollStrategy, SharedString, Styled, Subscription, Task, UniformListScrollHandle,
+    Window, div, px,
 };
 use gpui_component::IndexPath;
 use gpui_component::input::{EditorState, InputEvent, InputState};
@@ -103,6 +103,18 @@ pub fn body_hint_for(len: usize) -> Option<SharedString> {
 /// 序列化与落盘都在写入线程；写入线程再按 500 ms 合并同一 Tab 的重复写入。
 pub(crate) const DRAFT_DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// 上次"保存到文件"选择的目录（进程内记忆，不落盘）；下一次保存对话框从这里打开。
+pub(crate) struct LastSaveDir(pub Option<PathBuf>);
+
+impl Global for LastSaveDir {}
+
+/// 保存对话框的起始目录：上次保存的目录，否则 home。
+fn save_dialog_dir(cx: &App) -> PathBuf {
+    cx.try_global::<LastSaveDir>()
+        .and_then(|d| d.0.clone())
+        .unwrap_or_else(|| std::env::home_dir().unwrap_or_default())
+}
+
 pub struct RequestTab {
     /// Tab 的稳定标识：也是草稿文件名 `drafts/<id>.json`。
     pub id: TabId,
@@ -136,8 +148,8 @@ pub struct RequestTab {
     pub body_scroll: UniformListScrollHandle,
     pub headers_scroll: UniformListScrollHandle,
     pub response: ResponseState,
-    /// 最近一次"保存到文件"的结果提示；重新发送时清空。
-    pub save_notice: Option<SharedString>,
+    /// 工具栏右侧的一行提示（保存结果、搜索不可用等）；重新发送时清空。
+    pub notice: Option<SharedString>,
     pub generation: u64,
     /// 去抖中的草稿写入任务；每次改动替换（drop 即取消旧计时器）。
     draft_save: Option<Task<()>>,
@@ -239,7 +251,7 @@ impl RequestTab {
             body_scroll: UniformListScrollHandle::new(),
             headers_scroll: UniformListScrollHandle::new(),
             response: ResponseState::Idle,
-            save_notice: None,
+            notice: None,
             generation: 0,
             draft_save: None,
             _subs: subs,
@@ -551,7 +563,7 @@ impl RequestTab {
             }
         };
         self.prepare_error = None;
-        self.save_notice = None;
+        self.notice = None;
         self.generation += 1;
         let generation = self.generation;
 
@@ -688,7 +700,8 @@ impl RequestTab {
         cx.notify();
     }
 
-    /// "保存到文件"：弹系统保存对话框，选中后在 tokio 上写入 / 拷贝，完成后在状态行显示结果。
+    /// "保存到文件"：弹系统保存对话框（从上次保存的目录打开），选中后在 tokio 上原子写入 / 拷贝，
+    /// 完成后在工具栏显示结果并记住目录。
     pub fn save_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ResponseState::Done { body, view } = &self.response else {
             return;
@@ -696,8 +709,8 @@ impl RequestTab {
         let body = body.clone();
         let suggested = format!("response.{}", file_extension(view.kind));
         let generation = self.generation;
-        let home = std::env::home_dir().unwrap_or_default();
-        let rx = cx.prompt_for_new_path(&home, Some(suggested.as_str()));
+        let dir = save_dialog_dir(cx);
+        let rx = cx.prompt_for_new_path(&dir, Some(suggested.as_str()));
         cx.spawn_in(window, async move |this, cx| {
             // 对话框取消 / 出错都静默返回
             let Ok(Ok(Some(dest))) = rx.await else {
@@ -708,11 +721,14 @@ impl RequestTab {
                 Err(e) => Err(e),
             };
             let _ = this.update(cx, |this, cx| {
+                if result.is_ok() {
+                    cx.set_global(LastSaveDir(dest.parent().map(Path::to_path_buf)));
+                }
                 // 已重发：不再展示旧响应的保存结果
                 if this.generation != generation {
                     return;
                 }
-                this.save_notice = Some(match result {
+                this.notice = Some(match result {
                     Ok(()) => format!("已保存到 {}", dest.display()).into(),
                     Err(e) => format!("保存失败：{e}").into(),
                 });
