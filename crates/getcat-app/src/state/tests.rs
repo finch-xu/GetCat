@@ -18,11 +18,12 @@ use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, TabDraft, TabId, Ulid,
+    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, TabDraft, TabId, ThemePref,
+    Ulid, WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
 use gpui::{AppContext, Entity, IntoElement, TestAppContext, VisualTestContext, point, px, size};
-use gpui_component::input::InputEvent;
+use gpui_component::{ActiveTheme, input::InputEvent};
 use tempfile::TempDir;
 
 use crate::state::request_tab::{
@@ -765,4 +766,113 @@ fn without_store_edits_are_harmless(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(0, window, cx)));
     cx.read(|app| assert_eq!(ws.read(app).tab_count(), 1));
+}
+
+#[gpui::test]
+fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ids: Vec<Ulid> = (0..3).map(|_| Ulid::generate()).collect();
+    for (i, id) in ids.iter().enumerate() {
+        store.write_draft(TabDraft {
+            id: *id,
+            draft: RequestDraft {
+                url: format!("https://api.test/{i}"),
+                ..Default::default()
+            },
+            saved_id: None,
+            dirty: i == 1,
+        });
+    }
+    store.write_workspace(WorkspaceState {
+        tab_order: vec![ids[2], ids[0], ids[1]],
+        active: Some(ids[0]),
+        sidebar_width: Some(300.),
+        sidebar_collapsed: true,
+        theme: ThemePref::Dark,
+    });
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
+
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        let urls: Vec<String> = (0..ws.tab_count())
+            .map(|i| ws.tab_at(i).read(app).url.read(app).value().to_string())
+            .collect();
+        assert_eq!(
+            urls,
+            [
+                "https://api.test/2",
+                "https://api.test/0",
+                "https://api.test/1"
+            ]
+        );
+        assert_eq!(ws.active_index(), 1);
+        assert_eq!(ws.tab_at(1).read(app).id, ids[0]);
+        assert!(ws.tab_at(2).read(app).dirty);
+        assert!(!ws.tab_at(1).read(app).dirty);
+        assert!(ws.sidebar_collapsed());
+        assert_eq!(ws.sidebar_width(), Some(300.));
+        assert_eq!(ws.theme(), ThemePref::Dark);
+        assert!(app.theme().mode.is_dark());
+    });
+}
+
+#[gpui::test]
+fn restore_without_files_creates_one_tab(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let loaded = store.load_all();
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 1);
+        assert_eq!(ws.theme(), ThemePref::System);
+        assert!(!ws.sidebar_collapsed());
+    });
+    // 新建的空 Tab 已经有草稿文件
+    let id = cx.read(|app| ws.read(app).active_tab().read(app).id);
+    assert!(store.flush());
+    assert!(read_draft(&store, id).is_some());
+}
+
+#[gpui::test]
+fn restore_clears_orphan_saved_id(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let id = Ulid::generate();
+    store.write_draft(TabDraft {
+        id,
+        draft: RequestDraft {
+            url: "https://api.test/x".into(),
+            ..Default::default()
+        },
+        saved_id: Some(Ulid::generate()),
+        dirty: false,
+    });
+    assert!(store.flush());
+    let loaded = store.load_all();
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.read(|app| {
+        let tab = ws.read(app).active_tab();
+        let tab = tab.read(app);
+        assert_eq!(tab.id, id);
+        assert_eq!(tab.saved_id, None);
+        assert!(tab.saved_name.is_none());
+        assert!(tab.dirty, "orphaned tab must show as unsaved");
+    });
+}
+
+#[gpui::test]
+fn flush_drafts_writes_every_tab_immediately(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/unflushed", cx);
+    // 不推进虚拟时钟：去抖任务还没触发，由 flush_on_exit 兜底
+    cx.update(|_, cx| store::flush_on_exit(&ws, cx));
+    let id = cx.read(|app| tab.read(app).id);
+    assert_eq!(
+        read_draft(&store, id).unwrap().draft.url,
+        "https://api.test/unflushed"
+    );
 }

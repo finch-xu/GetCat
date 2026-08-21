@@ -470,8 +470,6 @@ impl RequestTab {
 
     /// 用一份 RequestDraft 重建所有输入组件（恢复草稿 / 打开已保存请求）。
     /// 只走不发事件的程序化写入，因此不会置脏；`saved_id` / `saved_name` / `dirty` 由调用方设置。
-    /// （Task 5 接线后移除 allow。）
-    #[allow(dead_code)]
     pub fn load_draft(
         &mut self,
         draft: &RequestDraft,

@@ -1,20 +1,19 @@
 //! 持久化句柄（全局）。Store 不可用时所有写入都是 no-op，UI 只显示横幅（spec §9.4 / §11）。
 
 use getcat_core::store::{Store, StoreError};
-use gpui::{App, Global};
+use gpui::{App, Entity, Global};
+
+use crate::state::workspace::Workspace;
 
 pub struct StoreHandle {
     store: Option<Store>,
-    /// 打开数据目录失败的文案；None 表示可写。（Task 5 的 `banner` 读取后移除 allow。）
-    #[allow(dead_code)]
+    /// 打开数据目录失败的文案；None 表示可写。
     error: Option<String>,
 }
 
 impl Global for StoreHandle {}
 
 /// 安装全局句柄：Ok → 可写；Err → 记录错误文案并以只读模式运行（已读出的数据照常显示）。
-/// （目前只有测试调用；Task 5 在 main.rs 启动时调用后移除 allow。）
-#[allow(dead_code)]
 pub fn install(cx: &mut App, opened: Result<Store, StoreError>) {
     let handle = match opened {
         Ok(store) => StoreHandle {
@@ -36,4 +35,26 @@ pub fn install(cx: &mut App, opened: Result<Store, StoreError>) {
 pub fn store(cx: &App) -> Option<&Store> {
     cx.try_global::<StoreHandle>()
         .and_then(|handle| handle.store.as_ref())
+}
+
+/// 顶部横幅文案：打开数据目录失败，或写入线程最近一次失败（下一次成功后自动消失）。O(1)，可在渲染路径调用。
+pub fn banner(cx: &App) -> Option<String> {
+    let handle = cx.try_global::<StoreHandle>()?;
+    handle.error.clone().or_else(|| {
+        handle
+            .store
+            .as_ref()
+            .and_then(|s| s.last_error())
+            .map(|e| format!("持久化写入失败：{e}"))
+    })
+}
+
+/// 退出 / 关窗前：每个 Tab 立即投递草稿快照（跳过去抖），再等写入线程清空队列（≤ 2 s）。
+pub fn flush_on_exit(workspace: &Entity<Workspace>, cx: &mut App) {
+    workspace.update(cx, |ws, cx| ws.flush_drafts(cx));
+    if let Some(store) = store(cx)
+        && !store.flush()
+    {
+        tracing::warn!("store flush timed out; the last edits may be lost");
+    }
 }

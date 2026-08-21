@@ -1,43 +1,119 @@
-//! 顶层工作区：Tab 列表、侧栏折叠、全局动作。
+//! 顶层工作区：Tab 列表、侧栏、主题、全局动作；负责从磁盘恢复，并把布局变化写回。
 
 // 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入
 // gpui 重导出的 `#[proc_macro_attribute] test`，与标准库 `#[test]` 同名冲突，
 // 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
+use std::rc::Rc;
+
+use getcat_core::model::{SavedRequest, TabDraft, TabId, ThemePref, Ulid, WorkspaceState};
+use getcat_core::store::Loaded;
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, Styled, Window, div, px,
+    App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
+    Render, SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Sizable,
+    ActiveTheme, IconName, Sizable, Theme, ThemeMode,
     button::{Button, ButtonVariants},
-    resizable::{h_resizable, resizable_panel},
+    resizable::{ResizableState, h_resizable, resizable_panel},
     tab::{Tab, TabBar},
     v_flex,
 };
 
-use getcat_core::model::Ulid;
-
 use crate::state::request_tab::RequestTab;
-use crate::state::store::store;
+use crate::state::store::{banner, store};
 use crate::ui::sidebar::render_sidebar;
 use crate::{CloseTab, NewTab, SendRequest, ToggleSidebar};
+
+/// 侧栏默认宽度（spec §7.1）。
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.;
 
 pub struct Workspace {
     tabs: Vec<Entity<RequestTab>>,
     active: usize,
     sidebar_collapsed: bool,
+    /// 用户拖出来的侧栏宽度；None 用默认值。
+    sidebar_width: Option<f32>,
+    sidebar_state: Entity<ResizableState>,
+    theme: ThemePref,
+    /// 已保存请求，按 updated_at 降序；Rc 让侧栏列表的渲染闭包每帧只 clone 指针。
+    saved: Rc<Vec<SavedRequest>>,
     focus_handle: FocusHandle,
+    _subs: Vec<Subscription>,
 }
 
 impl Workspace {
+    /// 空工作区：一个新 Tab。生产路径一律走 `restore(loaded)`（无数据时 `Loaded` 本身就是空的），
+    /// 因此只有测试用得到它；不加 `#[cfg(test)]` 会在 bin crate 里触发 dead_code。
+    #[cfg(test)]
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::restore(Loaded::default(), window, cx)
+    }
+
+    /// 从启动读取的结果重建：按 workspace.json 的顺序恢复 Tab，没有草稿则新建一个空 Tab。
+    pub fn restore(loaded: Loaded, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let Loaded {
+            workspace: state,
+            drafts,
+            requests,
+            errors,
+        } = loaded;
+        for err in &errors {
+            tracing::warn!(path = %err.path.display(), "skipped on load: {}", err.message);
+        }
+        let mut saved = requests;
+        sort_saved(&mut saved);
+        let state = state.unwrap_or_default();
         let mut ws = Self {
             tabs: Vec::new(),
             active: 0,
-            sidebar_collapsed: false,
+            sidebar_collapsed: state.sidebar_collapsed,
+            sidebar_width: state.sidebar_width,
+            sidebar_state: cx.new(|_| ResizableState::default()),
+            theme: state.theme,
+            saved: Rc::new(saved),
             focus_handle: cx.focus_handle(),
+            _subs: Vec::new(),
         };
-        ws.new_tab(window, cx);
+
+        let (drafts, active) = order_drafts(&state, drafts);
+        for d in drafts {
+            let saved_name: Option<SharedString> = d
+                .saved_id
+                .and_then(|id| ws.saved.iter().find(|r| r.id == id))
+                .map(|r| SharedString::from(r.name.clone()));
+            let still_saved = saved_name.is_some();
+            let tab = cx.new(|cx| {
+                let mut tab = RequestTab::new(d.id, window, cx);
+                tab.load_draft(&d.draft, window, cx);
+                // 对应的已保存请求文件已不存在（被手工删除）：退化为有改动的未保存 Tab
+                tab.saved_id = d.saved_id.filter(|_| still_saved);
+                tab.saved_name = saved_name;
+                tab.dirty = d.dirty || (d.saved_id.is_some() && !still_saved);
+                tab
+            });
+            ws.tabs.push(tab);
+        }
+        if ws.tabs.is_empty() {
+            ws.new_tab(window, cx);
+        } else {
+            ws.active = active
+                .and_then(|id| ws.tabs.iter().position(|t| t.read(cx).id == id))
+                .unwrap_or(0);
+            ws.active_tab().update(cx, |t, cx| t.focus_url(window, cx));
+        }
+
+        apply_theme(ws.theme, window, cx);
+        // 跟随系统：系统外观变化时重新同步（固定明 / 暗时忽略）
+        let weak = cx.entity().downgrade();
+        ws._subs
+            .push(window.observe_window_appearance(move |window, cx| {
+                if let Some(ws) = weak.upgrade()
+                    && ws.read(cx).theme == ThemePref::System
+                {
+                    Theme::sync_system_appearance(Some(window), cx);
+                }
+            }));
         ws
     }
 
@@ -53,6 +129,26 @@ impl Workspace {
     #[cfg(test)]
     pub fn active_index(&self) -> usize {
         self.active
+    }
+
+    #[cfg(test)]
+    pub fn tab_at(&self, ix: usize) -> Entity<RequestTab> {
+        self.tabs[ix].clone()
+    }
+
+    #[cfg(test)]
+    pub fn sidebar_collapsed(&self) -> bool {
+        self.sidebar_collapsed
+    }
+
+    #[cfg(test)]
+    pub fn sidebar_width(&self) -> Option<f32> {
+        self.sidebar_width
+    }
+
+    #[cfg(test)]
+    pub fn theme(&self) -> ThemePref {
+        self.theme
     }
 
     pub fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -94,28 +190,49 @@ impl Workspace {
         }
     }
 
+    /// 退出 / 关窗前：每个 Tab 立即投递草稿快照（跳过去抖）。
+    pub fn flush_drafts(&self, cx: &mut Context<Self>) {
+        for tab in &self.tabs {
+            tab.update(cx, |t, cx| t.save_draft_now(cx));
+        }
+    }
+
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let titles: Vec<SharedString> = self.tabs.iter().map(|t| t.read(cx).title(cx)).collect();
+        let titles: Vec<(SharedString, bool)> = self
+            .tabs
+            .iter()
+            .map(|t| {
+                let t = t.read(cx);
+                (t.title(cx), t.dirty)
+            })
+            .collect();
         TabBar::new("request-tabs")
             .w_full()
             .selected_index(self.active)
             .on_click(cx.listener(|this, ix: &usize, _, cx| this.activate(*ix, cx)))
-            .children(titles.into_iter().enumerate().map(|(ix, title)| {
-                Tab::new()
-                    .label(title.clone())
-                    .aria_label(format!("请求 Tab：{title}"))
-                    .suffix(
-                        Button::new(("close-tab", ix))
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::Close)
-                            .tooltip("关闭 Tab")
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                // 阻止冒泡到 Tab 的 on_click，否则关闭后会再触发 activate(ix)
-                                cx.stop_propagation();
-                                this.close_tab(ix, window, cx)
-                            })),
-                    )
+            .children(titles.into_iter().enumerate().map(|(ix, (title, dirty))| {
+                let aria = if dirty {
+                    format!("请求 Tab：{title}（未保存）")
+                } else {
+                    format!("请求 Tab：{title}")
+                };
+                let mut tab = Tab::new().label(title).aria_label(aria);
+                if dirty {
+                    // 未保存改动：标题前的圆点（spec §7.1）
+                    tab = tab.prefix(div().size(px(6.)).rounded_full().bg(cx.theme().primary));
+                }
+                tab.suffix(
+                    Button::new(("close-tab", ix))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Close)
+                        .tooltip("关闭 Tab")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            // 阻止冒泡到 Tab 的 on_click，否则关闭后会再触发 activate(ix)
+                            cx.stop_propagation();
+                            this.close_tab(ix, window, cx)
+                        })),
+                )
             }))
             .suffix(
                 Button::new("new-tab")
@@ -141,13 +258,66 @@ pub(crate) fn active_after_close(active: usize, closing: usize, len: usize) -> u
     }
 }
 
+/// 按 workspace.json 的 tab_order 排列草稿：顺序里没有文件的 id 跳过；没被提到的草稿按 id（即创建时间）追加。
+/// 返回排好序的草稿与（仍然存在的）激活 Tab。
+pub(crate) fn order_drafts(
+    state: &WorkspaceState,
+    mut drafts: Vec<TabDraft>,
+) -> (Vec<TabDraft>, Option<TabId>) {
+    drafts.sort_by_key(|d| d.id);
+    let mut ordered = Vec::with_capacity(drafts.len());
+    for id in &state.tab_order {
+        if let Some(pos) = drafts.iter().position(|d| d.id == *id) {
+            ordered.push(drafts.remove(pos));
+        }
+    }
+    ordered.extend(drafts);
+    let active = state
+        .active
+        .filter(|id| ordered.iter().any(|d| d.id == *id));
+    (ordered, active)
+}
+
+/// 侧栏列表顺序：最近更新在前；同一毫秒内按 id 降序（id 含创建时间）。
+pub(crate) fn sort_saved(list: &mut [SavedRequest]) {
+    list.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+}
+
+/// 把主题偏好应用到 gpui-component 的主题系统：System 跟随窗口外观，其余固定。
+pub(crate) fn apply_theme(pref: ThemePref, window: &mut Window, cx: &mut App) {
+    match pref {
+        ThemePref::System => Theme::sync_system_appearance(Some(window), cx),
+        ThemePref::Light => Theme::change(ThemeMode::Light, Some(window), cx),
+        ThemePref::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
+    }
+}
+
+/// 持久化不可用 / 写入失败的顶部横幅（spec §9.4 / §11）：一行文字，不阻塞任何操作。
+fn render_banner(text: String, cx: &App) -> impl IntoElement {
+    div()
+        .w_full()
+        .px_3()
+        .py_1()
+        .text_xs()
+        .bg(cx.theme().danger.opacity(0.12))
+        .text_color(cx.theme().danger)
+        .child(text)
+}
+
 impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.active_tab();
+        let sidebar_width = px(self.sidebar_width.unwrap_or(SIDEBAR_DEFAULT_WIDTH));
         div()
             .key_context("Workspace")
             .track_focus(&self.focus_handle)
             .size_full()
+            .flex()
+            .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(|this, _: &NewTab, window, cx| this.new_tab(window, cx)))
@@ -162,31 +332,86 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
                 this.active_tab().update(cx, |tab, cx| tab.send(window, cx))
             }))
+            .when_some(banner(cx), |d, text| d.child(render_banner(text, cx)))
             .child(
-                h_resizable("workspace")
-                    .child(
-                        resizable_panel()
-                            .size(px(240.))
-                            .size_range(px(180.)..px(420.))
-                            .visible(!self.sidebar_collapsed)
-                            .child(render_sidebar(cx)),
-                    )
-                    .child(
-                        resizable_panel().child(
-                            v_flex()
-                                .size_full()
-                                .min_w_0()
-                                .child(self.render_tab_bar(cx))
-                                .child(div().flex_1().min_h_0().child(active)),
+                div().flex_1().min_h_0().w_full().child(
+                    h_resizable("workspace")
+                        .with_state(&self.sidebar_state)
+                        .child(
+                            resizable_panel()
+                                .size(sidebar_width)
+                                .size_range(px(180.)..px(420.))
+                                .visible(!self.sidebar_collapsed)
+                                .child(render_sidebar(cx)),
+                        )
+                        .child(
+                            resizable_panel().child(
+                                v_flex()
+                                    .size_full()
+                                    .min_w_0()
+                                    .child(self.render_tab_bar(cx))
+                                    .child(div().flex_1().min_h_0().child(active)),
+                            ),
                         ),
-                    ),
+                ),
             )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::active_after_close;
+    use getcat_core::model::{RequestDraft, TabDraft, Ulid, WorkspaceState};
+
+    use super::{active_after_close, order_drafts};
+
+    fn draft(id: Ulid) -> TabDraft {
+        TabDraft {
+            id,
+            draft: RequestDraft::default(),
+            saved_id: None,
+            dirty: false,
+        }
+    }
+
+    #[test]
+    fn order_follows_tab_order_and_appends_unlisted_by_id() {
+        let a = Ulid::from_parts(1, 0);
+        let b = Ulid::from_parts(2, 0);
+        let c = Ulid::from_parts(3, 0);
+        let missing = Ulid::from_parts(9, 0);
+        let state = WorkspaceState {
+            tab_order: vec![c, missing, a],
+            active: Some(a),
+            ..Default::default()
+        };
+        let (ordered, active) = order_drafts(&state, vec![draft(b), draft(a), draft(c)]);
+        let ids: Vec<Ulid> = ordered.iter().map(|d| d.id).collect();
+        assert_eq!(ids, vec![c, a, b]);
+        assert_eq!(active, Some(a));
+    }
+
+    #[test]
+    fn missing_active_falls_back_to_none() {
+        let a = Ulid::from_parts(1, 0);
+        let state = WorkspaceState {
+            tab_order: vec![a],
+            active: Some(Ulid::from_parts(5, 0)),
+            ..Default::default()
+        };
+        let (ordered, active) = order_drafts(&state, vec![draft(a)]);
+        assert_eq!(ordered.len(), 1);
+        assert_eq!(active, None);
+    }
+
+    #[test]
+    fn empty_state_keeps_drafts_sorted_by_id() {
+        let a = Ulid::from_parts(1, 0);
+        let b = Ulid::from_parts(2, 0);
+        let (ordered, active) = order_drafts(&WorkspaceState::default(), vec![draft(b), draft(a)]);
+        let ids: Vec<Ulid> = ordered.iter().map(|d| d.id).collect();
+        assert_eq!(ids, vec![a, b]);
+        assert_eq!(active, None);
+    }
 
     #[test]
     fn closing_left_of_active_shifts_active_left() {

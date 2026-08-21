@@ -2,10 +2,12 @@ mod bridge;
 mod state;
 mod ui;
 
+use getcat_core::store::{Layout, Loaded, Store, StoreError, load_all};
 use gpui::*;
 use gpui_component::Root;
 use gpui_component_assets::Assets;
 
+use crate::state::store::{flush_on_exit, install};
 use crate::state::workspace::Workspace;
 
 actions!(getcat, [SendRequest, NewTab, CloseTab, ToggleSidebar]);
@@ -52,13 +54,47 @@ fn main() {
             ..Default::default()
         };
         cx.spawn(async move |cx| {
-            cx.open_window(options, |window, cx| {
-                let workspace = cx.new(|cx| Workspace::new(window, cx));
-                cx.new(|cx| Root::new(workspace, window, cx))
-            })
-            .expect("failed to open window");
-            cx.update(|cx| cx.activate(true));
+            // 启动读取在后台线程完成（spec §9.4）；数据目录不可写时仍以只读方式恢复已有数据，只显示横幅
+            let (opened, loaded) = cx.background_spawn(async move { open_store() }).await;
+            let opened_window = cx.update(|cx| {
+                install(cx, opened);
+                cx.open_window(options, |window, cx| {
+                    let workspace = cx.new(|cx| Workspace::restore(loaded, window, cx));
+                    // 关窗与退出都先把每个 Tab 的草稿快照投递出去，再等待写入线程清空队列（≤ 2 s）
+                    window.on_window_should_close(cx, {
+                        let workspace = workspace.clone();
+                        move |_, cx| {
+                            flush_on_exit(&workspace, cx);
+                            true
+                        }
+                    });
+                    cx.on_app_quit({
+                        let workspace = workspace.clone();
+                        move |cx| {
+                            flush_on_exit(&workspace, cx);
+                            async {}
+                        }
+                    })
+                    .detach();
+                    cx.new(|cx| Root::new(workspace, window, cx))
+                })
+            });
+            // AsyncApp::update 在本版本直接返回闭包结果（不再包一层 Result）
+            match opened_window {
+                Ok(_) => cx.update(|cx| cx.activate(true)),
+                Err(e) => tracing::error!("failed to open window: {e}"),
+            }
         })
         .detach();
     });
+}
+
+/// 后台线程：定位数据目录 → 读取全部文件 → 打开写入器。
+/// 读取放在 `Store::open` 之前：目录不可写时也能恢复已有数据（只读模式）。
+fn open_store() -> (Result<Store, StoreError>, Loaded) {
+    let Some(root) = Store::default_root() else {
+        return (Err(StoreError::NoDataDir), Loaded::default());
+    };
+    let loaded = load_all(&Layout::new(root.clone()));
+    (Store::open(root), loaded)
 }
