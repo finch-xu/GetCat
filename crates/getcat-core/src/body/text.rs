@@ -86,6 +86,17 @@ pub struct ClippedLine<'a> {
     pub hidden_bytes: usize,
 }
 
+/// 裁掉字节串**末尾被截断的多字节字符**（落盘响应只保留前 HEAD_BYTES，切口可能落在一个字的中间）。
+/// 只处理"末尾不完整"这一种情况；合法输入与中间含非法字节的输入原样返回，交给调用方做有损转换。
+pub fn trim_partial_utf8(bytes: &[u8]) -> &[u8] {
+    match std::str::from_utf8(bytes) {
+        Ok(_) => bytes,
+        // error_len() == None：错误是"输入在一个字符中间结束"，valid_up_to 之前全部合法
+        Err(e) if e.error_len().is_none() => &bytes[..e.valid_up_to()],
+        Err(_) => bytes,
+    }
+}
+
 /// 超过 MAX_LINE_CHARS 个字符的行只保留前 MAX_LINE_CHARS 个字符（按字符边界切）。
 /// `hidden_bytes` 用剩余字节数（`line.len() - cut`）而非重新数字符，保持 O(MAX_LINE_CHARS)：
 /// 单行几 MB 时若数剩余字符数会在每帧渲染中做一次 O(整行) 扫描。
@@ -177,5 +188,20 @@ mod tests {
         let c = clip_line(&line);
         assert_eq!(c.text.len(), MAX_LINE_CHARS);
         assert_eq!(c.hidden_bytes, 3_000_000 - MAX_LINE_CHARS);
+    }
+
+    #[test]
+    fn trim_partial_utf8_only_drops_a_truncated_tail() {
+        let full = "名名".as_bytes();
+        assert_eq!(trim_partial_utf8(full), full);
+        // 截掉最后一个字的最后 1 字节：尾部是不完整的多字节序列 → 裁掉整个不完整字符
+        let cut = &full[..full.len() - 1];
+        assert_eq!(trim_partial_utf8(cut), "名".as_bytes());
+        // 只剩 1 字节的不完整前导字节 → 空
+        assert_eq!(trim_partial_utf8(&full[..1]), b"");
+        // 中间有非法字节：不是"末尾截断"，原样返回（由调用方做有损转换）
+        let bad = [b'a', 0xFF, b'b'];
+        assert_eq!(trim_partial_utf8(&bad), &bad[..]);
+        assert_eq!(trim_partial_utf8(b""), b"");
     }
 }

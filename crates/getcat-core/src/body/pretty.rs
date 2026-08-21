@@ -5,6 +5,9 @@
 
 const INDENT: &[u8] = b"  ";
 pub const CHECK_INTERVAL: usize = 1 << 20;
+/// 缩进深度上限：更深的层级不再增加缩进。没有上限时，10 万层嵌套的 `[[[[…` 会让输出按深度平方膨胀
+/// （每层一行、每行 2·深度 个空格），远超 1.5× 的预分配与 3× 的内存预算。
+pub const MAX_INDENT_DEPTH: usize = 64;
 
 pub fn pretty_json(input: &[u8]) -> Vec<u8> {
     pretty_json_cancellable(input, || false).expect("never cancelled")
@@ -88,7 +91,108 @@ pub fn pretty_json_cancellable(
 #[inline]
 fn newline(out: &mut Vec<u8>, depth: usize) {
     out.push(b'\n');
-    for _ in 0..depth {
+    for _ in 0..depth.min(MAX_INDENT_DEPTH) {
         out.extend_from_slice(INDENT);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pretty(s: &str) -> String {
+        String::from_utf8(pretty_json(s.as_bytes())).unwrap()
+    }
+
+    #[test]
+    fn formats_nested_structures() {
+        let input = r#"{"a":1,"b":[1,2,{"c":"x}y"}],"d":{},"e":[ ]}"#;
+        let expected = "{\n  \"a\": 1,\n  \"b\": [\n    1,\n    2,\n    {\n      \"c\": \"x}y\"\n    }\n  ],\n  \"d\": {},\n  \"e\": []\n}";
+        assert_eq!(pretty(input), expected);
+    }
+
+    #[test]
+    fn is_idempotent() {
+        let once = pretty(r#"{"a":[1,{"b":null}],"c":"d"}"#);
+        assert_eq!(pretty(&once), once);
+    }
+
+    #[test]
+    fn preserves_escapes_and_string_contents() {
+        assert_eq!(
+            pretty(r#"{"q":"a\"b","bs":"\\","sp":"x  y","colon":"a:b"}"#),
+            "{\n  \"q\": \"a\\\"b\",\n  \"bs\": \"\\\\\",\n  \"sp\": \"x  y\",\n  \"colon\": \"a:b\"\n}"
+        );
+    }
+
+    #[test]
+    fn passes_through_unicode_bytes() {
+        assert_eq!(pretty(r#"{"名":"值"}"#), "{\n  \"名\": \"值\"\n}");
+    }
+
+    #[test]
+    fn scalar_top_level_unchanged() {
+        assert_eq!(pretty("123"), "123");
+        assert_eq!(pretty("\"s\""), "\"s\"");
+    }
+
+    #[test]
+    fn malformed_input_does_not_panic() {
+        let _ = pretty_json(b"{{{");
+        let _ = pretty_json(b"]]]");
+        let _ = pretty_json(b"{\"a\":");
+        let _ = pretty_json(&[0xFF, 0xFE, b'{']);
+    }
+
+    #[test]
+    fn cancellation_checked_at_start() {
+        assert_eq!(pretty_json_cancellable(b"{\"a\":1}", || true), None);
+    }
+
+    #[test]
+    fn cancellation_checked_inside_long_whitespace_runs() {
+        let big = format!("[{}]", " ".repeat(2 * CHECK_INTERVAL));
+        let mut calls = 0;
+        let out = pretty_json_cancellable(big.as_bytes(), || {
+            calls += 1;
+            calls > 2
+        });
+        assert_eq!(out, None);
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn cancellation_checked_every_interval() {
+        let big = format!("[{}]", "1,".repeat(CHECK_INTERVAL)); // > 2 MiB
+        let mut calls = 0;
+        let out = pretty_json_cancellable(big.as_bytes(), || {
+            calls += 1;
+            calls > 2
+        });
+        assert_eq!(out, None);
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn indent_depth_is_capped() {
+        let depth = 4 * MAX_INDENT_DEPTH;
+        let input = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
+        let out = pretty(&input);
+        let max_indent = out
+            .lines()
+            .map(|l| l.len() - l.trim_start().len())
+            .max()
+            .unwrap();
+        assert_eq!(max_indent, 2 * MAX_INDENT_DEPTH);
+        // 输出大小受缩进上限约束：每行最多 2·MAX_INDENT_DEPTH 个空格 + 1 个符号 + 换行
+        assert!(
+            out.len() <= input.len() * (2 * MAX_INDENT_DEPTH + 2),
+            "{}",
+            out.len()
+        );
+        // 结构不变：括号数与输入相同，且仍然幂等
+        assert_eq!(out.matches('[').count(), depth);
+        assert_eq!(out.matches(']').count(), depth);
+        assert_eq!(pretty(&out), out);
     }
 }

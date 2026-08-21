@@ -25,19 +25,24 @@ impl LineIndex {
             bytes.len() <= u32::MAX as usize,
             "LineIndex supports at most 4 GiB of text"
         );
-        let mut starts: Vec<u32> = Vec::with_capacity(bytes.len() / 16 + 1);
+        if should_cancel() {
+            return None;
+        }
+        // 先数一遍换行拿到精确行数：多一次 memchr 扫描（64 MiB 约 10–30 ms，在后台线程），
+        // 换来 Vec 不再倍增扩容——峰值内存等于最终值，也不需要 shrink_to_fit。
+        let line_count = if bytes.is_empty() {
+            0
+        } else {
+            let newlines = memchr::memchr_iter(b'\n', bytes).count();
+            // 末尾的换行不多算一行
+            newlines + usize::from(bytes[bytes.len() - 1] != b'\n')
+        };
+        let mut starts: Vec<u32> = Vec::with_capacity(line_count);
         if !bytes.is_empty() {
             starts.push(0);
         }
-        // 每 CHECK_INTERVAL 字节至少检查一次取消（含偏移 0），与换行密度无关。
         let mut chunk_start = 0usize;
-        loop {
-            if should_cancel() {
-                return None;
-            }
-            if chunk_start >= bytes.len() {
-                break;
-            }
+        while chunk_start < bytes.len() {
             let chunk_end = (chunk_start + CHECK_INTERVAL).min(bytes.len());
             for pos in memchr::memchr_iter(b'\n', &bytes[chunk_start..chunk_end]) {
                 let next = chunk_start + pos + 1;
@@ -46,8 +51,11 @@ impl LineIndex {
                 }
             }
             chunk_start = chunk_end;
+            if should_cancel() {
+                return None;
+            }
         }
-        starts.shrink_to_fit();
+        debug_assert_eq!(starts.len(), line_count);
         Some(LineIndex {
             starts,
             total_len: bytes.len(),
@@ -149,5 +157,23 @@ mod tests {
         });
         assert_eq!(out, None);
         assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn capacity_is_exact() {
+        for bytes in [
+            &b""[..],
+            b"abc",
+            b"a\nb\n",
+            &vec![b'x'; 3 * CHECK_INTERVAL][..],
+        ] {
+            let ix = LineIndex::build(bytes);
+            assert_eq!(
+                ix.heap_bytes(),
+                ix.len() * std::mem::size_of::<u32>(),
+                "{} bytes",
+                bytes.len()
+            );
+        }
     }
 }
