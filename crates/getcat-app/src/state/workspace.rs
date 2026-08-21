@@ -10,7 +10,7 @@ use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, Styled, Subscription, Window, div, px,
+    Render, SharedString, Styled, Subscription, UniformListScrollHandle, Window, div, px,
 };
 use gpui_component::{
     ActiveTheme, IconName, Root, Sizable, Theme, ThemeMode, WindowExt,
@@ -39,6 +39,8 @@ pub struct Workspace {
     theme: ThemePref,
     /// 已保存请求，按 updated_at 降序；Rc 让侧栏列表的渲染闭包每帧只 clone 指针。
     saved: Rc<Vec<SavedRequest>>,
+    /// 侧栏列表的滚动句柄。
+    saved_scroll: UniformListScrollHandle,
     focus_handle: FocusHandle,
     _subs: Vec<Subscription>,
 }
@@ -73,6 +75,7 @@ impl Workspace {
             sidebar_state: cx.new(|_| ResizableState::default()),
             theme: state.theme,
             saved: Rc::new(saved),
+            saved_scroll: UniformListScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             _subs: Vec::new(),
         };
@@ -250,10 +253,119 @@ impl Workspace {
         }
     }
 
-    /// 侧栏列表读取用（Task 8 接线后移除 allow）。
-    #[allow(dead_code)]
+    /// 侧栏列表读取用。
     pub(crate) fn saved(&self) -> &[SavedRequest] {
         &self.saved
+    }
+
+    /// 渲染闭包用：每帧只 clone 一个 Rc。
+    pub(crate) fn saved_rc(&self) -> Rc<Vec<SavedRequest>> {
+        self.saved.clone()
+    }
+
+    pub(crate) fn saved_scroll(&self) -> &UniformListScrollHandle {
+        &self.saved_scroll
+    }
+
+    /// 侧栏点击：已有 Tab 打开着这条 → 激活它；否则新建 Tab 载入。
+    pub fn open_saved(&mut self, id: Ulid, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ix) = self
+            .tabs
+            .iter()
+            .position(|t| t.read(cx).saved_id == Some(id))
+        {
+            self.activate(ix, cx);
+            return;
+        }
+        let Some(request) = self.saved.iter().find(|r| r.id == id).cloned() else {
+            return;
+        };
+        self.new_tab(window, cx);
+        let tab = self.active_tab();
+        tab.update(cx, |t, cx| {
+            t.load_draft(&request.draft, window, cx);
+            t.saved_id = Some(id);
+            t.saved_name = Some(request.name.clone().into());
+            t.dirty = false;
+            t.save_draft_now(cx);
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// 删除已保存请求：移出列表、删文件；正打开着它的 Tab 退化为未保存、有改动。
+    pub fn delete_saved(&mut self, id: Ulid, cx: &mut Context<Self>) {
+        let list = Rc::make_mut(&mut self.saved);
+        let before = list.len();
+        list.retain(|r| r.id != id);
+        if list.len() == before {
+            return;
+        }
+        if let Some(store) = store(cx) {
+            store.delete_request(id);
+        }
+        for tab in &self.tabs {
+            if tab.read(cx).saved_id == Some(id) {
+                tab.update(cx, |t, cx| {
+                    t.saved_id = None;
+                    t.saved_name = None;
+                    t.dirty = true;
+                    t.save_draft_now(cx);
+                    cx.notify();
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    /// 删除前确认（需要窗口根视图是 gpui_component::Root；测试不走这里）。
+    pub(crate) fn confirm_delete_saved(
+        &mut self,
+        id: Ulid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 已有对话框时再开一个会叠层且抢焦点（Plan 3 决策 P3-3）：忽略这次请求。
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let Some(name) = self
+            .saved
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.name.clone())
+        else {
+            return;
+        };
+        let weak = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let weak = weak.clone();
+            let name = name.clone();
+            dialog
+                .title("删除已保存请求")
+                .content(move |content, _, _| {
+                    content.child(format!("确定删除「{name}」？此操作不可撤销。"))
+                })
+                // 与 prompt_save_name 同理：普通 Dialog 不会自动生成 footer，
+                // button_props 只对 AlertDialog 生效，按钮必须自己拼。
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new()
+                                .child(Button::new("cancel-delete").outline().label("取消")),
+                        )
+                        .child(
+                            DialogAction::new()
+                                .child(Button::new("ok-delete").danger().label("删除")),
+                        ),
+                )
+                .on_ok(move |_, _, cx| {
+                    if let Some(ws) = weak.upgrade() {
+                        ws.update(cx, |ws, cx| ws.delete_saved(id, cx));
+                    }
+                    true
+                })
+        });
     }
 
     /// ⌘S / "保存"按钮：保存过的 Tab 直接覆盖；否则弹名字对话框。
@@ -334,6 +446,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 已有对话框时不叠加第二个（Plan 3 决策 P3-3）。
+        if window.has_active_dialog(cx) {
+            return;
+        }
         let default_name = tab.read(cx).title(cx);
         let input = cx.new(|cx| {
             InputState::new(window, cx)

@@ -34,6 +34,7 @@ use crate::state::store;
 use crate::state::workspace::Workspace;
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::KvTable;
+use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
     cx.update(|cx| {
@@ -1024,4 +1025,122 @@ fn empty_name_falls_back_to_tab_title(cx: &mut TestAppContext) {
         cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "   ".into(), cx)));
     assert!(store.flush());
     assert_eq!(read_request(&store, id).unwrap().name, "/users/42");
+}
+
+#[gpui::test]
+fn open_saved_opens_tab_then_focuses_existing(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/items/7", cx);
+    let id =
+        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "条目".into(), cx)));
+    // 关掉这个 Tab（自动补一个空 Tab），再从侧栏打开
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(0, window, cx)));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.open_saved(id, window, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 2);
+        assert_eq!(ws.active_index(), 1);
+        let t = ws.active_tab();
+        let t = t.read(app);
+        assert_eq!(t.saved_id, Some(id));
+        assert_eq!(t.title(app).as_ref(), "条目");
+        assert_eq!(t.url.read(app).value().as_ref(), "https://api.test/items/7");
+        assert!(!t.dirty);
+    });
+    // 再次打开同一条：聚焦已有 Tab，不新建
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.activate(0, cx);
+            ws.open_saved(id, window, cx);
+        })
+    });
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 2);
+        assert_eq!(ws.active_index(), 1);
+    });
+    // 打开的 Tab 的草稿记录了来源
+    let opened = cx.read(|app| ws.read(app).active_tab().read(app).id);
+    assert!(store.flush());
+    assert_eq!(read_draft(&store, opened).unwrap().saved_id, Some(id));
+    // 不存在的 id：no-op
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.open_saved(Ulid::generate(), window, cx)));
+    cx.read(|app| assert_eq!(ws.read(app).tab_count(), 2));
+}
+
+#[gpui::test]
+fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/gone", cx);
+    let id =
+        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "待删".into(), cx)));
+    assert!(store.flush());
+    assert_eq!(request_files(&store), 1);
+
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.delete_saved(id, cx)));
+    assert!(store.flush());
+    assert_eq!(request_files(&store), 0);
+    cx.read(|app| {
+        assert!(ws.read(app).saved().is_empty());
+        let t = tab.read(app);
+        assert_eq!(t.saved_id, None);
+        assert!(t.saved_name.is_none());
+        assert!(t.dirty, "tab content survives as an unsaved draft");
+        assert_eq!(t.title(app).as_ref(), "/gone");
+    });
+    let tab_id = cx.read(|app| tab.read(app).id);
+    assert_eq!(read_draft(&store, tab_id).unwrap().saved_id, None);
+    // 删除不存在的 id 是 no-op
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.delete_saved(Ulid::generate(), cx)));
+}
+
+#[gpui::test]
+fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let first_tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&first_tab, "https://api.test/first", cx);
+    let first = cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(first_tab.clone(), "第一".into(), cx)
+        })
+    });
+    // 真实时钟前进，保证 updated_at 不同
+    std::thread::sleep(Duration::from_millis(2));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    let second_tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&second_tab, "https://api.test/second", cx);
+    let second = cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(second_tab.clone(), "第二".into(), cx)
+        })
+    });
+    cx.read(|app| {
+        let saved = ws.read(app).saved();
+        let ids: Vec<Ulid> = saved.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![second, first]);
+    });
+
+    // 真正绘制一帧：侧栏 uniform_list 完成布局，内容高度 = 行高 × 2。
+    // 先 blur：聚焦中的 Input 在渲染时会调用 macOS 的 set_text_content_type，
+    // 而测试窗口没有真实平台窗口句柄（gpui TestWindow::window_handle 是 unimplemented!）。
+    cx.update(|window, _| window.blur());
+    let ws_element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        ws_element.into_any_element()
+    });
+    cx.read(|app| {
+        let laid_out = ws
+            .read(app)
+            .saved_scroll()
+            .0
+            .borrow()
+            .last_item_size
+            .expect("saved list was laid out");
+        assert_eq!(laid_out.contents.height, px(SAVED_ROW_HEIGHT * 2.));
+    });
 }
