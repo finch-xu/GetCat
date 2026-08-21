@@ -18,8 +18,8 @@ use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, TabDraft, TabId, ThemePref,
-    Ulid, WorkspaceState,
+    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, SavedRequest, TabDraft,
+    TabId, ThemePref, Ulid, WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
 use gpui::{AppContext, Entity, IntoElement, TestAppContext, VisualTestContext, point, px, size};
@@ -77,6 +77,23 @@ pub(crate) fn read_draft(store: &Store, id: TabId) -> Option<TabDraft> {
 pub(crate) fn read_workspace(store: &Store) -> Option<WorkspaceState> {
     let bytes = std::fs::read(store.layout().workspace_path()).ok()?;
     decode(&bytes).ok()
+}
+
+pub(crate) fn read_request(store: &Store, id: Ulid) -> Option<SavedRequest> {
+    let bytes = std::fs::read(store.layout().request_path(id)).ok()?;
+    decode(&bytes).ok()
+}
+
+/// requests/ 目录下 .json 文件数。
+pub(crate) fn request_files(store: &Store) -> usize {
+    std::fs::read_dir(store.layout().requests_dir())
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 pub(crate) fn set_url_and_send(tab: &Entity<RequestTab>, url: &str, cx: &mut VisualTestContext) {
@@ -935,4 +952,76 @@ fn cycle_theme_walks_system_light_dark(cx: &mut TestAppContext) {
             assert_eq!(ws.theme(), ThemePref::System);
         })
     });
+}
+
+#[gpui::test]
+fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users", cx);
+    cx.read(|app| assert!(tab.read(app).dirty));
+
+    let id = cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab.clone(), "  用户列表 ".into(), cx)
+        })
+    });
+    assert!(store.flush());
+    let req = read_request(&store, id).expect("requests/<ulid>.json written");
+    assert_eq!(req.name, "用户列表");
+    assert_eq!(req.draft.url, "https://api.test/users");
+    assert_eq!(req.draft.method, Method::Get);
+    assert_eq!(req.created_at, req.updated_at);
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.saved().len(), 1);
+        let t = tab.read(app);
+        assert_eq!(t.saved_id, Some(id));
+        assert!(!t.dirty);
+        assert_eq!(t.title(app).as_ref(), "用户列表");
+    });
+    // 草稿文件也记录了来源与干净状态
+    let tab_id = cx.read(|app| tab.read(app).id);
+    let draft = read_draft(&store, tab_id).unwrap();
+    assert_eq!((draft.saved_id, draft.dirty), (Some(id), false));
+}
+
+#[gpui::test]
+fn save_active_overwrites_existing_without_prompt(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/v1", cx);
+    let id =
+        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "接口".into(), cx)));
+    // 真实时钟前进，让 updated_at 可区分
+    std::thread::sleep(Duration::from_millis(2));
+    change_url(&tab, "https://api.test/v2", cx);
+    cx.read(|app| assert!(tab.read(app).dirty));
+
+    // 已有 saved_id：直接覆盖，不弹对话框（测试窗口没有 Root，若弹窗会 panic）
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.save_active(window, cx)));
+    assert!(store.flush());
+    assert_eq!(request_files(&store), 1);
+    let req = read_request(&store, id).unwrap();
+    assert_eq!(req.name, "接口");
+    assert_eq!(req.draft.url, "https://api.test/v2");
+    assert!(req.updated_at > req.created_at);
+    cx.read(|app| {
+        assert!(!tab.read(app).dirty);
+        assert_eq!(ws.read(app).saved()[0].id, id);
+    });
+}
+
+#[gpui::test]
+fn empty_name_falls_back_to_tab_title(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users/42", cx);
+    let id =
+        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "   ".into(), cx)));
+    assert!(store.flush());
+    assert_eq!(read_request(&store, id).unwrap().name, "/users/42");
 }

@@ -5,7 +5,7 @@
 // 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use std::rc::Rc;
 
-use getcat_core::model::{SavedRequest, TabDraft, TabId, ThemePref, Ulid, WorkspaceState};
+use getcat_core::model::{SavedRequest, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms};
 use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -13,8 +13,10 @@ use gpui::{
     Render, SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Sizable, Theme, ThemeMode,
+    ActiveTheme, IconName, Root, Sizable, Theme, ThemeMode, WindowExt,
     button::{Button, ButtonVariants},
+    dialog::{DialogAction, DialogClose, DialogFooter},
+    input::{Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
     tab::{Tab, TabBar},
     v_flex,
@@ -22,7 +24,7 @@ use gpui_component::{
 
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
-use crate::{CloseTab, NewTab, SendRequest, ToggleSidebar};
+use crate::{CloseTab, NewTab, SaveRequest, SendRequest, ToggleSidebar};
 
 /// 侧栏默认宽度（spec §7.1）。
 pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.;
@@ -248,6 +250,135 @@ impl Workspace {
         }
     }
 
+    /// 侧栏列表读取用（Task 8 接线后移除 allow）。
+    #[allow(dead_code)]
+    pub(crate) fn saved(&self) -> &[SavedRequest] {
+        &self.saved
+    }
+
+    /// ⌘S / "保存"按钮：保存过的 Tab 直接覆盖；否则弹名字对话框。
+    pub fn save_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab = self.active_tab();
+        match tab.read(cx).saved_id {
+            Some(id) => self.overwrite_saved(&tab, id, cx),
+            None => self.prompt_save_name(tab, window, cx),
+        }
+    }
+
+    fn overwrite_saved(&mut self, tab: &Entity<RequestTab>, id: Ulid, cx: &mut Context<Self>) {
+        let Some(existing) = self.saved.iter().find(|r| r.id == id).cloned() else {
+            // 列表里已没有这条（文件被外部删除）：当作新保存
+            let name = tab.read(cx).title(cx).to_string();
+            self.finish_save(tab.clone(), name, cx);
+            return;
+        };
+        let request = SavedRequest {
+            draft: tab.read(cx).draft(cx),
+            updated_at: now_ms(),
+            ..existing
+        };
+        let name: SharedString = request.name.clone().into();
+        self.upsert_saved(request, cx);
+        tab.update(cx, |t, cx| {
+            t.saved_name = Some(name);
+            t.mark_clean(cx);
+            t.save_draft_now(cx);
+        });
+        cx.notify();
+    }
+
+    /// 以给定名字保存为一条新请求（空名字回退为 Tab 标题）；返回新 id。
+    pub(crate) fn finish_save(
+        &mut self,
+        tab: Entity<RequestTab>,
+        name: String,
+        cx: &mut Context<Self>,
+    ) -> Ulid {
+        let trimmed = name.trim();
+        let name: String = if trimmed.is_empty() {
+            tab.read(cx).title(cx).to_string()
+        } else {
+            trimmed.to_string()
+        };
+        let request = SavedRequest::new(name.clone(), tab.read(cx).draft(cx));
+        let id = request.id;
+        self.upsert_saved(request, cx);
+        tab.update(cx, |t, cx| {
+            t.saved_id = Some(id);
+            t.saved_name = Some(name.into());
+            t.mark_clean(cx);
+            t.save_draft_now(cx);
+        });
+        cx.notify();
+        id
+    }
+
+    /// 插入或替换列表项、保持排序，并写文件。
+    fn upsert_saved(&mut self, request: SavedRequest, cx: &App) {
+        let list = Rc::make_mut(&mut self.saved);
+        match list.iter_mut().find(|r| r.id == request.id) {
+            Some(slot) => *slot = request.clone(),
+            None => list.push(request.clone()),
+        }
+        sort_saved(list);
+        if let Some(store) = store(cx) {
+            store.write_request(request);
+        }
+    }
+
+    /// 名字对话框：默认名取 Tab 标题；确定后 `finish_save`。
+    /// 需要窗口根视图是 gpui_component::Root（测试窗口没有，测试不走这里）。
+    fn prompt_save_name(
+        &mut self,
+        tab: Entity<RequestTab>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let default_name = tab.read(cx).title(cx);
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("请求名称")
+                .default_value(default_name)
+        });
+        let weak = cx.entity().downgrade();
+        let input_for_focus = input.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let input_for_content = input.clone();
+            let input_for_ok = input.clone();
+            let tab = tab.clone();
+            let weak = weak.clone();
+            dialog
+                .title("保存请求")
+                .content(move |content, _, _| {
+                    content.child(Input::new(&input_for_content).aria_label("请求名称"))
+                })
+                // `button_props` 的 ok_text/cancel_text 只被 AlertDialog 的自动 footer 消费；
+                // 普通 Dialog 必须自己拼 footer，否则 window.open_dialog 只更新状态、画面上不出现按钮。
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new()
+                                .child(Button::new("cancel-save").outline().label("取消")),
+                        )
+                        .child(
+                            DialogAction::new()
+                                .child(Button::new("ok-save").primary().label("保存")),
+                        ),
+                )
+                .on_ok(move |_, _, cx| {
+                    let name = input_for_ok.read(cx).value().to_string();
+                    if let Some(ws) = weak.upgrade() {
+                        ws.update(cx, |ws, cx| {
+                            ws.finish_save(tab.clone(), name, cx);
+                        });
+                    }
+                    true
+                })
+        });
+        // Dialog 打开时会聚焦自身；把焦点交给名称输入框
+        input_for_focus.update(cx, |s, cx| s.focus(window, cx));
+    }
+
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let titles: Vec<(SharedString, bool)> = self
             .tabs
@@ -360,9 +491,13 @@ fn render_banner(text: String, cx: &App) -> impl IntoElement {
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.active_tab();
         let sidebar_width = px(self.sidebar_width.unwrap_or(SIDEBAR_DEFAULT_WIDTH));
+        // gpui-component 的 Root::render() 不会自动画出 Dialog/Sheet/Notification 层，
+        // 需要消费方自己在某处渲染（story crate 的 StoryRoot::render 就是这么接的）；
+        // 否则 window.open_dialog 只会更新状态，画面上什么都不会出现。
+        let dialog_layer = Root::render_dialog_layer(window, cx);
         div()
             .key_context("Workspace")
             .track_focus(&self.focus_handle)
@@ -380,6 +515,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
                 this.active_tab().update(cx, |tab, cx| tab.send(window, cx))
             }))
+            .on_action(
+                cx.listener(|this, _: &SaveRequest, window, cx| this.save_active(window, cx)),
+            )
             .when_some(banner(cx), |d, text| d.child(render_banner(text, cx)))
             .child(
                 div().flex_1().min_h_0().w_full().child(
@@ -406,6 +544,7 @@ impl Render for Workspace {
                         ),
                 ),
             )
+            .children(dialog_layer)
     }
 }
 

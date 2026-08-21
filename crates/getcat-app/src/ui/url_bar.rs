@@ -11,6 +11,7 @@ use gpui_component::{
     v_flex,
 };
 
+use crate::SaveRequest;
 use crate::state::request_tab::RequestTab;
 use crate::ui::method_color;
 
@@ -54,6 +55,15 @@ impl RequestTab {
                             .flex_1()
                             .min_w_0()
                             .child(Input::new(&self.url).cleanable(true).aria_label("请求 URL")),
+                    )
+                    .child(
+                        Button::new("save-request")
+                            .outline()
+                            .label("保存")
+                            .tooltip("保存请求（⌘S / Ctrl S）")
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(SaveRequest), cx)
+                            }),
                     )
                     .child(action_button),
             )

@@ -432,8 +432,7 @@ impl RequestTab {
         cx.notify();
     }
 
-    /// 保存成功后调用（Task 7 接线后移除 allow）。
-    #[allow(dead_code)]
+    /// 保存成功后调用。
     pub(crate) fn mark_clean(&mut self, cx: &mut Context<Self>) {
         self.dirty = false;
         cx.notify();

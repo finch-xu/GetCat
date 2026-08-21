@@ -10,7 +10,10 @@ use gpui_component_assets::Assets;
 use crate::state::store::{flush_on_exit, install};
 use crate::state::workspace::Workspace;
 
-actions!(getcat, [SendRequest, NewTab, CloseTab, ToggleSidebar]);
+actions!(
+    getcat,
+    [SendRequest, NewTab, CloseTab, ToggleSidebar, SaveRequest]
+);
 
 fn primary(key: &str) -> String {
     if cfg!(target_os = "macos") {
@@ -43,6 +46,7 @@ fn main() {
             KeyBinding::new(&primary("t"), NewTab, None),
             KeyBinding::new(&primary("w"), CloseTab, None),
             KeyBinding::new(&primary("b"), ToggleSidebar, None),
+            KeyBinding::new(&primary("s"), SaveRequest, None),
         ]);
 
         let options = WindowOptions {
