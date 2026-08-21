@@ -17,14 +17,22 @@ use std::{
 use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
-use getcat_core::model::{BodyKind, RawFormat, ResponseMeta};
+use getcat_core::model::{
+    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, TabDraft, TabId, Ulid,
+};
+use getcat_core::store::{Store, codec::decode};
 use gpui::{AppContext, Entity, IntoElement, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::input::InputEvent;
+use tempfile::TempDir;
 
-use crate::state::request_tab::{BODY_HINT_BYTES, BodyMode, RequestTab, ResponseSection};
+use crate::state::request_tab::{
+    BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, RequestTab, ResponseSection,
+};
 use crate::state::response::{ResponseState, ResponseView};
+use crate::state::store;
 use crate::state::workspace::Workspace;
 use crate::ui::body_view::LINE_HEIGHT_PX;
+use crate::ui::kv_table::KvTable;
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
     cx.update(|cx| {
@@ -35,7 +43,34 @@ pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
 }
 
 pub(crate) fn new_tab(cx: &mut VisualTestContext) -> Entity<RequestTab> {
-    cx.update(|window, cx| cx.new(|cx| RequestTab::new(1, window, cx)))
+    cx.update(|window, cx| cx.new(|cx| RequestTab::new(Ulid::generate(), window, cx)))
+}
+
+/// 带独立临时数据目录的基座：写入线程是独立 std 线程、`flush` 会阻塞测试线程，
+/// 必须 `allow_parking`；合并窗口取 0，让 `flush` 后立刻能读到文件。
+pub(crate) fn init_with_store(cx: &mut TestAppContext) -> (&mut VisualTestContext, Store, TempDir) {
+    cx.executor().allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_with_delay(dir.path().to_path_buf(), Duration::ZERO).unwrap();
+    cx.update(|cx| store::install(cx, Ok(store.clone())));
+    (init(cx), store, dir)
+}
+
+/// 模拟用户在 URL 栏键入：`set_value` 不发 Change 事件，所以再直接驱动一次事件处理器。
+pub(crate) fn change_url(tab: &Entity<RequestTab>, url: &str, cx: &mut VisualTestContext) {
+    let url = url.to_string();
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let input = t.url.clone();
+            input.update(cx, |u, cx| u.set_value(url, window, cx));
+            t.on_url_event(&input, &InputEvent::Change, window, cx);
+        })
+    });
+}
+
+pub(crate) fn read_draft(store: &Store, id: TabId) -> Option<TabDraft> {
+    let bytes = std::fs::read(store.layout().draft_path(id)).ok()?;
+    decode(&bytes).ok()
 }
 
 pub(crate) fn set_url_and_send(tab: &Entity<RequestTab>, url: &str, cx: &mut VisualTestContext) {
@@ -124,20 +159,22 @@ fn workspace_tabs_add_close_activate(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(ws.tab_count(), 1);
-            assert_eq!(ws.active_tab().read(cx).id, 1);
+            let first = ws.active_tab();
             ws.new_tab(window, cx);
+            let second = ws.active_tab();
             ws.new_tab(window, cx);
             assert_eq!((ws.tab_count(), ws.active_index()), (3, 2));
             ws.activate(0, cx);
             assert_eq!(ws.active_index(), 0);
+            assert_eq!(ws.active_tab(), first);
             ws.close_tab(0, window, cx);
             assert_eq!((ws.tab_count(), ws.active_index()), (2, 0));
-            assert_eq!(ws.active_tab().read(cx).id, 2);
+            assert_eq!(ws.active_tab(), second);
             ws.close_tab(1, window, cx);
             ws.close_tab(0, window, cx);
             // 关掉最后一个 Tab 会自动新建一个空 Tab
             assert_eq!((ws.tab_count(), ws.active_index()), (1, 0));
-            assert_eq!(ws.active_tab().read(cx).id, 4);
+            assert_ne!(ws.active_tab(), second);
         });
     });
 }
@@ -561,4 +598,171 @@ fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
             assert!(t.body_hint.is_none());
         })
     });
+}
+
+#[gpui::test]
+fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| KvTable::new("k", "v", window, cx)));
+    let values = vec![
+        KeyValue::new("a", "1"),
+        KeyValue {
+            key: "b".into(),
+            value: String::new(),
+            enabled: false,
+        },
+    ];
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_values(&values, window, cx);
+            assert_eq!(t.values(cx), values);
+            // 末尾保留一个空行用于新增
+            assert_eq!(t.row_count(), 3);
+            t.set_values(&[], window, cx);
+            assert!(t.values(cx).is_empty());
+            assert_eq!(t.row_count(), 1);
+        })
+    });
+    // Path 参数表（锁定 key）：不补空行
+    let locked =
+        cx.update(|window, cx| cx.new(|cx| KvTable::new("k", "v", window, cx).locked_keys(true)));
+    cx.update(|window, cx| {
+        locked.update(cx, |t, cx| {
+            t.set_values(&values, window, cx);
+            assert_eq!(t.row_count(), 2);
+            assert_eq!(t.values(cx), values);
+        })
+    });
+}
+
+#[gpui::test]
+fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let file = std::env::temp_dir().join(format!("getcat-load-{}.json", std::process::id()));
+    let drafts = vec![
+        RequestDraft {
+            method: Method::Post,
+            url: "https://x.test/{id}?a=1".into(),
+            path_params: vec![KeyValue::new("id", "7")],
+            params: vec![KeyValue {
+                key: "q".into(),
+                value: "v".into(),
+                enabled: false,
+            }],
+            headers: vec![KeyValue::new("X-Token", "t")],
+            body: BodyKind::Raw {
+                format: RawFormat::Xml,
+                text: "<a/>".into(),
+            },
+        },
+        RequestDraft {
+            method: Method::Put,
+            url: "https://x.test/form".into(),
+            body: BodyKind::FormUrlEncoded {
+                fields: vec![KeyValue::new("a", "1")],
+            },
+            ..Default::default()
+        },
+        RequestDraft {
+            method: Method::Delete,
+            url: "https://x.test/file".into(),
+            body: BodyKind::File {
+                path: file.clone(),
+                content_type: Some("application/json".into()),
+            },
+            ..Default::default()
+        },
+        RequestDraft::default(),
+    ];
+    for draft in drafts {
+        cx.update(|window, cx| {
+            tab.update(cx, |t, cx| {
+                t.load_draft(&draft, window, cx);
+                assert_eq!(t.draft(cx), draft);
+                assert!(!t.dirty, "programmatic load must not dirty the tab");
+            })
+        });
+    }
+}
+
+#[gpui::test]
+fn edits_mark_tab_dirty_and_title_prefers_saved_name(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.read(|app| assert!(!tab.read(app).dirty));
+    change_url(&tab, "https://api.test/users/1", cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            assert!(t.dirty);
+            assert_eq!(t.title(cx).as_ref(), "/users/1");
+            t.saved_name = Some("用户详情".into());
+            assert_eq!(t.title(cx).as_ref(), "用户详情");
+            t.mark_clean(cx);
+            assert!(!t.dirty);
+        })
+    });
+}
+
+#[gpui::test]
+fn draft_autosaves_after_debounce(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    let id = cx.read(|app| tab.read(app).id);
+    change_url(&tab, "https://api.test/a", cx);
+    change_url(&tab, "https://api.test/ab", cx);
+    // 去抖窗口未到：还没有任何草稿写入
+    cx.run_until_parked();
+    assert!(store.flush());
+    assert!(read_draft(&store, id).is_none());
+
+    cx.executor().advance_clock(DRAFT_DEBOUNCE);
+    cx.run_until_parked();
+    assert!(store.flush());
+    let draft = read_draft(&store, id).expect("draft file written after debounce");
+    assert_eq!(draft.draft.url, "https://api.test/ab");
+    assert!(draft.dirty);
+    assert_eq!(draft.saved_id, None);
+    // 快照只做一次：两次键入只产生一个草稿写入
+    assert_eq!(store.write_count(), 1);
+}
+
+#[gpui::test]
+fn new_tab_writes_draft_and_close_deletes_it(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let (first, second) = cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            let first = ws.active_tab().read(cx).id;
+            ws.new_tab(window, cx);
+            (first, ws.active_tab().read(cx).id)
+        })
+    });
+    assert!(store.flush());
+    assert!(read_draft(&store, first).is_some());
+    assert!(read_draft(&store, second).is_some());
+
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(1, window, cx)));
+    assert!(store.flush());
+    assert!(read_draft(&store, first).is_some());
+    assert!(read_draft(&store, second).is_none());
+
+    // 关掉最后一个：旧草稿删除，新空 Tab 的草稿出现
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(0, window, cx)));
+    let third = cx.read(|app| ws.read(app).active_tab().read(app).id);
+    assert!(store.flush());
+    assert!(read_draft(&store, first).is_none());
+    assert!(read_draft(&store, third).is_some());
+}
+
+#[gpui::test]
+fn without_store_edits_are_harmless(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/x", cx);
+    cx.executor().advance_clock(DRAFT_DEBOUNCE);
+    cx.run_until_parked();
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(0, window, cx)));
+    cx.read(|app| assert_eq!(ws.read(app).tab_count(), 1));
 }

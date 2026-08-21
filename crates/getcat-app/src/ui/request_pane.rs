@@ -99,7 +99,7 @@ impl RequestTab {
                             .on_click(cx.listener(|this, ix: &usize, _, cx| {
                                 this.body_mode = BodyMode::from_index(*ix);
                                 this.refresh_body_hint(cx);
-                                cx.notify();
+                                this.mark_dirty(cx);
                             }))
                             .child("none")
                             .child("raw")
@@ -116,7 +116,7 @@ impl RequestTab {
                                     this.raw_format =
                                         RawFormat::ALL.get(*ix).copied().unwrap_or(RawFormat::Json);
                                     this.refresh_body_hint(cx);
-                                    cx.notify();
+                                    this.mark_dirty(cx);
                                 }))
                                 .children(
                                     RawFormat::ALL.iter().map(|f| Tab::new().label(f.label())),

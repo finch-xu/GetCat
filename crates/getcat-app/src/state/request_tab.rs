@@ -7,25 +7,27 @@ use std::time::{Duration, Instant};
 use getcat_core::body::tier::ViewTier;
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
-use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft};
+use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft, TabDraft, TabId, Ulid};
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use gpui::{
     App, AppContext, Context, Entity, IntoElement, ParentElement, PathPromptOptions, Render,
-    ScrollStrategy, SharedString, Styled, Subscription, UniformListScrollHandle, Window, div, px,
+    ScrollStrategy, SharedString, Styled, Subscription, Task, UniformListScrollHandle, Window, div,
+    px,
 };
 use gpui_component::IndexPath;
 use gpui_component::input::{EditorState, InputEvent, InputState};
 use gpui_component::resizable::{resizable_panel, v_resizable};
-use gpui_component::select::SelectState;
+use gpui_component::select::{SelectEvent, SelectState};
 use gpui_component::v_flex;
 
 use tokio::sync::mpsc;
 
 use crate::bridge;
 use crate::state::response::{CancelFlag, ResponseState, ResponseView};
+use crate::state::store::store;
 use crate::ui::kv_table::{KvTable, KvTableEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,10 +93,19 @@ pub fn body_hint_for(len: usize) -> Option<SharedString> {
     (len > BODY_HINT_BYTES).then(|| "文本 Body 超过 10 MB，建议改用文件 Body 流式上传".into())
 }
 
+/// 编辑后到投递草稿的去抖：主线程只在窗口结束时做一次 `draft()` 快照（rope → String 拷贝），
+/// 序列化与落盘都在写入线程；写入线程再按 500 ms 合并同一 Tab 的重复写入。
+pub(crate) const DRAFT_DEBOUNCE: Duration = Duration::from_millis(300);
+
 pub struct RequestTab {
-    /// Tab 的稳定标识；当前只由 Workspace 分配，展示与持久化在后续阶段使用。
-    #[allow(dead_code)]
-    pub id: u64,
+    /// Tab 的稳定标识：也是草稿文件名 `drafts/<id>.json`。
+    pub id: TabId,
+    /// 来自哪条已保存请求（保存 / 从侧栏打开时设置；该请求被删除时清空）。
+    pub saved_id: Option<Ulid>,
+    /// 已保存请求的名字：有则作为 Tab 标题。
+    pub saved_name: Option<SharedString>,
+    /// 自上次保存以来是否有改动；Tab 标题前显示圆点。
+    pub dirty: bool,
     pub method: Entity<SelectState<Vec<&'static str>>>,
     pub url: Entity<InputState>,
     pub url_error: Option<String>,
@@ -121,11 +132,13 @@ pub struct RequestTab {
     /// 最近一次"保存到文件"的结果提示；重新发送时清空。
     pub save_notice: Option<SharedString>,
     pub generation: u64,
+    /// 去抖中的草稿写入任务；每次改动替换（drop 即取消旧计时器）。
+    draft_save: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
 impl RequestTab {
-    pub fn new(id: u64, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(id: TabId, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let methods: Vec<&'static str> = Method::ALL.iter().map(|m| m.as_str()).collect();
         let method = cx.new(|cx| SelectState::new(methods, Some(IndexPath::default()), window, cx));
         let url = cx.new(|cx| {
@@ -168,11 +181,25 @@ impl RequestTab {
             })
             .collect();
 
+        // 任何会改变 draft() 的用户操作都经 mark_dirty（置脏 + 去抖写草稿）
         let mut subs = vec![
             cx.subscribe_in(&url, window, Self::on_url_event),
-            cx.subscribe_in(&params, window, |_, _, _: &KvTableEvent, _, cx| cx.notify()),
-            cx.subscribe_in(&headers, window, |_, _, _: &KvTableEvent, _, cx| {
-                cx.notify()
+            cx.subscribe_in(
+                &method,
+                window,
+                |this, _, _: &SelectEvent<Vec<&'static str>>, _, cx| this.mark_dirty(cx),
+            ),
+            cx.subscribe_in(&path_params, window, |this, _, _: &KvTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
+            cx.subscribe_in(&params, window, |this, _, _: &KvTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
+            cx.subscribe_in(&headers, window, |this, _, _: &KvTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
+            cx.subscribe_in(&form, window, |this, _, _: &KvTableEvent, _, cx| {
+                this.mark_dirty(cx)
             }),
         ];
         for (_, editor) in &body_editors {
@@ -182,6 +209,9 @@ impl RequestTab {
 
         Self {
             id,
+            saved_id: None,
+            saved_name: None,
+            dirty: false,
             method,
             url,
             url_error: None,
@@ -204,11 +234,12 @@ impl RequestTab {
             response: ResponseState::Idle,
             save_notice: None,
             generation: 0,
+            draft_save: None,
             _subs: subs,
         }
     }
 
-    fn on_url_event(
+    pub(crate) fn on_url_event(
         &mut self,
         _: &Entity<InputState>,
         ev: &InputEvent,
@@ -221,7 +252,7 @@ impl RequestTab {
                 self.path_params
                     .update(cx, |t, cx| t.sync_keys(&names, window, cx));
                 self.url_error = None;
-                cx.notify();
+                self.mark_dirty(cx);
             }
             InputEvent::PressEnter { .. } => self.send(window, cx),
             _ => {}
@@ -244,6 +275,7 @@ impl RequestTab {
             return;
         }
         self.refresh_body_hint(cx);
+        self.mark_dirty(cx);
     }
 
     /// 按当前 body_mode / raw_format 重新计算超大文本提示：不在 raw 模式时清空；
@@ -286,7 +318,7 @@ impl RequestTab {
                 this.file_path = Some(path);
                 this.file_size = size;
                 this.body_mode = BodyMode::File;
-                cx.notify();
+                this.mark_dirty(cx);
             });
         })
         .detach();
@@ -297,7 +329,7 @@ impl RequestTab {
         // 而不是悄悄退回 none/raw 让用户以为 Body 被清空了。
         self.file_path = None;
         self.file_size = None;
-        cx.notify();
+        self.mark_dirty(cx);
     }
 
     pub fn focus_url(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -367,8 +399,11 @@ impl RequestTab {
         }
     }
 
+    /// Tab 标题：已保存请求名优先，否则取 URL 末段（spec §7.1）。
     pub fn title(&self, cx: &App) -> SharedString {
-        tab_title(&self.url.read(cx).value())
+        self.saved_name
+            .clone()
+            .unwrap_or_else(|| tab_title(&self.url.read(cx).value()))
     }
 
     pub fn set_pretty(&mut self, pretty: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -388,6 +423,115 @@ impl RequestTab {
         }
         self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
+    }
+
+    /// 用户改动的唯一入口：置脏、重绘、去抖写草稿。
+    pub(crate) fn mark_dirty(&mut self, cx: &mut Context<Self>) {
+        self.dirty = true;
+        self.schedule_draft_save(cx);
+        cx.notify();
+    }
+
+    /// 保存成功后调用（Task 7 接线后移除 allow）。
+    #[allow(dead_code)]
+    pub(crate) fn mark_clean(&mut self, cx: &mut Context<Self>) {
+        self.dirty = false;
+        cx.notify();
+    }
+
+    fn schedule_draft_save(&mut self, cx: &mut Context<Self>) {
+        if store(cx).is_none() {
+            return;
+        }
+        // 替换旧任务即取消旧计时器
+        self.draft_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(DRAFT_DEBOUNCE).await;
+            let _ = this.update(cx, |this, cx| this.save_draft_now(cx));
+        }));
+    }
+
+    /// 立即投递一份草稿快照（跳过去抖）；序列化在写入线程完成。
+    pub(crate) fn save_draft_now(&mut self, cx: &mut Context<Self>) {
+        self.draft_save = None;
+        if let Some(store) = store(cx) {
+            store.write_draft(self.tab_draft(cx));
+        }
+    }
+
+    /// 草稿文件的内容：draft 快照 + 来源 + 是否有改动。
+    pub fn tab_draft(&self, cx: &App) -> TabDraft {
+        TabDraft {
+            id: self.id,
+            draft: self.draft(cx),
+            saved_id: self.saved_id,
+            dirty: self.dirty,
+        }
+    }
+
+    /// 用一份 RequestDraft 重建所有输入组件（恢复草稿 / 打开已保存请求）。
+    /// 只走不发事件的程序化写入，因此不会置脏；`saved_id` / `saved_name` / `dirty` 由调用方设置。
+    /// （Task 5 接线后移除 allow。）
+    #[allow(dead_code)]
+    pub fn load_draft(
+        &mut self,
+        draft: &RequestDraft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.method.update(cx, |s, cx| {
+            s.set_selected_value(&draft.method.as_str(), window, cx)
+        });
+        self.url
+            .update(cx, |u, cx| u.set_value(draft.url.clone(), window, cx));
+        self.path_params
+            .update(cx, |t, cx| t.set_values(&draft.path_params, window, cx));
+        self.params
+            .update(cx, |t, cx| t.set_values(&draft.params, window, cx));
+        self.headers
+            .update(cx, |t, cx| t.set_values(&draft.headers, window, cx));
+        self.file_path = None;
+        self.file_size = None;
+        match &draft.body {
+            BodyKind::None => self.body_mode = BodyMode::None,
+            BodyKind::Raw { format, text } => {
+                self.body_mode = BodyMode::Raw;
+                self.raw_format = *format;
+                let editor = self.editor_for(*format).clone();
+                editor.update(cx, |e, cx| e.set_value(text.clone(), window, cx));
+            }
+            BodyKind::FormUrlEncoded { fields } => {
+                self.body_mode = BodyMode::Form;
+                self.form
+                    .update(cx, |t, cx| t.set_values(fields, window, cx));
+            }
+            BodyKind::File { path, .. } => {
+                self.body_mode = BodyMode::File;
+                if !path.as_os_str().is_empty() {
+                    self.file_path = Some(path.clone());
+                    self.refresh_file_size(cx);
+                }
+            }
+        }
+        self.url_error = None;
+        self.refresh_body_hint(cx);
+        cx.notify();
+    }
+
+    /// 后台读取文件 Body 的大小（只用于显示）。
+    fn refresh_file_size(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.file_path.clone() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let size = cx
+                .background_spawn(async move { std::fs::metadata(&path).map(|m| m.len()).ok() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_size = size;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 

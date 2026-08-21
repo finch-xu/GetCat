@@ -15,14 +15,16 @@ use gpui_component::{
     v_flex,
 };
 
+use getcat_core::model::Ulid;
+
 use crate::state::request_tab::RequestTab;
+use crate::state::store::store;
 use crate::ui::sidebar::render_sidebar;
 use crate::{CloseTab, NewTab, SendRequest, ToggleSidebar};
 
 pub struct Workspace {
     tabs: Vec<Entity<RequestTab>>,
     active: usize,
-    next_id: u64,
     sidebar_collapsed: bool,
     focus_handle: FocusHandle,
 }
@@ -32,7 +34,6 @@ impl Workspace {
         let mut ws = Self {
             tabs: Vec::new(),
             active: 0,
-            next_id: 1,
             sidebar_collapsed: false,
             focus_handle: cx.focus_handle(),
         };
@@ -55,10 +56,12 @@ impl Workspace {
     }
 
     pub fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let id = self.next_id;
-        self.next_id += 1;
-        let tab = cx.new(|cx| RequestTab::new(id, window, cx));
-        tab.update(cx, |t, cx| t.focus_url(window, cx));
+        let tab = cx.new(|cx| RequestTab::new(Ulid::generate(), window, cx));
+        tab.update(cx, |t, cx| {
+            t.focus_url(window, cx);
+            // 立即写一份空草稿：重启时 workspace.json 的 tab_order 才找得到它
+            t.save_draft_now(cx);
+        });
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         cx.notify();
@@ -67,6 +70,11 @@ impl Workspace {
     pub fn close_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         if ix >= self.tabs.len() {
             return;
+        }
+        // 关闭 Tab = 删草稿文件（spec §9.3）；关最后一个时先删再新建
+        let closing = self.tabs[ix].read(cx).id;
+        if let Some(store) = store(cx) {
+            store.delete_draft(closing);
         }
         if self.tabs.len() == 1 {
             self.tabs.clear();

@@ -140,6 +140,23 @@ impl KvTable {
             .count()
     }
 
+    /// 用给定键值整体替换所有行（程序化载入，**不发** `Changed` 事件）；非锁定表末尾补一个空行用于新增。
+    pub fn set_values(&mut self, values: &[KeyValue], window: &mut Window, cx: &mut Context<Self>) {
+        self.rows.clear();
+        for kv in values {
+            self.push_row(&kv.key, &kv.value, kv.enabled, window, cx);
+        }
+        if !self.locked_keys {
+            self.push_row("", "", true, window, cx);
+        }
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
     /// 让行的 key 集合等于 `names`（保持顺序），保留同名行已有的 value 与 enabled。
     pub fn sync_keys(&mut self, names: &[String], window: &mut Window, cx: &mut Context<Self>) {
         let existing: Vec<(String, String, bool)> = self

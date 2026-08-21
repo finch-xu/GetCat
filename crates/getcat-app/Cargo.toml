@@ -28,6 +28,8 @@ tracing-subscriber.workspace = true
 [dev-dependencies]
 # gpui 的 TestAppContext / #[gpui::test] 需要 test-support；只在测试构建启用（与 gpui-component 自身测试的写法一致）
 gpui = { workspace = true, features = ["test-support"] }
+# 每个持久化测试一个独立临时数据目录
+tempfile.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["x11", "wayland"] }
