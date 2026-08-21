@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use getcat_core::body::tier::{ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
-use getcat_core::model::{BodyKind, Method, RawFormat, RequestDraft, TabDraft, TabId, Ulid};
+use getcat_core::model::{
+    BodyKind, Method, RawFormat, RequestDraft, SplitDirection, TabDraft, TabId, Ulid,
+};
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
@@ -19,7 +21,7 @@ use gpui::{
 };
 use gpui_component::IndexPath;
 use gpui_component::input::{EditorState, InputEvent, InputState, Search};
-use gpui_component::resizable::{resizable_panel, v_resizable};
+use gpui_component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_component::select::{SelectEvent, SelectState};
 use gpui_component::v_flex;
 
@@ -151,6 +153,8 @@ pub struct RequestTab {
     pub request_section: RequestSection,
     pub response_section: ResponseSection,
     pub pretty: bool,
+    /// 请求 / 响应分栏方向；由 Workspace 统一设置（工作区级设置，随 workspace.json 持久化）。
+    pub split: SplitDirection,
     /// B/C 档行视图与 Headers 列表的滚动位置；新响应到达时回到顶部。
     pub body_scroll: UniformListScrollHandle,
     pub headers_scroll: UniformListScrollHandle,
@@ -255,6 +259,7 @@ impl RequestTab {
             request_section: RequestSection::Params,
             response_section: ResponseSection::Body,
             pretty: true,
+            split: SplitDirection::Vertical,
             body_scroll: UniformListScrollHandle::new(),
             headers_scroll: UniformListScrollHandle::new(),
             response: ResponseState::Idle,
@@ -803,12 +808,17 @@ impl RequestTab {
 
 impl Render for RequestTab {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 两个方向各用一个 id：ResizablePanelGroup 按 id 记住拖出来的尺寸，上下与左右互不串扰
+        let (group, request_size) = match self.split {
+            SplitDirection::Vertical => (v_resizable("request-response-v"), px(300.)),
+            SplitDirection::Horizontal => (h_resizable("request-response-h"), px(480.)),
+        };
         v_flex().size_full().child(self.render_url_bar(cx)).child(
-            div().flex_1().min_h_0().child(
-                v_resizable("request-response")
+            div().flex_1().min_h_0().min_w_0().child(
+                group
                     .child(
                         resizable_panel()
-                            .size(px(300.))
+                            .size(request_size)
                             .size_range(px(140.)..px(900.))
                             .child(self.render_request_pane(cx)),
                     )

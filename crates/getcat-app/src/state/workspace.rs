@@ -5,7 +5,9 @@
 // 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use std::rc::Rc;
 
-use getcat_core::model::{SavedRequest, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms};
+use getcat_core::model::{
+    SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms,
+};
 use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -16,6 +18,7 @@ use gpui_component::{
     ActiveTheme, IconName, Root, Sizable, Theme, ThemeMode, WindowExt,
     button::{Button, ButtonVariants},
     dialog::{DialogAction, DialogClose, DialogFooter},
+    h_flex,
     input::{Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
     tab::{Tab, TabBar},
@@ -37,6 +40,8 @@ pub struct Workspace {
     sidebar_width: Option<f32>,
     sidebar_state: Entity<ResizableState>,
     theme: ThemePref,
+    /// 请求 / 响应分栏方向（工作区级，写入 workspace.json）。
+    split: SplitDirection,
     /// 已保存请求，按 updated_at 降序；Rc 让侧栏列表的渲染闭包每帧只 clone 指针。
     saved: Rc<Vec<SavedRequest>>,
     /// 侧栏列表的滚动句柄。
@@ -73,6 +78,7 @@ impl Workspace {
             sidebar_width: state.sidebar_width,
             sidebar_state: cx.new(|_| ResizableState::default()),
             theme: state.theme,
+            split: state.split,
             saved: Rc::new(saved),
             saved_scroll: UniformListScrollHandle::new(),
             focus_handle: cx.focus_handle(),
@@ -80,6 +86,7 @@ impl Workspace {
         };
 
         let (drafts, active) = order_drafts(&state, drafts);
+        let split = ws.split;
         for d in drafts {
             let saved_name: Option<SharedString> = d
                 .saved_id
@@ -89,6 +96,7 @@ impl Workspace {
             let tab = cx.new(|cx| {
                 let mut tab = RequestTab::new(d.id, window, cx);
                 tab.load_draft(&d.draft, window, cx);
+                tab.split = split;
                 // 对应的已保存请求文件已不存在（被手工删除）：退化为有改动的未保存 Tab
                 tab.saved_id = d.saved_id.filter(|_| still_saved);
                 tab.saved_name = saved_name;
@@ -156,7 +164,12 @@ impl Workspace {
     }
 
     pub fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab = cx.new(|cx| RequestTab::new(Ulid::generate(), window, cx));
+        let split = self.split;
+        let tab = cx.new(|cx| {
+            let mut tab = RequestTab::new(Ulid::generate(), window, cx);
+            tab.split = split;
+            tab
+        });
         tab.update(cx, |t, cx| {
             t.focus_url(window, cx);
             // 立即写一份空草稿：重启时 workspace.json 的 tab_order 才找得到它
@@ -212,6 +225,7 @@ impl Workspace {
             sidebar_width: self.sidebar_width,
             sidebar_collapsed: self.sidebar_collapsed,
             theme: self.theme,
+            split: self.split,
         }
     }
 
@@ -241,6 +255,25 @@ impl Workspace {
     /// 侧栏按钮：系统 → 浅色 → 深色 → 系统。
     pub fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_theme(self.theme.next(), window, cx);
+    }
+
+    /// 切换请求 / 响应的分栏方向（上下 ↔ 左右）：作用于所有 Tab，并写入 workspace.json。
+    pub fn toggle_split(&mut self, cx: &mut Context<Self>) {
+        let split = self.split.toggled();
+        self.split = split;
+        for tab in &self.tabs {
+            tab.update(cx, |t, cx| {
+                t.split = split;
+                cx.notify();
+            });
+        }
+        self.persist_workspace(cx);
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn split(&self) -> SplitDirection {
+        self.split
     }
 
     /// 拖拽分隔条松手：记录侧栏宽度并写回。
@@ -538,12 +571,28 @@ impl Workspace {
                 )
             }))
             .suffix(
-                Button::new("new-tab")
-                    .ghost()
-                    .small()
-                    .icon(IconName::Plus)
-                    .tooltip("新建请求")
-                    .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
+                h_flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        Button::new("toggle-split")
+                            .ghost()
+                            .small()
+                            .icon(match self.split {
+                                SplitDirection::Vertical => IconName::PanelBottom,
+                                SplitDirection::Horizontal => IconName::PanelRight,
+                            })
+                            .tooltip(format!("切换为{}", self.split.toggled().label()))
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_split(cx))),
+                    )
+                    .child(
+                        Button::new("new-tab")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Plus)
+                            .tooltip("新建请求")
+                            .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
+                    ),
             )
     }
 }

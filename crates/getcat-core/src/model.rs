@@ -238,6 +238,31 @@ impl ThemePref {
     }
 }
 
+/// 请求 / 响应分栏方向（spec §7.1）：上下（默认）或左右。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitDirection {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
+impl SplitDirection {
+    pub fn toggled(self) -> SplitDirection {
+        match self {
+            SplitDirection::Vertical => SplitDirection::Horizontal,
+            SplitDirection::Horizontal => SplitDirection::Vertical,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SplitDirection::Vertical => "上下分栏",
+            SplitDirection::Horizontal => "左右分栏",
+        }
+    }
+}
+
 /// 工作区状态（`workspace.json`）：只有布局与顺序，不含任何请求内容。
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct WorkspaceState {
@@ -252,6 +277,9 @@ pub struct WorkspaceState {
     pub sidebar_collapsed: bool,
     #[serde(default)]
     pub theme: ThemePref,
+    /// 请求 / 响应分栏方向；旧文件没有此字段时为上下。
+    #[serde(default)]
+    pub split: SplitDirection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,5 +414,26 @@ mod tests {
     #[test]
     fn now_ms_is_after_2026() {
         assert!(now_ms() > 1_767_225_600_000); // 2026-01-01T00:00:00Z
+    }
+
+    #[test]
+    fn split_direction_defaults_to_vertical_and_roundtrips() {
+        let ws: WorkspaceState = serde_json::from_str("{}").unwrap();
+        assert_eq!(ws.split, SplitDirection::Vertical);
+        let ws: WorkspaceState = serde_json::from_str(r#"{"split":"horizontal"}"#).unwrap();
+        assert_eq!(ws.split, SplitDirection::Horizontal);
+        assert_eq!(
+            serde_json::to_string(&SplitDirection::Horizontal).unwrap(),
+            "\"horizontal\""
+        );
+        assert_eq!(
+            SplitDirection::Vertical.toggled(),
+            SplitDirection::Horizontal
+        );
+        assert_eq!(
+            SplitDirection::Horizontal.toggled(),
+            SplitDirection::Vertical
+        );
+        assert_eq!(SplitDirection::Vertical.label(), "上下分栏");
     }
 }

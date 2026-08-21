@@ -18,8 +18,8 @@ use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, SavedRequest, TabDraft,
-    TabId, ThemePref, Ulid, WorkspaceState,
+    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, SavedRequest,
+    SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
 use gpui::{
@@ -897,6 +897,7 @@ fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
         sidebar_width: Some(300.),
         sidebar_collapsed: true,
         theme: ThemePref::Dark,
+        split: SplitDirection::Horizontal,
     });
     assert!(store.flush());
     let loaded = store.load_all();
@@ -923,6 +924,8 @@ fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
         assert!(ws.sidebar_collapsed());
         assert_eq!(ws.sidebar_width(), Some(300.));
         assert_eq!(ws.theme(), ThemePref::Dark);
+        assert_eq!(ws.split(), SplitDirection::Horizontal);
+        assert_eq!(ws.tab_at(0).read(app).split, SplitDirection::Horizontal);
         assert!(app.theme().mode.is_dark());
     });
 }
@@ -1336,5 +1339,41 @@ fn find_in_response_on_an_empty_body_notices(cx: &mut TestAppContext) {
                     .is_focused(window)
             );
         })
+    });
+}
+
+#[gpui::test]
+fn toggle_split_applies_to_all_tabs_and_persists(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.new_tab(window, cx);
+            assert_eq!(ws.split(), SplitDirection::Vertical);
+            ws.toggle_split(cx);
+            assert_eq!(ws.split(), SplitDirection::Horizontal);
+            assert_eq!(ws.tab_at(0).read(cx).split, SplitDirection::Horizontal);
+            assert_eq!(ws.tab_at(1).read(cx).split, SplitDirection::Horizontal);
+            // 切换后新建的 Tab 继承方向
+            ws.new_tab(window, cx);
+            assert_eq!(ws.tab_at(2).read(cx).split, SplitDirection::Horizontal);
+        })
+    });
+    assert!(store.flush());
+    assert_eq!(
+        read_workspace(&store).unwrap().split,
+        SplitDirection::Horizontal
+    );
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_split(cx)));
+    assert!(store.flush());
+    assert_eq!(
+        read_workspace(&store).unwrap().split,
+        SplitDirection::Vertical
+    );
+    cx.read(|app| {
+        assert_eq!(
+            ws.read(app).tab_at(2).read(app).split,
+            SplitDirection::Vertical
+        )
     });
 }
