@@ -25,6 +25,8 @@ tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+rust-i18n.workspace = true
+sys-locale.workspace = true
 
 [dev-dependencies]
 # gpui 的 TestAppContext / #[gpui::test] 需要 test-support；只在测试构建启用（与 gpui-component 自身测试的写法一致）

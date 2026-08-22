@@ -17,9 +17,11 @@ use gpui_component::{
     v_flex,
 };
 
+use crate::i18n::tr;
 use crate::state::request_tab::{RequestTab, ResponseSection};
 use crate::state::response::{ResponseState, ResponseView};
 use crate::ui::body_view::{render_header_rows, render_text_lines};
+use crate::ui::text::{content_kind_label, error_detail, error_kind, tier_notice};
 use crate::ui::{format_bytes, format_duration, status_color};
 use crate::{FindInResponse, SendRequest};
 
@@ -82,7 +84,7 @@ impl RequestTab {
                                         .text_color(cx.theme().muted_foreground)
                                         .max_w_96()
                                         .truncate()
-                                        .child(notice),
+                                        .child(notice.text()),
                                 )
                             })
                             .when(is_done, |h| {
@@ -91,7 +93,11 @@ impl RequestTab {
                                         .ghost()
                                         .xsmall()
                                         .icon(IconName::Search)
-                                        .tooltip_with_action("在响应中查找", &FindInResponse, None)
+                                        .tooltip_with_action(
+                                            tr!("response.find"),
+                                            &FindInResponse,
+                                            None,
+                                        )
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.find_in_response(window, cx)
                                         })),
@@ -100,7 +106,7 @@ impl RequestTab {
                                     Button::new("save-body")
                                         .ghost()
                                         .xsmall()
-                                        .label("保存到文件…")
+                                        .label(tr!("response.save_to_file"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.save_body(window, cx)
                                         })),
@@ -168,7 +174,7 @@ impl RequestTab {
                         h_flex()
                             .gap_1()
                             .items_center()
-                            .child("输入 URL 后点击发送，或按")
+                            .child(tr!("response.idle_prefix"))
                             .children(send_key),
                     )
                     .into_any_element()
@@ -177,18 +183,21 @@ impl RequestTab {
                 received, total, ..
             } => {
                 let text = match total {
-                    Some(t) => format!(
-                        "发送中… 已接收 {} / {}",
-                        format_bytes(*received),
-                        format_bytes(*t)
+                    Some(t) => tr!(
+                        "response.in_flight",
+                        received = format_bytes(*received),
+                        total = format_bytes(*t)
                     ),
-                    None => format!("发送中… 已接收 {}", format_bytes(*received)),
+                    None => tr!(
+                        "response.in_flight_unknown",
+                        received = format_bytes(*received)
+                    ),
                 };
                 empty_state(text, cx)
             }
             ResponseState::Failed {
                 error: RequestError::Cancelled,
-            } => empty_state("请求已取消", cx),
+            } => empty_state(tr!("response.cancelled"), cx),
             ResponseState::Failed { error } => v_flex()
                 .size_full()
                 .items_center()
@@ -199,13 +208,13 @@ impl RequestTab {
                         .text_sm()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(cx.theme().danger)
-                        .child(error.kind_label()),
+                        .child(error_kind(error)),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(error.to_string()),
+                        .child(error_detail(error)),
                 )
                 .into_any_element(),
             ResponseState::Done { body, view } => match section {
@@ -229,19 +238,16 @@ impl RequestTab {
             return v_flex()
                 .size_full()
                 .child(self.render_preview_summary(body, view, cx))
-                .child(empty_state(
-                    "二进制内容不提供文本预览，可用右上角「保存到文件」导出",
-                    cx,
-                ))
+                .child(empty_state(tr!("response.binary_no_preview"), cx))
                 .into_any_element();
         };
         let lines = if doc.doc.line_count() == 0 {
-            empty_state("响应体为空", cx)
+            empty_state(tr!("response.empty_body"), cx)
         } else {
             match doc.tier {
                 ViewTier::Editor => {
                     Editor::new(self.response_editor_for(view.kind.editor_language()))
-                        .aria_label("响应 Body")
+                        .aria_label(tr!("response.body_aria"))
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_size(cx.theme().mono_font_size)
                         .readonly(true)
@@ -256,7 +262,7 @@ impl RequestTab {
         };
         v_flex()
             .size_full()
-            .when_some(doc.tier.notice(), |v, text| v.child(notice_bar(text)))
+            .when_some(tier_notice(doc.tier), |v, text| v.child(notice_bar(text)))
             .when(view.is_preview(), |v| {
                 v.child(self.render_preview_summary(body, view, cx))
             })
@@ -277,18 +283,31 @@ impl RequestTab {
             .bordered(false)
             .small()
             .label_width(rems(4.5))
-            .item("大小", format_bytes(view.meta.body_len), 1)
             .item(
-                "类型",
+                tr!("response.summary.size"),
+                format_bytes(view.meta.body_len),
+                1,
+            )
+            .item(
+                tr!("response.summary.type"),
                 view.meta
                     .content_type
                     .clone()
-                    .unwrap_or_else(|| view.kind.label().to_string()),
+                    .map(SharedString::from)
+                    .unwrap_or_else(|| content_kind_label(view.kind)),
                 1,
             )
-            .item("耗时", format_duration(view.meta.duration), 1)
+            .item(
+                tr!("response.summary.duration"),
+                format_duration(view.meta.duration),
+                1,
+            )
             .when_some(body.path(), |list, path| {
-                list.item("临时文件", path.display().to_string(), 1)
+                list.item(
+                    tr!("response.summary.temp_file"),
+                    path.display().to_string(),
+                    1,
+                )
             });
         v_flex()
             .gap_2()
@@ -303,7 +322,7 @@ impl RequestTab {
                         Button::new("open-with-system")
                             .outline()
                             .xsmall()
-                            .label("用系统程序打开")
+                            .label(tr!("response.open_with_system"))
                             .on_click(cx.listener(|this, _, _, cx| this.open_body_with_system(cx))),
                     ),
                 )
@@ -317,7 +336,7 @@ impl RequestTab {
             ResponseState::Idle => h_flex()
                 .text_sm()
                 .text_color(muted)
-                .child("尚未发送")
+                .child(tr!("response.status_idle"))
                 .into_any_element(),
             ResponseState::InFlight {
                 started, received, ..
@@ -325,7 +344,10 @@ impl RequestTab {
                 .gap_3()
                 .text_sm()
                 .text_color(muted)
-                .child(format!("发送中… {}", format_duration(started.elapsed())))
+                .child(tr!(
+                    "response.status_in_flight",
+                    elapsed = format_duration(started.elapsed())
+                ))
                 .child(format_bytes(*received))
                 .into_any_element(),
             ResponseState::Failed { error } => {
@@ -334,9 +356,9 @@ impl RequestTab {
                     .text_sm()
                     .text_color(if cancelled { muted } else { cx.theme().danger })
                     .child(if cancelled {
-                        "已取消"
+                        tr!("response.status_cancelled")
                     } else {
-                        "请求失败"
+                        tr!("response.status_failed")
                     })
                     .into_any_element()
             }
@@ -364,7 +386,7 @@ impl RequestTab {
                             .text_color(muted)
                             .child(format_bytes(view.meta.body_len)),
                     )
-                    .child(div().text_color(muted).child(view.kind.label()))
+                    .child(div().text_color(muted).child(content_kind_label(view.kind)))
                     .into_any_element()
             }
         }

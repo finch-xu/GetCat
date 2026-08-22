@@ -11,21 +11,21 @@ pub const FORMAT_VERSION: u64 = 1;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
-    #[error("无法确定数据目录（找不到用户主目录）")]
+    #[error("Couldn't locate the data directory (no home directory)")]
     NoDataDir,
-    #[error("数据目录不可写：{path}（{source}）")]
+    #[error("Data directory is not writable: {path} ({source})")]
     Unwritable {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("IO 错误：{0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] io::Error),
-    #[error("JSON 错误：{0}")]
+    #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("缺少 version 字段")]
+    #[error("Missing version field")]
     MissingVersion,
-    #[error("不支持的文件版本 {0}（当前 {FORMAT_VERSION}）")]
+    #[error("Unsupported file version {0} (current {FORMAT_VERSION})")]
     UnsupportedVersion(u64),
 }
 

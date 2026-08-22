@@ -217,7 +217,7 @@ fn load_dir<T: DeserializeOwned>(dir: &Path, out: &mut Vec<T>, errors: &mut Vec<
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return,
         Err(e) => {
-            record(dir, format!("无法读取目录：{e}"), errors);
+            record(dir, format!("Couldn't read directory: {e}"), errors);
             return;
         }
     };
@@ -239,7 +239,7 @@ fn load_file<T: DeserializeOwned>(path: &Path, errors: &mut Vec<LoadError>) -> O
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
         Err(e) => {
-            record(path, format!("无法读取文件：{e}"), errors);
+            record(path, format!("Couldn't read file: {e}"), errors);
             return None;
         }
     };
@@ -269,8 +269,8 @@ fn quarantine(path: &Path, err: &StoreError, errors: &mut Vec<LoadError>) {
     name.push(format!(".corrupt-{}", now_ms()));
     let dest = path.with_file_name(name);
     let message = match fs::rename(path, &dest) {
-        Ok(()) => format!("文件损坏，已重命名为 {}：{err}", dest.display()),
-        Err(rename_err) => format!("文件损坏且无法重命名（{rename_err}）：{err}"),
+        Ok(()) => format!("File is corrupt; renamed to {}: {err}", dest.display()),
+        Err(rename_err) => format!("File is corrupt and couldn't be renamed ({rename_err}): {err}"),
     };
     record(path, message, errors);
 }

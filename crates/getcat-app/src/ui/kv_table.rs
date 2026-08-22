@@ -22,11 +22,37 @@ use gpui_component::{
     v_flex,
 };
 
+use crate::i18n::{Locale, tr};
 use crate::ui::format_bytes;
 
 /// 每行控件的可访问名称带行号，屏幕阅读器才分得清"第 3 行的参数名"和"第 4 行的参数名"。
-pub fn row_aria_label(ix: usize, what: &str) -> String {
-    format!("{what}（第 {} 行）", ix + 1)
+pub fn row_aria_label(ix: usize, what: &str) -> SharedString {
+    tr!("kv.row_aria", what = what, row = ix + 1)
+}
+
+/// 表格的用途决定 Key / Value 列的占位符；存枚举，切换界面语言时重新翻译。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KvPlaceholder {
+    /// Query / Path 参数
+    Param,
+    /// 请求头
+    Header,
+    /// 表单字段（urlencoded / form-data）
+    Field,
+}
+
+impl KvPlaceholder {
+    pub fn key_text(self) -> SharedString {
+        match self {
+            KvPlaceholder::Param => tr!("kv.param_key"),
+            KvPlaceholder::Header => tr!("kv.header_key"),
+            KvPlaceholder::Field => tr!("kv.field_key"),
+        }
+    }
+
+    pub fn value_text(self) -> SharedString {
+        tr!("kv.value")
+    }
 }
 
 pub enum KvTableEvent {
@@ -110,8 +136,7 @@ pub(crate) fn move_column_boundary(fractions: &mut [f32; COLUMNS], boundary: usi
 }
 
 pub struct KvTable {
-    key_placeholder: SharedString,
-    value_placeholder: SharedString,
+    placeholder: KvPlaceholder,
     rows: Vec<KvRow>,
     /// Path 参数模式：key 只读、由 URL 驱动，不自动追加空行。
     locked_keys: bool,
@@ -120,27 +145,41 @@ pub struct KvTable {
     /// 三列占可变区域的比例，和为 1；拖表头分隔线改。按比例而不是像素记，
     /// 请求区被拖宽拖窄时各列跟着等比缩放。
     column_fractions: [f32; COLUMNS],
+    /// 占位符驻留在每行的 InputState 里，切换界面语言时由这个订阅刷新。
+    _locale_sub: Subscription,
 }
 
 impl EventEmitter<KvTableEvent> for KvTable {}
 
 impl KvTable {
-    pub fn new(
-        key_placeholder: impl Into<SharedString>,
-        value_placeholder: impl Into<SharedString>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(placeholder: KvPlaceholder, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let locale_sub = cx.observe_global_in::<Locale>(window, Self::refresh_placeholders);
         let mut this = Self {
-            key_placeholder: key_placeholder.into(),
-            value_placeholder: value_placeholder.into(),
+            placeholder,
             rows: Vec::new(),
             locked_keys: false,
             file_capable: false,
             column_fractions: DEFAULT_COLUMN_FRACTIONS,
+            _locale_sub: locale_sub,
         };
         this.push_row("", "", "", true, window, cx);
         this
+    }
+
+    /// 界面语言变了：把每行三个输入框的占位符换成当前语言。
+    fn refresh_placeholders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let key = self.placeholder.key_text();
+        let value = self.placeholder.value_text();
+        let description = tr!("kv.description");
+        for row in &self.rows {
+            row.key
+                .update(cx, |s, cx| s.set_placeholder(key.clone(), window, cx));
+            row.value
+                .update(cx, |s, cx| s.set_placeholder(value.clone(), window, cx));
+            row.description.update(cx, |s, cx| {
+                s.set_placeholder(description.clone(), window, cx)
+            });
+        }
     }
 
     pub fn locked_keys(mut self, locked: bool) -> Self {
@@ -166,8 +205,8 @@ impl KvTable {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let key_ph = self.key_placeholder.clone();
-        let value_ph = self.value_placeholder.clone();
+        let key_ph = self.placeholder.key_text();
+        let value_ph = self.placeholder.value_text();
         let key_state = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(key_ph)
@@ -180,7 +219,7 @@ impl KvTable {
         });
         let description_state = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("描述")
+                .placeholder(tr!("kv.description"))
                 .default_value(description.to_string())
         });
         let subs = vec![
@@ -352,7 +391,7 @@ impl KvTable {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("选择".into()),
+            prompt: Some(tr!("common.choose")),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = rx.await else {
@@ -456,7 +495,7 @@ impl KvTable {
                 .small()
                 .appearance(false)
                 .w_full()
-                .aria_label(row_aria_label(ix, &self.value_placeholder))
+                .aria_label(row_aria_label(ix, &self.placeholder.value_text()))
                 .into_any_element();
         }
         let muted = cx.theme().muted_foreground;
@@ -470,8 +509,8 @@ impl KvTable {
                 Button::new(("kv-choose-file", ix))
                     .outline()
                     .xsmall()
-                    .label("选择文件…")
-                    .tooltip(row_aria_label(ix, "选择文件"))
+                    .label(tr!("common.choose_file"))
+                    .tooltip(row_aria_label(ix, &tr!("kv.choose_file_aria")))
                     .on_click(
                         cx.listener(move |this, _, window, cx| {
                             this.choose_row_file(ix, window, cx)
@@ -520,7 +559,7 @@ impl KvTable {
                 None => div()
                     .text_sm()
                     .text_color(muted)
-                    .child("未选择文件")
+                    .child(tr!("kv.no_file"))
                     .into_any_element(),
             })
             .into_any_element()
@@ -648,7 +687,7 @@ impl KvTable {
                 div()
                     .id(("kv-enabled-cell", ix))
                     .role(Role::Group)
-                    .aria_label(row_aria_label(ix, "启用"))
+                    .aria_label(row_aria_label(ix, &tr!("kv.enabled")))
                     .w_8()
                     .h_full()
                     .flex_none()
@@ -658,7 +697,7 @@ impl KvTable {
                     .child(
                         Checkbox::new(("kv-enabled", ix))
                             .checked(row.enabled)
-                            .tooltip(row_aria_label(ix, "启用"))
+                            .tooltip(row_aria_label(ix, &tr!("kv.enabled")))
                             .on_click(cx.listener(move |this, checked: &bool, _, cx| {
                                 this.toggle_row(ix, *checked, cx)
                             })),
@@ -676,7 +715,7 @@ impl KvTable {
                                 .appearance(false)
                                 .w_full()
                                 .readonly(locked)
-                                .aria_label(row_aria_label(ix, &self.key_placeholder)),
+                                .aria_label(row_aria_label(ix, &self.placeholder.key_text())),
                         ),
                     )
                     .child(
@@ -689,10 +728,7 @@ impl KvTable {
                                             .ghost()
                                             .xsmall()
                                             .label(kind.label())
-                                            .tooltip(row_aria_label(
-                                                ix,
-                                                "值类型：点击在 Text / File 间切换",
-                                            ))
+                                            .tooltip(row_aria_label(ix, &tr!("kv.kind_toggle")))
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.set_row_kind(ix, kind.toggled(), cx)
                                             })),
@@ -712,7 +748,7 @@ impl KvTable {
                                 .small()
                                 .appearance(false)
                                 .w_full()
-                                .aria_label(row_aria_label(ix, "描述")),
+                                .aria_label(row_aria_label(ix, &tr!("kv.description"))),
                         ),
                     ),
             )
@@ -729,7 +765,7 @@ impl KvTable {
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
-                            .tooltip(row_aria_label(ix, "删除"))
+                            .tooltip(row_aria_label(ix, &tr!("kv.remove")))
                             .disabled(locked)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.remove_row(ix, window, cx)
@@ -758,7 +794,7 @@ impl Render for KvTable {
                         .py_2()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("URL 中没有 {name} 形式的 Path 参数"),
+                        .child(tr!("kv.no_path_params")),
                 )
             })
             .children(
@@ -780,8 +816,9 @@ mod tests {
 
     #[test]
     fn row_aria_labels_carry_the_row_number() {
-        assert_eq!(row_aria_label(0, "参数名"), "参数名（第 1 行）");
-        assert_eq!(row_aria_label(2, "删除"), "删除（第 3 行）");
+        // 测试进程的 locale 是 rust-i18n 的默认值 en
+        assert_eq!(row_aria_label(0, "Name").as_ref(), "Name (row 1)");
+        assert_eq!(row_aria_label(2, "Remove").as_ref(), "Remove (row 3)");
     }
 
     fn total(f: &[f32; COLUMNS]) -> f32 {

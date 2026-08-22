@@ -7,9 +7,9 @@ use crate::model::{KeyValue, RequestDraft};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum UrlError {
-    #[error("URL 不能为空")]
+    #[error("URL must not be empty")]
     Empty,
-    #[error("无效的 URL：{0}")]
+    #[error("Invalid URL: {0}")]
     Invalid(String),
 }
 
@@ -86,7 +86,10 @@ pub fn build_url(draft: &RequestDraft) -> Result<Url, UrlError> {
     };
     let mut url = Url::parse(&with_scheme).map_err(|e| UrlError::Invalid(e.to_string()))?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(UrlError::Invalid(format!("不支持的协议：{}", url.scheme())));
+        return Err(UrlError::Invalid(format!(
+            "Unsupported scheme: {}",
+            url.scheme()
+        )));
     }
     let enabled: Vec<&KeyValue> = draft
         .params

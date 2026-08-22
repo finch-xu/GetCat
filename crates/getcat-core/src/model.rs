@@ -289,14 +289,6 @@ pub enum ThemePref {
 impl ThemePref {
     pub const ALL: [ThemePref; 3] = [ThemePref::System, ThemePref::Light, ThemePref::Dark];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            ThemePref::System => "跟随系统",
-            ThemePref::Light => "浅色",
-            ThemePref::Dark => "深色",
-        }
-    }
-
     /// 循环切换：系统 → 浅色 → 深色 → 系统。
     pub fn next(self) -> ThemePref {
         match self {
@@ -305,6 +297,29 @@ impl ThemePref {
             ThemePref::Dark => ThemePref::System,
         }
     }
+}
+
+/// 界面语言偏好：跟随系统，或固定英文 / 中文。
+///
+/// 序列化值就是 BCP 47 语言标签（`"en"` / `"zh-CN"`），`"system"` 表示跟随系统。
+/// 简体与繁体系统语言都落到 `zh-CN`（目前只有一套中文文案）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LanguagePref {
+    #[default]
+    #[serde(rename = "system")]
+    System,
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "zh-CN")]
+    Chinese,
+}
+
+impl LanguagePref {
+    pub const ALL: [LanguagePref; 3] = [
+        LanguagePref::System,
+        LanguagePref::English,
+        LanguagePref::Chinese,
+    ];
 }
 
 /// 发送请求的行为设置（`settings.json` 的 `request` 段）；改动后要重建 HTTP client。
@@ -356,6 +371,9 @@ pub struct AppSettings {
     /// 启动后自动向 GitHub Releases 查询一次新版本（只检查，不下载）。
     #[serde(default = "default_true")]
     pub check_updates_on_launch: bool,
+    /// 界面语言；旧版 settings.json 没有这个字段时按跟随系统处理。
+    #[serde(default)]
+    pub language: LanguagePref,
 }
 
 pub const EDITOR_FONT_SIZE_RANGE: std::ops::RangeInclusive<u32> = 10..=24;
@@ -370,6 +388,7 @@ impl Default for AppSettings {
             request: RequestSettings::default(),
             editor_font_size: default_editor_font_size(),
             check_updates_on_launch: true,
+            language: LanguagePref::System,
         }
     }
 }
@@ -576,7 +595,28 @@ mod tests {
         assert_eq!(ThemePref::Light.next(), ThemePref::Dark);
         assert_eq!(ThemePref::Dark.next(), ThemePref::System);
         assert_eq!(serde_json::to_string(&ThemePref::Dark).unwrap(), "\"dark\"");
-        assert_eq!(ThemePref::System.label(), "跟随系统");
+    }
+
+    /// 语言偏好序列化成 BCP 47 标签；旧 settings.json 没有 language 字段时回落到跟随系统。
+    #[test]
+    fn language_pref_serializes_as_language_tag_and_defaults_to_system() {
+        assert_eq!(
+            serde_json::to_string(&LanguagePref::Chinese).unwrap(),
+            "\"zh-CN\""
+        );
+        assert_eq!(
+            serde_json::to_string(&LanguagePref::English).unwrap(),
+            "\"en\""
+        );
+        assert_eq!(
+            serde_json::from_str::<LanguagePref>("\"system\"").unwrap(),
+            LanguagePref::System
+        );
+        let legacy: AppSettings =
+            serde_json::from_str(r#"{"editor_font_size":14,"check_updates_on_launch":false}"#)
+                .unwrap();
+        assert_eq!(legacy.language, LanguagePref::System);
+        assert_eq!(legacy.editor_font_size, 14);
     }
 
     #[test]

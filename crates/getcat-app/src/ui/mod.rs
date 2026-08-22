@@ -6,6 +6,7 @@ pub mod request_pane;
 pub mod response_pane;
 pub mod settings_dialog;
 pub mod sidebar;
+pub mod text;
 pub mod url_bar;
 
 use std::time::Duration;

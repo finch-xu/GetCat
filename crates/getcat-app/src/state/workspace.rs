@@ -31,6 +31,7 @@ use gpui_component::{
 
 use gpui_updater::UpdateStatus;
 
+use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
 use crate::state::update;
@@ -467,13 +468,13 @@ impl Workspace {
         window.open_alert_dialog(cx, move |alert, _, _| {
             let weak = weak.clone();
             alert
-                .title(SharedString::from(format!("删除“{name}”？")))
-                .description("此操作不可撤销。")
+                .title(tr!("dialog.delete_saved.title", name = name))
+                .description(tr!("dialog.delete_saved.body"))
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("删除")
+                        .ok_text(tr!("common.delete"))
                         .ok_variant(ButtonVariant::Danger)
-                        .cancel_text("取消")
+                        .cancel_text(tr!("common.cancel"))
                         .show_cancel(true),
                 )
                 .on_ok(move |_, _, cx| {
@@ -574,7 +575,7 @@ impl Workspace {
         let default_name = tab.read(cx).title(cx);
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("请求名称")
+                .placeholder(tr!("dialog.save_request.name"))
                 .default_value(default_name)
         });
         let weak = cx.entity().downgrade();
@@ -585,21 +586,26 @@ impl Workspace {
             let tab = tab.clone();
             let weak = weak.clone();
             dialog
-                .title("保存请求")
+                .title(tr!("dialog.save_request.title"))
                 .content(move |content, _, _| {
-                    content.child(Input::new(&input_for_content).aria_label("请求名称"))
+                    content.child(
+                        Input::new(&input_for_content).aria_label(tr!("dialog.save_request.name")),
+                    )
                 })
                 // `button_props` 的 ok_text/cancel_text 只被 AlertDialog 的自动 footer 消费；
                 // 普通 Dialog 必须自己拼 footer，否则 window.open_dialog 只更新状态、画面上不出现按钮。
                 .footer(
                     DialogFooter::new()
                         .child(
-                            DialogClose::new()
-                                .child(Button::new("cancel-save").outline().label("取消")),
+                            DialogClose::new().child(
+                                Button::new("cancel-save")
+                                    .outline()
+                                    .label(tr!("common.cancel")),
+                            ),
                         )
                         .child(
                             DialogAction::new()
-                                .child(Button::new("ok-save").primary().label("保存")),
+                                .child(Button::new("ok-save").primary().label(tr!("common.save"))),
                         ),
                 )
                 .on_ok(move |_, _, cx| {
@@ -664,7 +670,7 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::Plus)
-                        .tooltip_with_action("新建请求", &NewTab, None)
+                        .tooltip_with_action(tr!("tab.new"), &NewTab, None)
                         .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
                 ),
             )
@@ -672,9 +678,9 @@ impl Workspace {
             .on_click(cx.listener(|this, ix: &usize, _, cx| this.activate(*ix, cx)))
             .children(titles.into_iter().enumerate().map(|(ix, (title, dirty))| {
                 let aria = if dirty {
-                    format!("请求 Tab：{title}（未保存）")
+                    tr!("tab.aria_dirty", title = title)
                 } else {
-                    format!("请求 Tab：{title}")
+                    tr!("tab.aria", title = title)
                 };
                 let mut tab = Tab::new().label(title).aria_label(aria);
                 if dirty {
@@ -691,7 +697,7 @@ impl Workspace {
                         .ghost()
                         .xsmall()
                         .icon(IconName::Close)
-                        .tooltip("关闭 Tab")
+                        .tooltip(tr!("tab.close"))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             // 阻止冒泡到 Tab 的 on_click，否则关闭后会再触发 activate(ix)
                             cx.stop_propagation();
@@ -771,16 +777,16 @@ impl Workspace {
                             .ghost()
                             .xsmall()
                             .icon(IconName::ArrowUp)
-                            .label(format!("重新启动以完成更新 v{version}"))
-                            .tooltip("新版本已安装，重新启动后生效")
+                            .label(tr!("status.update_restart", version = version))
+                            .tooltip(tr!("status.update_restart_tooltip"))
                             .on_click(|_, _, cx| update::restart(cx))
                     } else {
                         Button::new("update-available")
                             .ghost()
                             .xsmall()
                             .icon(IconName::ArrowUp)
-                            .label(format!("有新版本 v{version}"))
-                            .tooltip("在「关于」页查看并安装")
+                            .label(tr!("status.update_available", version = version))
+                            .tooltip(tr!("status.update_available_tooltip"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_settings_page(SettingsPage::About, window, cx)
                             }))
@@ -794,7 +800,7 @@ impl Workspace {
                         .xsmall()
                         .selected(self.split == SplitDirection::Horizontal)
                         .icon(IconName::PanelRight)
-                        .tooltip("响应区在右侧")
+                        .tooltip(tr!("status.split_right"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.set_split(SplitDirection::Horizontal, cx)
                         })),
@@ -805,7 +811,7 @@ impl Workspace {
                         .xsmall()
                         .selected(self.split == SplitDirection::Vertical)
                         .icon(IconName::PanelBottom)
-                        .tooltip("响应区在下方")
+                        .tooltip(tr!("status.split_bottom"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.set_split(SplitDirection::Vertical, cx)
                         })),
@@ -832,7 +838,7 @@ impl Render for Workspace {
         div()
             .id("workspace")
             .role(Role::Group)
-            .aria_label("GetCat 工作区")
+            .aria_label(tr!("app.workspace_aria"))
             .key_context("Workspace")
             .track_focus(&self.focus_handle)
             .size_full()

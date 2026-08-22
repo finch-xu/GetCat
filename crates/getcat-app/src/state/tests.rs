@@ -28,10 +28,9 @@ use gpui::{
 use gpui_component::{ActiveTheme, input::InputEvent};
 use tempfile::TempDir;
 
+use crate::i18n::tr;
 use crate::state::request_tab::{
-    BINARY_SEARCH_NOTICE, BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, EMPTY_BODY_SEARCH_NOTICE,
-    FORM_DATA_CONTENT_TYPE_HINT, NO_RESPONSE_NOTICE, RequestTab, ResponseSection,
-    VIRTUAL_SEARCH_NOTICE,
+    BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestTab, ResponseSection,
 };
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::settings;
@@ -39,7 +38,7 @@ use crate::state::store;
 use crate::state::update::{self, InstallKind};
 use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::body_view::LINE_HEIGHT_PX;
-use crate::ui::kv_table::{KvTable, RowKind};
+use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
@@ -476,7 +475,7 @@ fn save_body_writes_memory_body_to_chosen_path(cx: &mut TestAppContext) {
     wait_until(cx, |cx| cx.read(|app| tab.read(app).notice.is_some()));
     cx.read(|app| {
         let notice = tab.read(app).notice.clone().unwrap();
-        assert!(notice.starts_with("已保存到"), "{notice}");
+        assert!(matches!(notice, Notice::SavedTo(_)), "{notice:?}");
     });
     assert_eq!(std::fs::read(&dest).unwrap(), br#"{"a":1}"#);
     let _ = std::fs::remove_file(&dest);
@@ -662,7 +661,7 @@ fn oversized_raw_body_shows_file_hint(cx: &mut TestAppContext) {
             // set_value 不发 Change 事件（gpui-component 如此设计），这里直接驱动事件处理器模拟一次粘贴
             editor.update(cx, |e, cx| e.set_value(big, window, cx));
             t.on_body_editor_event(&editor, &InputEvent::Change, window, cx);
-            assert!(t.body_hint.as_ref().unwrap().contains("10 MB"));
+            assert!(t.body_hint.unwrap().text().contains("10 MB"));
             editor.update(cx, |e, cx| e.set_value("{}", window, cx));
             t.on_body_editor_event(&editor, &InputEvent::Change, window, cx);
             assert!(t.body_hint.is_none());
@@ -684,7 +683,7 @@ fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
             let json_editor = t.editor_for(RawFormat::Json).clone();
             json_editor.update(cx, |e, cx| e.set_value(big, window, cx));
             t.refresh_body_hint(cx);
-            assert!(t.body_hint.as_ref().unwrap().contains("10 MB"));
+            assert!(t.body_hint.unwrap().text().contains("10 MB"));
 
             // 切到 Text 格式：该编辑器是空的，提示应清空
             t.raw_format = RawFormat::Text;
@@ -694,7 +693,7 @@ fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
             // 切回 JSON：重新看到超大内容的提示
             t.raw_format = RawFormat::Json;
             t.refresh_body_hint(cx);
-            assert!(t.body_hint.as_ref().unwrap().contains("10 MB"));
+            assert!(t.body_hint.unwrap().text().contains("10 MB"));
 
             // 离开 raw 模式：提示必须清空
             t.body_mode = BodyMode::None;
@@ -730,7 +729,7 @@ fn raw_body_draft_reads_editor_text_directly(cx: &mut TestAppContext) {
 #[gpui::test]
 fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
     let cx = init(cx);
-    let table = cx.update(|window, cx| cx.new(|cx| KvTable::new("k", "v", window, cx)));
+    let table = cx.update(|window, cx| cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx)));
     let values = vec![
         KeyValue {
             description: "查询词".into(),
@@ -758,8 +757,9 @@ fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
         })
     });
     // Path 参数表（锁定 key）：不补空行
-    let locked =
-        cx.update(|window, cx| cx.new(|cx| KvTable::new("k", "v", window, cx).locked_keys(true)));
+    let locked = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx).locked_keys(true))
+    });
     cx.update(|window, cx| {
         locked.update(cx, |t, cx| {
             t.set_values(&values, window, cx);
@@ -772,8 +772,9 @@ fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
 #[gpui::test]
 fn kv_table_sync_keys_keeps_description(cx: &mut TestAppContext) {
     let cx = init(cx);
-    let table =
-        cx.update(|window, cx| cx.new(|cx| KvTable::new("k", "v", window, cx).locked_keys(true)));
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx).locked_keys(true))
+    });
     cx.update(|window, cx| {
         table.update(cx, |t, cx| {
             t.set_values(
@@ -884,7 +885,7 @@ fn form_data_mode_warns_when_user_sets_content_type(cx: &mut TestAppContext) {
                 h.set_values(&[KeyValue::new("content-type", "text/plain")], window, cx)
             });
             t.refresh_body_hint(cx);
-            assert_eq!(t.body_hint.as_deref(), Some(FORM_DATA_CONTENT_TYPE_HINT));
+            assert_eq!(t.body_hint, Some(BodyHint::FormDataContentType));
             // 禁用那一行：提示消失
             headers.update(cx, |h, cx| {
                 h.set_values(
@@ -1479,7 +1480,7 @@ fn find_in_response_only_notices_on_virtual_tier(cx: &mut TestAppContext) {
             let g = t.generation;
             t.apply_outcome(g, Ok((body, view)), window, cx);
             t.find_in_response(window, cx);
-            assert_eq!(t.notice.as_deref(), Some(VIRTUAL_SEARCH_NOTICE));
+            assert_eq!(t.notice, Some(Notice::VirtualSearch));
             assert!(
                 !t.response_editor_for("text")
                     .read(cx)
@@ -1497,7 +1498,7 @@ fn find_in_response_without_a_response_notices(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             t.find_in_response(window, cx);
-            assert_eq!(t.notice.as_deref(), Some(NO_RESPONSE_NOTICE));
+            assert_eq!(t.notice, Some(Notice::NoResponse));
         })
     });
 }
@@ -1517,7 +1518,7 @@ fn find_in_response_on_a_binary_body_notices(cx: &mut TestAppContext) {
         tab.update(cx, |t, cx| {
             t.response_section = ResponseSection::Headers;
             t.find_in_response(window, cx);
-            assert_eq!(t.notice.as_deref(), Some(BINARY_SEARCH_NOTICE));
+            assert_eq!(t.notice, Some(Notice::BinarySearch));
             // 提前返回：既不切回 Body，也不把焦点交给（二进制用的）text 编辑器
             assert_eq!(t.response_section, ResponseSection::Headers);
             assert!(
@@ -1539,7 +1540,7 @@ fn find_in_response_on_an_empty_body_notices(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             t.find_in_response(window, cx);
-            assert_eq!(t.notice.as_deref(), Some(EMPTY_BODY_SEARCH_NOTICE));
+            assert_eq!(t.notice, Some(Notice::EmptyBodySearch));
             assert!(
                 !t.response_editor_for("json")
                     .read(cx)
@@ -1632,7 +1633,7 @@ fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
     });
     // 新建的空 Tab 成为激活 Tab：副标题跟着变
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
-    cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app).as_ref(), "新请求"));
+    cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app), tr!("tab.untitled")));
 }
 
 fn temp_form_file(name: &str, bytes: &[u8]) -> PathBuf {
@@ -1646,7 +1647,7 @@ fn kv_table_form_fields_roundtrip_and_refresh_size(cx: &mut TestAppContext) {
     let cx = init(cx);
     let file = temp_form_file("doc.json", b"{}");
     let table = cx.update(|window, cx| {
-        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+        cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true))
     });
     let fields = vec![
         FormField {
@@ -1684,7 +1685,7 @@ fn kv_table_choose_row_file_sets_path_and_switching_back_drops_it(cx: &mut TestA
     let cx = init(cx);
     let file = temp_form_file("pic.png", b"png!");
     let table = cx.update(|window, cx| {
-        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+        cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true))
     });
     cx.update(|window, cx| {
         table.update(cx, |t, cx| {
@@ -1730,7 +1731,7 @@ fn kv_table_choose_row_file_sets_path_and_switching_back_drops_it(cx: &mut TestA
 fn kv_table_cancelled_row_file_dialog_keeps_row(cx: &mut TestAppContext) {
     let cx = init(cx);
     let table = cx.update(|window, cx| {
-        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+        cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true))
     });
     cx.update(|window, cx| {
         table.update(cx, |t, cx| {
@@ -1754,7 +1755,7 @@ fn kv_table_choosing_file_on_trailing_row_appends_empty_row(cx: &mut TestAppCont
     let cx = init(cx);
     let file = temp_form_file("trailing.txt", b"hello");
     let table = cx.update(|window, cx| {
-        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+        cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true))
     });
     cx.update(|window, cx| {
         table.update(cx, |t, cx| {

@@ -23,8 +23,8 @@ impl ContentKind {
             ContentKind::Json => "JSON",
             ContentKind::Xml => "XML",
             ContentKind::Html => "HTML",
-            ContentKind::Text => "文本",
-            ContentKind::Binary => "二进制",
+            ContentKind::Text => "Text",
+            ContentKind::Binary => "Binary",
         }
     }
 
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn labels_are_user_facing() {
         assert_eq!(ContentKind::Json.label(), "JSON");
-        assert_eq!(ContentKind::Text.label(), "文本");
-        assert_eq!(ContentKind::Binary.label(), "二进制");
+        assert_eq!(ContentKind::Text.label(), "Text");
+        assert_eq!(ContentKind::Binary.label(), "Binary");
     }
 }

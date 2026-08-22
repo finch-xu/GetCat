@@ -28,9 +28,10 @@ use gpui_component::v_flex;
 use tokio::sync::mpsc;
 
 use crate::bridge;
+use crate::i18n::{Locale, tr};
 use crate::state::response::{CancelFlag, ResponseState, ResponseView, prepare_guarded};
 use crate::state::store::store;
-use crate::ui::kv_table::{KvTable, KvTableEvent};
+use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestSection {
@@ -94,30 +95,61 @@ const TICK_INTERVAL: Duration = Duration::from_millis(100);
 /// 文本 Body 超过此大小时提示改用文件 Body（spec §6.5）。
 pub const BODY_HINT_BYTES: usize = 10 * 1024 * 1024;
 
-pub fn body_hint_for(len: usize) -> Option<SharedString> {
-    (len > BODY_HINT_BYTES).then(|| {
-        format!(
-            "文本 Body 超过 {}，建议改用文件 Body 流式上传",
-            mib_label(BODY_HINT_BYTES as u64)
-        )
-        .into()
-    })
+pub fn body_hint_for(len: usize) -> Option<BodyHint> {
+    (len > BODY_HINT_BYTES).then_some(BodyHint::TooLarge)
 }
 
-/// form-data 模式下用户自设 Content-Type 的提示（发送时该头会被剔除，见 core::http）。
-pub const FORM_DATA_CONTENT_TYPE_HINT: &str =
-    "form-data 的 Content-Type（含 boundary）由 GetCat 生成，Headers 中的 Content-Type 将被忽略";
+/// Body 区的非阻塞提示。存枚举而不是文案：切换界面语言后渲染时重新翻译。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyHint {
+    /// raw 文本超过 [`BODY_HINT_BYTES`]。
+    TooLarge,
+    /// form-data 模式下用户自设了 Content-Type（发送时该头会被剔除，见 core::http）。
+    FormDataContentType,
+}
+
+impl BodyHint {
+    pub fn text(self) -> SharedString {
+        match self {
+            BodyHint::TooLarge => tr!(
+                "request.hint_body_too_large",
+                size = mib_label(BODY_HINT_BYTES as u64)
+            ),
+            BodyHint::FormDataContentType => tr!("request.hint_form_data_content_type"),
+        }
+    }
+}
+
+/// 工具栏右侧的一行提示。同样存枚举，渲染时翻译。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Notice {
+    /// ⌘F 在 B / C 档（没有编辑器）。
+    VirtualSearch,
+    NoResponse,
+    BinarySearch,
+    /// A 档但正文为空：`render_body_view` 这时画的是「响应体为空」占位而不是编辑器，
+    /// 聚焦一个没渲染的元素没有任何反馈。
+    EmptyBodySearch,
+    SavedTo(PathBuf),
+    SaveFailed(String),
+}
+
+impl Notice {
+    pub fn text(&self) -> SharedString {
+        match self {
+            Notice::VirtualSearch => tr!("notice.virtual_search"),
+            Notice::NoResponse => tr!("notice.no_response"),
+            Notice::BinarySearch => tr!("notice.binary_search"),
+            Notice::EmptyBodySearch => tr!("notice.empty_body_search"),
+            Notice::SavedTo(path) => tr!("notice.saved_to", path = path.display()),
+            Notice::SaveFailed(error) => tr!("notice.save_failed", error = error),
+        }
+    }
+}
 
 /// 编辑后到投递草稿的去抖：主线程只在窗口结束时做一次 `draft()` 快照（rope → String 拷贝），
 /// 序列化与落盘都在写入线程；写入线程再按 500 ms 合并同一 Tab 的重复写入。
 pub(crate) const DRAFT_DEBOUNCE: Duration = Duration::from_millis(300);
-
-/// ⌘F 在 B / C 档（没有编辑器）时的提示。
-pub const VIRTUAL_SEARCH_NOTICE: &str = "纯文本视图暂不支持搜索：可「保存到文件」后用编辑器查找";
-pub const NO_RESPONSE_NOTICE: &str = "没有可搜索的响应";
-pub const BINARY_SEARCH_NOTICE: &str = "二进制内容不提供搜索";
-/// A 档但正文为空：`render_body_view` 这时画的是「响应体为空」占位而不是编辑器，聚焦一个没渲染的元素没有任何反馈。
-pub const EMPTY_BODY_SEARCH_NOTICE: &str = "响应体为空，无可搜索内容";
 
 /// 上次"保存到文件"选择的目录（进程内记忆，不落盘）；下一次保存对话框从这里打开。
 pub(crate) struct LastSaveDir(pub Option<PathBuf>);
@@ -142,8 +174,9 @@ pub struct RequestTab {
     pub dirty: bool,
     pub method: Entity<SelectState<Vec<&'static str>>>,
     pub url: Entity<InputState>,
-    /// 发送前校验失败的内联提示（URL 非法 / Header 非法 / 未选文件），显示在 URL 栏下方（spec §11）。
-    pub prepare_error: Option<String>,
+    /// 发送前校验失败的错误（URL 非法 / Header 非法 / 未选文件），显示在 URL 栏下方（spec §11）；
+    /// 存错误本身，渲染时按当前语言翻译。
+    pub prepare_error: Option<RequestError>,
     pub path_params: Entity<KvTable>,
     pub params: Entity<KvTable>,
     pub headers: Entity<KvTable>,
@@ -155,7 +188,7 @@ pub struct RequestTab {
     pub file_path: Option<PathBuf>,
     pub file_size: Option<u64>,
     /// 非阻塞的 Body 提示：raw 模式下是文本过大提示，form-data 模式下是 Content-Type 冲突提示。
-    pub body_hint: Option<SharedString>,
+    pub body_hint: Option<BodyHint>,
     body_editors: Vec<(RawFormat, Entity<EditorState>)>,
     response_editors: Vec<(&'static str, Entity<EditorState>)>,
     pub request_section: RequestSection,
@@ -168,7 +201,7 @@ pub struct RequestTab {
     pub headers_scroll: UniformListScrollHandle,
     pub response: ResponseState,
     /// 工具栏右侧的一行提示（保存结果、搜索不可用等）；重新发送时清空。
-    pub notice: Option<SharedString>,
+    pub notice: Option<Notice>,
     pub generation: u64,
     /// 去抖中的草稿写入任务；每次改动替换（drop 即取消旧计时器）。
     draft_save: Option<Task<()>>,
@@ -179,15 +212,14 @@ impl RequestTab {
     pub fn new(id: TabId, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let methods: Vec<&'static str> = Method::ALL.iter().map(|m| m.as_str()).collect();
         let method = cx.new(|cx| SelectState::new(methods, Some(IndexPath::default()), window, cx));
-        let url = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("输入请求 URL，例如 https://api.example.com/users/{id}")
-        });
-        let path_params = cx.new(|cx| KvTable::new("参数名", "值", window, cx).locked_keys(true));
-        let params = cx.new(|cx| KvTable::new("参数名", "值", window, cx));
-        let headers = cx.new(|cx| KvTable::new("Header 名", "值", window, cx));
-        let form = cx.new(|cx| KvTable::new("字段名", "值", window, cx));
-        let form_data = cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true));
+        let url = cx.new(|cx| InputState::new(window, cx).placeholder(tr!("url_bar.placeholder")));
+        let path_params =
+            cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx).locked_keys(true));
+        let params = cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx));
+        let headers = cx.new(|cx| KvTable::new(KvPlaceholder::Header, window, cx));
+        let form = cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx));
+        let form_data =
+            cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true));
 
         let body_editors: Vec<(RawFormat, Entity<EditorState>)> = RawFormat::ALL
             .iter()
@@ -249,6 +281,12 @@ impl RequestTab {
         for (_, editor) in &body_editors {
             subs.push(cx.subscribe_in(editor, window, Self::on_body_editor_event));
         }
+        // 占位符驻留在 InputState 里，切换界面语言时要自己刷新
+        subs.push(cx.observe_global_in::<Locale>(window, |this, window, cx| {
+            this.url.update(cx, |state, cx| {
+                state.set_placeholder(tr!("url_bar.placeholder"), window, cx)
+            });
+        }));
         // body 编辑器内的 ⌘⏎ 由全局 SendRequest 动作处理（见 main.rs 的 bind_keys），不在此订阅
 
         Self {
@@ -332,7 +370,7 @@ impl RequestTab {
         let hint = match self.body_mode {
             BodyMode::Raw => body_hint_for(self.editor_for(self.raw_format).read(cx).text().len()),
             BodyMode::FormData if self.has_user_content_type(cx) => {
-                Some(SharedString::from(FORM_DATA_CONTENT_TYPE_HINT))
+                Some(BodyHint::FormDataContentType)
             }
             _ => None,
         };
@@ -357,7 +395,7 @@ impl RequestTab {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("选择".into()),
+            prompt: Some(tr!("common.choose")),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = rx.await else {
@@ -604,7 +642,7 @@ impl RequestTab {
         let req = match http::prepare(&draft) {
             Ok(r) => r,
             Err(e) => {
-                self.prepare_error = Some(e.to_string());
+                self.prepare_error = Some(e);
                 cx.notify();
                 return;
             }
@@ -750,22 +788,22 @@ impl RequestTab {
     /// ⌘F / 工具栏搜索按钮：A 档把焦点交给只读编辑器并打开它的搜索面板；B / C 档没有编辑器，只提示。
     pub fn find_in_response(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ResponseState::Done { view, .. } = &self.response else {
-            self.notice = Some(NO_RESPONSE_NOTICE.into());
+            self.notice = Some(Notice::NoResponse);
             cx.notify();
             return;
         };
         let Some(doc) = view.doc(self.pretty) else {
-            self.notice = Some(BINARY_SEARCH_NOTICE.into());
+            self.notice = Some(Notice::BinarySearch);
             cx.notify();
             return;
         };
         if doc.tier != ViewTier::Editor {
-            self.notice = Some(VIRTUAL_SEARCH_NOTICE.into());
+            self.notice = Some(Notice::VirtualSearch);
             cx.notify();
             return;
         }
         if doc.doc.line_count() == 0 {
-            self.notice = Some(EMPTY_BODY_SEARCH_NOTICE.into());
+            self.notice = Some(Notice::EmptyBodySearch);
             cx.notify();
             return;
         }
@@ -825,8 +863,8 @@ impl RequestTab {
                     return;
                 }
                 this.notice = Some(match result {
-                    Ok(()) => format!("已保存到 {}", dest.display()).into(),
-                    Err(e) => format!("保存失败：{e}").into(),
+                    Ok(()) => Notice::SavedTo(dest),
+                    Err(e) => Notice::SaveFailed(e.to_string()),
                 });
                 cx.notify();
             });
@@ -880,11 +918,11 @@ fn file_extension(kind: ContentKind) -> &'static str {
     }
 }
 
-/// Tab 标题：有路径取路径，否则取主机名；空 URL 显示"新请求"。
+/// Tab 标题：有路径取路径，否则取主机名；空 URL 显示「新请求」。
 pub fn tab_title(url: &str) -> SharedString {
     let trimmed = url.trim();
     if trimmed.is_empty() {
-        return "新请求".into();
+        return tr!("tab.untitled");
     }
     // 先去 query 再去 scheme：`localhost:8080/cb?to=https://x` 的 `://` 在 query 里
     let without_query = trimmed.split('?').next().unwrap_or(trimmed);
@@ -893,7 +931,7 @@ pub fn tab_title(url: &str) -> SharedString {
         .map(|(_, rest)| rest)
         .unwrap_or(without_query);
     if without_scheme.is_empty() {
-        return "新请求".into();
+        return tr!("tab.untitled");
     }
     match without_scheme.find('/') {
         Some(ix) if ix + 1 < without_scheme.len() => without_scheme[ix..].to_string().into(),
@@ -913,6 +951,7 @@ mod tests {
         assert!(
             body_hint_for(BODY_HINT_BYTES + 1)
                 .unwrap()
+                .text()
                 .contains("10 MB")
         );
     }
@@ -942,7 +981,7 @@ mod tests {
 
     #[test]
     fn title_from_url() {
-        assert_eq!(tab_title("").as_ref(), "新请求");
+        assert_eq!(tab_title(""), tr!("tab.untitled"));
         assert_eq!(
             tab_title("https://api.example.com/users/42?x=1").as_ref(),
             "/users/42"
@@ -953,8 +992,8 @@ mod tests {
         );
         assert_eq!(tab_title("api.example.com/").as_ref(), "api.example.com");
         assert_eq!(tab_title("not a url").as_ref(), "not a url");
-        assert_eq!(tab_title("https://").as_ref(), "新请求");
-        assert_eq!(tab_title("http://").as_ref(), "新请求");
+        assert_eq!(tab_title("https://"), tr!("tab.untitled"));
+        assert_eq!(tab_title("http://"), tr!("tab.untitled"));
         // query 里的 "://" 不是 scheme
         assert_eq!(tab_title("localhost:8080/cb?to=https://x").as_ref(), "/cb");
         assert_eq!(tab_title("x.com?a=1").as_ref(), "x.com");

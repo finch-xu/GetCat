@@ -3,6 +3,7 @@
 use getcat_core::store::{Store, StoreError};
 use gpui::{App, Entity, Global};
 
+use crate::i18n::tr;
 use crate::state::workspace::Workspace;
 
 pub struct StoreHandle {
@@ -24,7 +25,7 @@ pub fn install(cx: &mut App, opened: Result<Store, StoreError>) {
             tracing::warn!("persistence unavailable: {err}");
             StoreHandle {
                 store: None,
-                error: Some(format!("持久化不可用：{err}")),
+                error: Some(tr!("store.unavailable", error = err).to_string()),
             }
         }
     };
@@ -45,7 +46,7 @@ pub fn banner(cx: &App) -> Option<String> {
             .store
             .as_ref()
             .and_then(|s| s.last_error())
-            .map(|e| format!("持久化写入失败：{e}"))
+            .map(|e| tr!("store.write_failed", error = e).to_string())
     })
 }
 

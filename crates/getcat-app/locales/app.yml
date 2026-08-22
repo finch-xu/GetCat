@@ -1,0 +1,551 @@
+_version: 2
+
+# 通用按钮文案：短动词，不带句末标点；打开对话框 / 选择器的加 …
+common:
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  save:
+    en: Save
+    zh-CN: 保存
+  delete:
+    en: Delete
+    zh-CN: 删除
+  open:
+    en: Open
+    zh-CN: 打开
+  done:
+    en: Done
+    zh-CN: 完成
+  clear:
+    en: Clear
+    zh-CN: 清除
+  choose:
+    en: Choose
+    zh-CN: 选择
+  choose_file:
+    en: Choose file…
+    zh-CN: 选择文件…
+
+app:
+  workspace_aria:
+    en: GetCat workspace
+    zh-CN: GetCat 工作区
+
+theme:
+  system:
+    en: System
+    zh-CN: 跟随系统
+  light:
+    en: Light
+    zh-CN: 浅色
+  dark:
+    en: Dark
+    zh-CN: 深色
+
+# 语言名按它自己的语言显示：English / 中文 在两种界面里都一样
+language:
+  system:
+    en: Follow system
+    zh-CN: 跟随系统
+  en:
+    en: English
+    zh-CN: English
+  zh:
+    en: 中文
+    zh-CN: 中文
+
+sidebar:
+  rail_aria:
+    en: Navigation rail
+    zh-CN: 功能栏
+  settings:
+    en: Settings…
+    zh-CN: 设置…
+  collapse:
+    en: Collapse
+    zh-CN: 收起
+  theme_tooltip:
+    en: "Theme: %{theme} (click to switch)"
+    zh-CN: "主题：%{theme}（点击切换）"
+  saved:
+    title:
+      en: Saved requests
+      zh-CN: 已保存请求
+    title_with_count:
+      en: "Saved requests (%{count})"
+      zh-CN: "已保存请求（%{count}）"
+    empty_title:
+      en: No saved requests yet
+      zh-CN: 尚无已保存的请求
+    empty_hint_prefix:
+      en: Press
+      zh-CN: 按
+    empty_hint_suffix:
+      en: to save the current request
+      zh-CN: 保存当前请求
+    row_aria:
+      en: "Saved request: %{name}"
+      zh-CN: "已保存请求：%{name}"
+    delete:
+      en: Delete
+      zh-CN: 删除
+    menu_open:
+      en: Open
+      zh-CN: 打开
+    menu_delete:
+      en: Delete…
+      zh-CN: 删除…
+
+tab:
+  untitled:
+    en: New request
+    zh-CN: 新请求
+  new:
+    en: New request
+    zh-CN: 新建请求
+  close:
+    en: Close tab
+    zh-CN: 关闭 Tab
+  aria:
+    en: "Request tab: %{title}"
+    zh-CN: "请求 Tab：%{title}"
+  aria_dirty:
+    en: "Request tab: %{title} (unsaved)"
+    zh-CN: "请求 Tab：%{title}（未保存）"
+
+url_bar:
+  placeholder:
+    en: "Enter a request URL, e.g. https://api.example.com/users/{id}"
+    zh-CN: "输入请求 URL，例如 https://api.example.com/users/{id}"
+  method_aria:
+    en: Request method
+    zh-CN: 请求方法
+  url_aria:
+    en: Request URL
+    zh-CN: 请求 URL
+  send:
+    en: Send
+    zh-CN: 发送
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  save:
+    en: Save
+    zh-CN: 保存
+  save_tooltip:
+    en: Save request
+    zh-CN: 保存请求
+
+request:
+  path_params:
+    en: Path parameters
+    zh-CN: Path 参数
+  query_params:
+    en: Query parameters
+    zh-CN: Query 参数
+  raw_format_tooltip:
+    en: Format of the raw body (sets highlighting and Content-Type)
+    zh-CN: raw 内容的格式（决定高亮与 Content-Type）
+  no_body:
+    en: This request has no body
+    zh-CN: 此请求没有 Body
+  body_editor_aria:
+    en: Request body editor
+    zh-CN: 请求 Body 编辑器
+  no_file:
+    en: No file selected. The file is streamed when sending and never loaded into memory
+    zh-CN: 尚未选择文件；发送时将以流式方式上传，内容不进入内存
+  hint_body_too_large:
+    en: "Text body exceeds %{size}; consider a binary body to stream the file instead"
+    zh-CN: "文本 Body 超过 %{size}，建议改用文件 Body 流式上传"
+  hint_form_data_content_type:
+    en: GetCat generates the form-data Content-Type (with boundary); the Content-Type header is ignored
+    zh-CN: form-data 的 Content-Type（含 boundary）由 GetCat 生成，Headers 中的 Content-Type 将被忽略
+
+kv:
+  param_key:
+    en: Name
+    zh-CN: 参数名
+  header_key:
+    en: Header
+    zh-CN: Header 名
+  field_key:
+    en: Field
+    zh-CN: 字段名
+  value:
+    en: Value
+    zh-CN: 值
+  description:
+    en: Description
+    zh-CN: 描述
+  row_aria:
+    en: "%{what} (row %{row})"
+    zh-CN: "%{what}（第 %{row} 行）"
+  enabled:
+    en: Enabled
+    zh-CN: 启用
+  remove:
+    en: Remove
+    zh-CN: 删除
+  choose_file_aria:
+    en: Choose file
+    zh-CN: 选择文件
+  no_file:
+    en: No file selected
+    zh-CN: 未选择文件
+  kind_toggle:
+    en: "Value type: click to switch between Text and File"
+    zh-CN: "值类型：点击在 Text / File 间切换"
+  no_path_params:
+    en: "The URL has no {name}-style path parameters"
+    zh-CN: "URL 中没有 {name} 形式的 Path 参数"
+
+response:
+  idle_prefix:
+    en: Enter a URL and click Send, or press
+    zh-CN: 输入 URL 后点击发送，或按
+  in_flight:
+    en: "Sending… received %{received} / %{total}"
+    zh-CN: "发送中… 已接收 %{received} / %{total}"
+  in_flight_unknown:
+    en: "Sending… received %{received}"
+    zh-CN: "发送中… 已接收 %{received}"
+  cancelled:
+    en: Request cancelled
+    zh-CN: 请求已取消
+  status_idle:
+    en: Not sent yet
+    zh-CN: 尚未发送
+  status_in_flight:
+    en: "Sending… %{elapsed}"
+    zh-CN: "发送中… %{elapsed}"
+  status_cancelled:
+    en: Cancelled
+    zh-CN: 已取消
+  status_failed:
+    en: Request failed
+    zh-CN: 请求失败
+  find:
+    en: Find in response
+    zh-CN: 在响应中查找
+  save_to_file:
+    en: Save to file…
+    zh-CN: 保存到文件…
+  binary_no_preview:
+    en: Binary content has no text preview; use “Save to file…” in the top right to export it
+    zh-CN: 二进制内容不提供文本预览，可用右上角「保存到文件…」导出
+  empty_body:
+    en: Empty response body
+    zh-CN: 响应体为空
+  body_aria:
+    en: Response body
+    zh-CN: 响应 Body
+  headers_aria:
+    en: Response headers
+    zh-CN: 响应头列表
+  lines_aria:
+    en: Response body (plain text view)
+    zh-CN: 响应正文（纯文本视图）
+  line_truncated:
+    en: "… (%{size} omitted)"
+    zh-CN: "…（已省略 %{size}）"
+  open_with_system:
+    en: Open with system app
+    zh-CN: 用系统程序打开
+  summary:
+    size:
+      en: Size
+      zh-CN: 大小
+    type:
+      en: Type
+      zh-CN: 类型
+    duration:
+      en: Duration
+      zh-CN: 耗时
+    temp_file:
+      en: Temp file
+      zh-CN: 临时文件
+  tier:
+    virtual:
+      en: "Large response: over %{size} or %{lines} lines; switched to plain text mode"
+      zh-CN: "大响应：超过 %{size} 或 %{lines} 行，已切换为纯文本模式"
+    preview:
+      en: "Response exceeds %{size}; written to a temp file, previewing the first %{head}"
+      zh-CN: "响应超过 %{size}，已写入临时文件，仅预览前 %{head}"
+
+notice:
+  virtual_search:
+    en: Search isn’t available in plain text view; save to a file and search in an editor
+    zh-CN: 纯文本视图暂不支持搜索：可「保存到文件…」后用编辑器查找
+  no_response:
+    en: No response to search
+    zh-CN: 没有可搜索的响应
+  binary_search:
+    en: Binary content can’t be searched
+    zh-CN: 二进制内容不提供搜索
+  empty_body_search:
+    en: Empty response body, nothing to search
+    zh-CN: 响应体为空，无可搜索内容
+  saved_to:
+    en: "Saved to %{path}"
+    zh-CN: "已保存到 %{path}"
+  save_failed:
+    en: "Couldn’t save: %{error}"
+    zh-CN: "保存失败：%{error}"
+
+content:
+  text:
+    en: Text
+    zh-CN: 文本
+  binary:
+    en: Binary
+    zh-CN: 二进制
+
+# 请求错误：kind 是短标签（状态行 / 标题），detail 只在种类本身没有附加信息时使用
+error:
+  kind:
+    invalid_url:
+      en: Invalid URL
+      zh-CN: URL 无效
+    invalid_header:
+      en: Invalid header
+      zh-CN: Header 无效
+    unsupported:
+      en: Unsupported
+      zh-CN: 暂不支持
+    dns:
+      en: DNS lookup failed
+      zh-CN: DNS 失败
+    connection_refused:
+      en: Connection refused
+      zh-CN: 连接被拒绝
+    tls:
+      en: TLS error
+      zh-CN: TLS 错误
+    timeout:
+      en: Timeout
+      zh-CN: 超时
+    spill:
+      en: Couldn’t write temp file
+      zh-CN: 落盘失败
+    file_body:
+      en: File not readable
+      zh-CN: 文件不可读
+    cancelled:
+      en: Cancelled
+      zh-CN: 已取消
+    other:
+      en: Network error
+      zh-CN: 网络错误
+  detail:
+    timeout:
+      en: The connection timed out
+      zh-CN: 连接超时
+    background_failed:
+      en: "Background processing failed: %{message}"
+      zh-CN: "后台处理异常：%{message}"
+
+dialog:
+  delete_saved:
+    title:
+      en: "Delete “%{name}”?"
+      zh-CN: "删除“%{name}”？"
+    body:
+      en: This can’t be undone.
+      zh-CN: 此操作不可撤销。
+  save_request:
+    title:
+      en: Save request
+      zh-CN: 保存请求
+    name:
+      en: Request name
+      zh-CN: 请求名称
+
+status:
+  update_restart:
+    en: "Restart to finish updating to v%{version}"
+    zh-CN: "重新启动以完成更新 v%{version}"
+  update_restart_tooltip:
+    en: The update is installed; restart to apply it
+    zh-CN: 新版本已安装，重新启动后生效
+  update_available:
+    en: "v%{version} available"
+    zh-CN: "有新版本 v%{version}"
+  update_available_tooltip:
+    en: Open About to review and install
+    zh-CN: 在「关于」页查看并安装
+  split_right:
+    en: Response on the right
+    zh-CN: 响应区在右侧
+  split_bottom:
+    en: Response at the bottom
+    zh-CN: 响应区在下方
+
+store:
+  unavailable:
+    en: "Storage unavailable: %{error}"
+    zh-CN: "持久化不可用：%{error}"
+  write_failed:
+    en: "Couldn’t write to storage: %{error}"
+    zh-CN: "持久化写入失败：%{error}"
+
+update:
+  idle:
+    en: "Not checked yet (current v%{current})"
+    zh-CN: "尚未检查更新（当前 v%{current}）"
+  checking:
+    en: Checking for updates…
+    zh-CN: 正在检查更新…
+  up_to_date:
+    en: "Up to date (v%{current})"
+    zh-CN: "已是最新版本（v%{current}）"
+  available:
+    en: "v%{version} is available"
+    zh-CN: "发现新版本 v%{version}"
+  downloading:
+    en: "Downloading %{downloaded} / %{total}"
+    zh-CN: "正在下载 %{downloaded} / %{total}"
+  downloaded:
+    en: "Downloaded %{downloaded}"
+    zh-CN: "已下载 %{downloaded}"
+  installing:
+    en: Installing…
+    zh-CN: 正在安装…
+  staged:
+    en: "v%{version} installed; restart to apply"
+    zh-CN: "v%{version} 已安装，重新启动后生效"
+  failed:
+    en: "Update failed: %{error}"
+    zh-CN: "更新失败：%{error}"
+
+settings:
+  title:
+    en: Settings
+    zh-CN: 设置
+  reset:
+    en: Reset to defaults
+    zh-CN: 恢复默认
+  general:
+    en: General
+    zh-CN: 通用
+  request:
+    en: Request
+    zh-CN: 请求
+  data:
+    en: Data
+    zh-CN: 数据
+  about:
+    en: About
+    zh-CN: 关于
+  appearance:
+    en: Appearance
+    zh-CN: 外观
+  theme:
+    en: Theme
+    zh-CN: 主题
+  theme_desc:
+    en: System follows the macOS appearance automatically
+    zh-CN: 跟随系统会随 macOS 的外观自动切换
+  language:
+    en: Language
+    zh-CN: 语言
+  language_desc:
+    en: Follow system picks from your preferred languages and falls back to English
+    zh-CN: 跟随系统按系统首选语言选择，没有匹配的语言时使用英文
+  editor_font_size:
+    en: Editor font size
+    zh-CN: 编辑器字号
+  editor_font_size_desc:
+    en: Monospace size for the request body and response (px)
+    zh-CN: 请求 Body 与响应正文使用的等宽字号（px）
+  timeout:
+    en: Timeout
+    zh-CN: 超时
+  timeout_total:
+    en: Total timeout (s)
+    zh-CN: 总超时（秒）
+  timeout_desc:
+    en: Upper bound from connect to the last byte; 0 means unlimited. The connect timeout is fixed at 10 s
+    zh-CN: 从连接到读完响应的总时长上限；0 表示不限。连接超时固定 10 秒
+  redirects:
+    en: Redirects
+    zh-CN: 跳转
+  follow_redirects:
+    en: Follow 3xx redirects
+    zh-CN: 自动跟随 3xx 跳转
+  follow_redirects_desc:
+    en: When off, 301 / 302 responses are shown as-is
+    zh-CN: 关闭后直接显示 301 / 302 等响应本身
+  max_redirects:
+    en: Maximum redirects
+    zh-CN: 最大跳转次数
+  security:
+    en: Security
+    zh-CN: 安全
+  verify_tls:
+    en: Verify TLS certificates
+    zh-CN: 校验 TLS 证书
+  verify_tls_desc:
+    en: When off, self-signed and expired certificates are accepted; only for local debugging
+    zh-CN: 关闭后接受自签名 / 过期证书，仅建议用于本地调试
+  storage:
+    en: Storage
+    zh-CN: 存储位置
+  storage_desc:
+    en: Saved requests, drafts and settings live here as JSON files; back them up or manage them with Git
+    zh-CN: 已保存请求、草稿与设置都以 JSON 文件形式放在这里，可直接备份或用 Git 管理
+  data_dir:
+    en: Data directory
+    zh-CN: 数据目录
+  data_dir_unavailable:
+    en: (storage unavailable)
+    zh-CN: （持久化不可用）
+  reveal_finder:
+    en: Reveal in Finder
+    zh-CN: 在访达中显示
+  reveal_folder:
+    en: Open containing folder
+    zh-CN: 打开所在文件夹
+  about_blurb:
+    en: An HTTP debugging tool built on gpui and gpui-component.
+    zh-CN: 基于 gpui 与 gpui-component 构建的 HTTP 调试工具。
+  version:
+    en: Version
+    zh-CN: 版本
+  license:
+    en: License
+    zh-CN: 许可证
+  updates:
+    en: Updates
+    zh-CN: 更新
+  check_on_launch:
+    en: Check for updates on launch
+    zh-CN: 启动时检查更新
+  check_on_launch_desc:
+    en: Queries GitHub Releases once, 5 s after launch; never downloads automatically
+    zh-CN: 启动 5 秒后向 GitHub Releases 查询一次，不会自动下载
+  update_unsupported:
+    en: No automatic updates on this platform; download from the releases page
+    zh-CN: 此平台暂无自动更新，请前往发布页下载
+  install_update:
+    en: Download and install
+    zh-CN: 下载并安装
+  restart:
+    en: Restart
+    zh-CN: 重新启动
+  retry:
+    en: Retry
+    zh-CN: 重试
+  check_updates:
+    en: Check for updates
+    zh-CN: 检查更新
+  releases:
+    en: Releases
+    zh-CN: 发布页
+  update_dev_build:
+    en: Development builds can’t update in place; download from the releases page
+    zh-CN: 开发构建无法就地更新，请从发布页下载
+  update_translocated:
+    en: Move GetCat to the Applications folder before updating
+    zh-CN: 请先把 GetCat 拖到「应用程序」文件夹，再进行更新

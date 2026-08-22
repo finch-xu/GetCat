@@ -3,9 +3,13 @@
 
 mod assets;
 mod bridge;
+mod i18n;
 mod state;
 mod theme;
 mod ui;
+
+// 界面文案：crates/getcat-app/locales/app.yml；找不到当前语言的 key 时退回英文
+rust_i18n::i18n!("locales", fallback = "en");
 
 use getcat_core::store::{Layout, Loaded, Store, StoreError, load_all};
 use gpui::*;
@@ -99,7 +103,7 @@ fn main() {
                 let (opened, mut loaded) = cx.background_spawn(async move { open_store() }).await;
                 let opened_window = cx.update(|cx| {
                     install(cx, opened);
-                    // 设置在开窗前生效：HTTP client 与编辑器字号都要在第一帧就是用户的值
+                    // 设置在开窗前生效：HTTP client、编辑器字号与界面语言都要在第一帧就是用户的值
                     settings::install(cx, loaded.settings.take());
                     // 更新器在开窗前安装：Workspace 构造时要订阅它
                     update::install(cx);

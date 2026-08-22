@@ -12,11 +12,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use getcat_core::model::AppSettings;
-use gpui::{App, AppContext, Entity, Global};
+use gpui::{App, AppContext, Entity, Global, SharedString};
 use gpui_updater::{
     EngineConfig, GitHubSource, UpdateSource, UpdateStatus, Updater, Verification, Version,
 };
 
+use crate::i18n::tr;
 use crate::state::settings;
 
 pub const REPO_OWNER: &str = "finch-xu";
@@ -249,27 +250,27 @@ pub fn hint_version(status: &UpdateStatus) -> Option<(&Version, bool)> {
 }
 
 /// 「关于」页的状态一行字。
-pub fn status_line(status: &UpdateStatus, current: &str) -> String {
+pub fn status_line(status: &UpdateStatus, current: &str) -> SharedString {
     match status {
-        UpdateStatus::Idle => format!("尚未检查更新（当前 v{current}）"),
-        UpdateStatus::Checking => "正在检查更新…".into(),
-        UpdateStatus::UpToDate => format!("已是最新版本（v{current}）"),
-        UpdateStatus::Available(v) => format!("发现新版本 v{v}"),
+        UpdateStatus::Idle => tr!("update.idle", current = current),
+        UpdateStatus::Checking => tr!("update.checking"),
+        UpdateStatus::UpToDate => tr!("update.up_to_date", current = current),
+        UpdateStatus::Available(v) => tr!("update.available", version = v),
         UpdateStatus::Downloading {
             downloaded,
             total: Some(total),
-        } => format!(
-            "正在下载 {} / {}",
-            format_mb(*downloaded),
-            format_mb(*total)
+        } => tr!(
+            "update.downloading",
+            downloaded = format_mb(*downloaded),
+            total = format_mb(*total)
         ),
         UpdateStatus::Downloading {
             downloaded,
             total: None,
-        } => format!("已下载 {}", format_mb(*downloaded)),
-        UpdateStatus::Installing => "正在安装…".into(),
-        UpdateStatus::Staged(v) => format!("v{v} 已安装，重新启动后生效"),
-        UpdateStatus::Errored(msg) => format!("更新失败：{msg}"),
+        } => tr!("update.downloaded", downloaded = format_mb(*downloaded)),
+        UpdateStatus::Installing => tr!("update.installing"),
+        UpdateStatus::Staged(v) => tr!("update.staged", version = v),
+        UpdateStatus::Errored(msg) => tr!("update.failed", error = msg),
     }
 }
 
@@ -364,22 +365,23 @@ mod tests {
 
     #[test]
     fn status_lines() {
+        // 测试进程的 locale 是 rust-i18n 的默认值 en
         let v = Version::new(2, 0, 0);
         assert_eq!(
-            status_line(&UpdateStatus::Idle, "0.1.0"),
-            "尚未检查更新（当前 v0.1.0）"
+            status_line(&UpdateStatus::Idle, "0.1.0").as_ref(),
+            "Not checked yet (current v0.1.0)"
         );
         assert_eq!(
-            status_line(&UpdateStatus::Checking, "0.1.0"),
-            "正在检查更新…"
+            status_line(&UpdateStatus::Checking, "0.1.0").as_ref(),
+            "Checking for updates…"
         );
         assert_eq!(
-            status_line(&UpdateStatus::UpToDate, "0.1.0"),
-            "已是最新版本（v0.1.0）"
+            status_line(&UpdateStatus::UpToDate, "0.1.0").as_ref(),
+            "Up to date (v0.1.0)"
         );
         assert_eq!(
-            status_line(&UpdateStatus::Available(v.clone()), "0.1.0"),
-            "发现新版本 v2.0.0"
+            status_line(&UpdateStatus::Available(v.clone()), "0.1.0").as_ref(),
+            "v2.0.0 is available"
         );
         assert_eq!(
             status_line(
@@ -388,8 +390,9 @@ mod tests {
                     total: Some(3_145_728),
                 },
                 "0.1.0"
-            ),
-            "正在下载 1.5 MB / 3.0 MB"
+            )
+            .as_ref(),
+            "Downloading 1.5 MB / 3.0 MB"
         );
         assert_eq!(
             status_line(
@@ -398,20 +401,25 @@ mod tests {
                     total: None,
                 },
                 "0.1.0"
-            ),
-            "已下载 1.0 MB"
+            )
+            .as_ref(),
+            "Downloaded 1.0 MB"
         );
-        assert_eq!(status_line(&UpdateStatus::Installing, "0.1.0"), "正在安装…");
         assert_eq!(
-            status_line(&UpdateStatus::Staged(v), "0.1.0"),
-            "v2.0.0 已安装，重新启动后生效"
+            status_line(&UpdateStatus::Installing, "0.1.0").as_ref(),
+            "Installing…"
+        );
+        assert_eq!(
+            status_line(&UpdateStatus::Staged(v), "0.1.0").as_ref(),
+            "v2.0.0 installed; restart to apply"
         );
         assert_eq!(
             status_line(
                 &UpdateStatus::Errored("http error: offline".into()),
                 "0.1.0"
-            ),
-            "更新失败：http error: offline"
+            )
+            .as_ref(),
+            "Update failed: http error: offline"
         );
     }
 

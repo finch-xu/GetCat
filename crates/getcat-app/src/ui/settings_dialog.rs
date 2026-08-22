@@ -3,7 +3,7 @@
 //! 设置值的读写都走 [`crate::state::settings`]（请求段改了重建 HTTP client、字号直接套到主题），
 //! 主题偏好仍记在 [`Workspace`]（它属于布局状态，写进 `workspace.json`）。
 
-use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, ThemePref};
+use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, LanguagePref, ThemePref};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
@@ -25,10 +25,12 @@ use gpui_component::{
 };
 use gpui_updater::UpdateStatus;
 
+use crate::i18n::tr;
 use crate::state::settings;
 use crate::state::store::store;
 use crate::state::update::{self, InstallKind};
 use crate::state::workspace::Workspace;
+use crate::ui::text::{language_label, theme_label};
 
 const DIALOG_WIDTH: f32 = 760.;
 const CONTENT_HEIGHT: f32 = 460.;
@@ -63,7 +65,7 @@ pub fn open_settings_page(
     window.open_dialog(cx, move |dialog, _, _| {
         let weak = weak.clone();
         dialog
-            .title("设置")
+            .title(tr!("settings.title"))
             .w(px(DIALOG_WIDTH))
             .content(move |content, _, cx| {
                 content.child(div().w_full().h(px(CONTENT_HEIGHT)).child(render_settings(
@@ -80,13 +82,13 @@ pub fn open_settings_page(
                     .child(
                         Button::new("reset-settings")
                             .ghost()
-                            .label("恢复默认")
+                            .label(tr!("settings.reset"))
                             .on_click(|_, _, cx| settings::reset(cx)),
                     )
                     .child(
                         Button::new("close-settings")
                             .primary()
-                            .label("完成")
+                            .label(tr!("common.done"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
             )
@@ -112,66 +114,90 @@ fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, cx: &Ap
 
 fn general_page(workspace: WeakEntity<Workspace>) -> SettingPage {
     let theme_for_read = workspace.clone();
-    SettingPage::new("通用").icon(IconName::Settings).group(
-        SettingGroup::new()
-            .title("外观")
-            .item(
-                SettingItem::new(
-                    "主题",
-                    SettingField::dropdown(
-                        ThemePref::ALL
-                            .iter()
-                            .map(|p| (theme_key(*p), SharedString::from(p.label())))
-                            .collect(),
-                        move |cx| {
-                            theme_for_read
-                                .upgrade()
-                                .map(|ws| theme_key(ws.read(cx).theme()))
-                                .unwrap_or_else(|| theme_key(ThemePref::System))
-                        },
-                        move |value, cx| {
-                            if let Some(ws) = workspace.upgrade() {
-                                let pref = ThemePref::ALL
+    SettingPage::new(tr!("settings.general"))
+        .icon(IconName::Settings)
+        .group(
+            SettingGroup::new()
+                .title(tr!("settings.appearance"))
+                .item(
+                    SettingItem::new(
+                        tr!("settings.theme"),
+                        SettingField::dropdown(
+                            ThemePref::ALL
+                                .iter()
+                                .map(|p| (theme_key(*p), theme_label(*p)))
+                                .collect(),
+                            move |cx| {
+                                theme_for_read
+                                    .upgrade()
+                                    .map(|ws| theme_key(ws.read(cx).theme()))
+                                    .unwrap_or_else(|| theme_key(ThemePref::System))
+                            },
+                            move |value, cx| {
+                                if let Some(ws) = workspace.upgrade() {
+                                    let pref = ThemePref::ALL
+                                        .iter()
+                                        .copied()
+                                        .find(|p| theme_key(*p) == value)
+                                        .unwrap_or_default();
+                                    ws.update(cx, |ws, cx| ws.set_theme_global(pref, cx));
+                                }
+                            },
+                        )
+                        .default_value(theme_key(ThemePref::System)),
+                    )
+                    .description(tr!("settings.theme_desc")),
+                )
+                .item(
+                    SettingItem::new(
+                        tr!("settings.language"),
+                        SettingField::dropdown(
+                            LanguagePref::ALL
+                                .iter()
+                                .map(|p| (language_key(*p), language_label(*p)))
+                                .collect(),
+                            |cx| language_key(settings::settings(cx).language),
+                            |value, cx| {
+                                let pref = LanguagePref::ALL
                                     .iter()
                                     .copied()
-                                    .find(|p| theme_key(*p) == value)
+                                    .find(|p| language_key(*p) == value)
                                     .unwrap_or_default();
-                                ws.update(cx, |ws, cx| ws.set_theme_global(pref, cx));
-                            }
-                        },
+                                settings::update(cx, |s| s.language = pref);
+                            },
+                        )
+                        .default_value(language_key(LanguagePref::System)),
                     )
-                    .default_value(theme_key(ThemePref::System)),
+                    .description(tr!("settings.language_desc")),
                 )
-                .description("跟随系统会随 macOS 的外观自动切换"),
-            )
-            .item(
-                SettingItem::new(
-                    "编辑器字号",
-                    SettingField::number_input(
-                        NumberFieldOptions {
-                            min: *EDITOR_FONT_SIZE_RANGE.start() as f64,
-                            max: *EDITOR_FONT_SIZE_RANGE.end() as f64,
-                            step: 1.0,
-                        },
-                        |cx| settings::settings(cx).editor_font_size as f64,
-                        |value, cx| {
-                            settings::update(cx, |s| s.editor_font_size = value.round() as u32)
-                        },
+                .item(
+                    SettingItem::new(
+                        tr!("settings.editor_font_size"),
+                        SettingField::number_input(
+                            NumberFieldOptions {
+                                min: *EDITOR_FONT_SIZE_RANGE.start() as f64,
+                                max: *EDITOR_FONT_SIZE_RANGE.end() as f64,
+                                step: 1.0,
+                            },
+                            |cx| settings::settings(cx).editor_font_size as f64,
+                            |value, cx| {
+                                settings::update(cx, |s| s.editor_font_size = value.round() as u32)
+                            },
+                        )
+                        .default_value(13.0),
                     )
-                    .default_value(13.0),
-                )
-                .description("请求 Body 与响应正文使用的等宽字号（px）"),
-            ),
-    )
+                    .description(tr!("settings.editor_font_size_desc")),
+                ),
+        )
 }
 
 fn request_page() -> SettingPage {
-    SettingPage::new("请求")
+    SettingPage::new(tr!("settings.request"))
         .icon(IconName::Globe)
         .group(
-            SettingGroup::new().title("超时").item(
+            SettingGroup::new().title(tr!("settings.timeout")).item(
                 SettingItem::new(
-                    "总超时（秒）",
+                    tr!("settings.timeout_total"),
                     SettingField::number_input(
                         NumberFieldOptions {
                             min: 0.0,
@@ -187,15 +213,15 @@ fn request_page() -> SettingPage {
                     )
                     .default_value(30.0),
                 )
-                .description("从连接到读完响应的总时长上限；0 表示不限。连接超时固定 10 秒"),
+                .description(tr!("settings.timeout_desc")),
             ),
         )
         .group(
             SettingGroup::new()
-                .title("跳转")
+                .title(tr!("settings.redirects"))
                 .item(
                     SettingItem::new(
-                        "自动跟随 3xx 跳转",
+                        tr!("settings.follow_redirects"),
                         SettingField::switch(
                             |cx| settings::settings(cx).request.follow_redirects,
                             |value, cx| {
@@ -204,10 +230,10 @@ fn request_page() -> SettingPage {
                         )
                         .default_value(true),
                     )
-                    .description("关闭后直接显示 301 / 302 等响应本身"),
+                    .description(tr!("settings.follow_redirects_desc")),
                 )
                 .item(SettingItem::new(
-                    "最大跳转次数",
+                    tr!("settings.max_redirects"),
                     SettingField::number_input(
                         NumberFieldOptions {
                             min: 1.0,
@@ -225,16 +251,16 @@ fn request_page() -> SettingPage {
                 )),
         )
         .group(
-            SettingGroup::new().title("安全").item(
+            SettingGroup::new().title(tr!("settings.security")).item(
                 SettingItem::new(
-                    "校验 TLS 证书",
+                    tr!("settings.verify_tls"),
                     SettingField::switch(
                         |cx| settings::settings(cx).request.verify_tls,
                         |value, cx| settings::update(cx, |s| s.request.verify_tls = value),
                     )
                     .default_value(true),
                 )
-                .description("关闭后接受自签名 / 过期证书，仅建议用于本地调试"),
+                .description(tr!("settings.verify_tls_desc")),
             ),
         )
 }
@@ -242,64 +268,64 @@ fn request_page() -> SettingPage {
 fn data_page(cx: &App) -> SettingPage {
     let root: Option<SharedString> = store(cx).map(|s| s.root().display().to_string().into());
     let path_for_reveal = root.clone();
-    SettingPage::new("数据").icon(IconName::HardDrive).group(
-        SettingGroup::new()
-            .title("存储位置")
-            .description(
-                "已保存请求、草稿与设置都以 JSON 文件形式放在这里，可直接备份或用 Git 管理",
-            )
-            .item(SettingItem::render(move |_, _, cx| {
-                let mono = cx.theme().mono_font_family.clone();
-                let muted = cx.theme().muted_foreground;
-                h_flex()
-                    .w_full()
-                    .gap_3()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        v_flex()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child("数据目录"),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .font_family(mono)
-                                    .truncate()
-                                    .child(
-                                        root.clone().unwrap_or_else(|| "（持久化不可用）".into()),
-                                    ),
-                            ),
-                    )
-                    .child({
-                        let path = path_for_reveal.clone();
-                        Button::new("reveal-data-dir")
-                            .outline()
-                            .small()
-                            .label(if cfg!(target_os = "macos") {
-                                "在访达中显示"
-                            } else {
-                                "打开所在文件夹"
-                            })
-                            .disabled(path.is_none())
-                            .on_click(move |_, _, cx| {
-                                if let Some(p) = &path {
-                                    cx.reveal_path(std::path::Path::new(p.as_ref()));
-                                }
-                            })
-                    })
-            })),
-    )
+    SettingPage::new(tr!("settings.data"))
+        .icon(IconName::HardDrive)
+        .group(
+            SettingGroup::new()
+                .title(tr!("settings.storage"))
+                .description(tr!("settings.storage_desc"))
+                .item(SettingItem::render(move |_, _, cx| {
+                    let mono = cx.theme().mono_font_family.clone();
+                    let muted = cx.theme().muted_foreground;
+                    h_flex()
+                        .w_full()
+                        .gap_3()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            v_flex()
+                                .min_w_0()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(tr!("settings.data_dir")),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .font_family(mono)
+                                        .truncate()
+                                        .child(root.clone().unwrap_or_else(|| {
+                                            tr!("settings.data_dir_unavailable")
+                                        })),
+                                ),
+                        )
+                        .child({
+                            let path = path_for_reveal.clone();
+                            Button::new("reveal-data-dir")
+                                .outline()
+                                .small()
+                                .label(if cfg!(target_os = "macos") {
+                                    tr!("settings.reveal_finder")
+                                } else {
+                                    tr!("settings.reveal_folder")
+                                })
+                                .disabled(path.is_none())
+                                .on_click(move |_, _, cx| {
+                                    if let Some(p) = &path {
+                                        cx.reveal_path(std::path::Path::new(p.as_ref()));
+                                    }
+                                })
+                        })
+                })),
+        )
 }
 
 fn about_page() -> SettingPage {
-    SettingPage::new("关于")
+    SettingPage::new(tr!("settings.about"))
         .icon(IconName::Info)
         .group(
             SettingGroup::new()
@@ -313,7 +339,7 @@ fn about_page() -> SettingPage {
                             div()
                                 .text_xs()
                                 .text_color(muted)
-                                .child("基于 gpui 与 gpui-component 构建的 HTTP 调试工具。"),
+                                .child(tr!("settings.about_blurb")),
                         )
                         .child(
                             DescriptionList::new()
@@ -321,24 +347,24 @@ fn about_page() -> SettingPage {
                                 .bordered(false)
                                 .small()
                                 .label_width(rems(4.))
-                                .item("版本", env!("CARGO_PKG_VERSION"), 1)
-                                .item("许可证", "Apache-2.0", 1),
+                                .item(tr!("settings.version"), env!("CARGO_PKG_VERSION"), 1)
+                                .item(tr!("settings.license"), "Apache-2.0", 1),
                         )
                 })),
         )
         .group(
             SettingGroup::new()
-                .title("更新")
+                .title(tr!("settings.updates"))
                 .item(
                     SettingItem::new(
-                        "启动时检查更新",
+                        tr!("settings.check_on_launch"),
                         SettingField::switch(
                             |cx| settings::settings(cx).check_updates_on_launch,
                             |value, cx| settings::update(cx, |s| s.check_updates_on_launch = value),
                         )
                         .default_value(true),
                     )
-                    .description("启动 5 秒后向 GitHub Releases 查询一次，不会自动下载"),
+                    .description(tr!("settings.check_on_launch_desc")),
                 )
                 .item(SettingItem::render(|_, _, cx| render_update_row(cx))),
         )
@@ -359,7 +385,7 @@ fn render_update_row(cx: &App) -> AnyElement {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("此平台暂无自动更新，请前往发布页下载"),
+                    .child(tr!("settings.update_unsupported")),
             )
             .child(releases_button("open-releases"))
             .into_any_element();
@@ -375,7 +401,9 @@ fn render_update_row(cx: &App) -> AnyElement {
         UpdateStatus::Idle | UpdateStatus::UpToDate => actions = actions.child(check_button(false)),
         UpdateStatus::Checking => actions = actions.child(check_button(true)),
         UpdateStatus::Available(_) => {
-            let install = Button::new("install-update").small().label("下载并安装");
+            let install = Button::new("install-update")
+                .small()
+                .label(tr!("settings.install_update"));
             actions = actions
                 .child(if kind == InstallKind::Installed {
                     install
@@ -392,7 +420,7 @@ fn render_update_row(cx: &App) -> AnyElement {
                 Button::new("restart-update")
                     .primary()
                     .small()
-                    .label("重新启动")
+                    .label(tr!("settings.restart"))
                     .on_click(|_, _, cx| update::restart(cx)),
             );
         }
@@ -402,7 +430,7 @@ fn render_update_row(cx: &App) -> AnyElement {
                     Button::new("retry-update")
                         .outline()
                         .small()
-                        .label("重试")
+                        .label(tr!("settings.retry"))
                         .on_click(|_, _, cx| update::check(cx)),
                 )
                 .child(releases_button("open-releases"));
@@ -411,10 +439,10 @@ fn render_update_row(cx: &App) -> AnyElement {
 
     let note = match (&status, kind) {
         (UpdateStatus::Available(_), InstallKind::DevBuild) => {
-            Some("开发构建无法就地更新，请从发布页下载")
+            Some(tr!("settings.update_dev_build"))
         }
         (UpdateStatus::Available(_), InstallKind::Translocated) => {
-            Some("请先把 GetCat 拖到「应用程序」文件夹，再进行更新")
+            Some(tr!("settings.update_translocated"))
         }
         _ => None,
     };
@@ -462,7 +490,7 @@ fn check_button(checking: bool) -> Button {
     Button::new("check-updates")
         .outline()
         .small()
-        .label("检查更新")
+        .label(tr!("settings.check_updates"))
         .loading(checking)
         .on_click(|_, _, cx| update::check(cx))
 }
@@ -473,9 +501,17 @@ fn releases_button(id: &'static str) -> Link {
         h_flex()
             .gap_1()
             .items_center()
-            .child("发布页")
+            .child(tr!("settings.releases"))
             .child(Icon::new(IconName::ExternalLink).size_3p5()),
     )
+}
+
+fn language_key(pref: LanguagePref) -> SharedString {
+    match pref {
+        LanguagePref::System => "system".into(),
+        LanguagePref::English => "en".into(),
+        LanguagePref::Chinese => "zh-CN".into(),
+    }
 }
 
 fn theme_key(pref: ThemePref) -> SharedString {

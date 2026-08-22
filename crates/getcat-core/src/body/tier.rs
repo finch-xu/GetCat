@@ -22,14 +22,14 @@ pub fn mib_label(bytes: u64) -> String {
 // 文案只构造一次；数字全部来自阈值常量，改阈值时文案自动跟随。
 static VIRTUAL_NOTICE: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "大响应：超过 {} 或 {} 行，已切换为纯文本模式",
+        "Large response: over {} or {} lines; switched to plain text mode",
         mib_label(EDITOR_MAX_BYTES as u64),
         EDITOR_MAX_LINES
     )
 });
 static PREVIEW_NOTICE: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "响应超过 {}，已写入临时文件，仅预览前 {}",
+        "Response exceeds {}; written to a temp file, previewing the first {}",
         mib_label(MAX_BODY_BYTES),
         mib_label(HEAD_BYTES as u64)
     )
@@ -99,7 +99,7 @@ mod tests {
             virtual_notice.contains(&EDITOR_MAX_LINES.to_string()),
             "{virtual_notice}"
         );
-        assert!(virtual_notice.contains("纯文本"));
+        assert!(virtual_notice.contains("plain text"));
         let preview_notice = ViewTier::Preview.notice().unwrap();
         assert!(
             preview_notice.contains(&mib_label(MAX_BODY_BYTES)),

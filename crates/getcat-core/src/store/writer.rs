@@ -129,7 +129,7 @@ impl StoreWriter {
     fn send(&self, msg: Msg) {
         if self.tx.send(msg).is_err() {
             warn!("store writer thread is gone; dropping persistence job");
-            self.stats.set_error("写入线程已退出".into());
+            self.stats.set_error("Writer thread has exited".into());
         }
     }
 }
@@ -214,7 +214,7 @@ fn perform(job: Pending, stats: &Stats) {
         }
         Err(_) => {
             warn!(path = %path.display(), "persistence job panicked");
-            stats.set_error(format!("{}：写入任务崩溃", path.display()));
+            stats.set_error(format!("{}: write task crashed", path.display()));
         }
     }
 }
@@ -305,7 +305,7 @@ mod tests {
         w.write(path.clone(), || panic!("boom"));
         assert!(w.flush(Duration::from_secs(5)));
         assert!(
-            w.last_error().unwrap().contains("崩溃"),
+            w.last_error().unwrap().contains("crashed"),
             "{:?}",
             w.last_error()
         );

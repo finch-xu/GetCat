@@ -14,6 +14,7 @@ use gpui_component::{
     scroll::{Scrollbar, ScrollbarAxis},
 };
 
+use crate::i18n::tr;
 use crate::ui::format_bytes;
 
 /// 每行固定高度（uniform_list 要求等高；按第一项测量，所有行都用同一个 h()）。
@@ -56,8 +57,9 @@ pub fn render_text_lines(
                     )
                     .child(div().child(SharedString::from(clipped.text.to_string())))
                     .when(clipped.hidden_bytes > 0, |h| {
-                        h.child(div().ml_2().text_color(warning).child(SharedString::from(
-                            format!("…（已省略 {}）", format_bytes(clipped.hidden_bytes as u64)),
+                        h.child(div().ml_2().text_color(warning).child(tr!(
+                            "response.line_truncated",
+                            size = format_bytes(clipped.hidden_bytes as u64)
                         )))
                     })
             })
@@ -75,7 +77,7 @@ pub fn render_text_lines(
     div()
         .id("response-lines-region")
         .role(Role::Group)
-        .aria_label("响应正文（纯文本视图）")
+        .aria_label(tr!("response.lines_aria"))
         .relative()
         .size_full()
         .child(list)
@@ -119,7 +121,7 @@ pub fn render_header_rows(
     div()
         .id("response-headers-region")
         .role(Role::Group)
-        .aria_label("响应头列表")
+        .aria_label(tr!("response.headers_aria"))
         .relative()
         .size_full()
         .child(list)

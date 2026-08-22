@@ -1,11 +1,12 @@
 //! 应用设置（全局）：内存里一份 [`AppSettings`]，改动后同步写 `settings.json`、
-//! 重建 HTTP client（请求段改了才重建）并把编辑器字号套到主题上。
+//! 重建 HTTP client（请求段改了才重建）、把编辑器字号套到主题上、切换界面语言。
 
 use getcat_core::model::{AppSettings, EDITOR_FONT_SIZE_RANGE};
 use gpui::{App, Global, px};
 use gpui_component::Theme;
 
 use crate::bridge;
+use crate::i18n;
 use crate::state::store::store;
 
 pub struct SettingsHandle {
@@ -47,6 +48,9 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut AppSettings)) {
         Theme::global_mut(cx).mono_font_size = px(next.editor_font_size as f32);
         cx.refresh_windows();
     }
+    if next.language != before.language {
+        i18n::apply(next.language, cx);
+    }
     if let Some(store) = store(cx) {
         store.write_settings(next.clone());
     }
@@ -62,4 +66,5 @@ pub fn reset(cx: &mut App) {
 fn apply(settings: &AppSettings, cx: &mut App) {
     bridge::rebuild_client(cx, &settings.request);
     Theme::global_mut(cx).mono_font_size = px(settings.editor_font_size as f32);
+    i18n::apply(settings.language, cx);
 }

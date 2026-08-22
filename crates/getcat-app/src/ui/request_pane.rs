@@ -13,10 +13,11 @@ use gpui_component::{
     v_flex,
 };
 
+use crate::i18n::tr;
 use crate::state::request_tab::{BodyMode, RequestSection, RequestTab};
 use crate::ui::format_bytes;
 
-fn section_label(text: &'static str, cx: &App) -> impl IntoElement {
+fn section_label(text: SharedString, cx: &App) -> impl IntoElement {
     div()
         .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
@@ -69,10 +70,10 @@ impl RequestTab {
                         RequestSection::Params => v_flex()
                             .gap_3()
                             .when(self.has_path_params(cx), |v| {
-                                v.child(section_label("Path 参数", cx))
+                                v.child(section_label(tr!("request.path_params"), cx))
                                     .child(self.path_params.clone())
                             })
-                            .child(section_label("Query 参数", cx))
+                            .child(section_label(tr!("request.query_params"), cx))
                             .child(self.params.clone())
                             .into_any_element(),
                         RequestSection::Headers => self.headers.clone().into_any_element(),
@@ -119,7 +120,7 @@ impl RequestTab {
                                 .outline()
                                 .small()
                                 .label(current_format.label())
-                                .tooltip("raw 内容的格式（决定高亮与 Content-Type）")
+                                .tooltip(tr!("request.raw_format_tooltip"))
                                 .dropdown_caret(true)
                                 .dropdown_menu(move |mut menu, _, _| {
                                     for format in RawFormat::ALL {
@@ -148,7 +149,7 @@ impl RequestTab {
                     .py_2()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("此请求没有 Body")
+                    .child(tr!("request.no_body"))
                     .into_any_element(),
                 BodyMode::Raw => v_flex()
                     .flex_1()
@@ -164,14 +165,19 @@ impl RequestTab {
                             .overflow_hidden()
                             .child(
                                 Editor::new(self.editor_for(self.raw_format))
-                                    .aria_label("请求 Body 编辑器")
+                                    .aria_label(tr!("request.body_editor_aria"))
                                     .font_family(cx.theme().mono_font_family.clone())
                                     .text_size(cx.theme().mono_font_size)
                                     .size_full(),
                             ),
                     )
-                    .when_some(self.body_hint.clone(), |v, hint| {
-                        v.child(div().text_xs().text_color(cx.theme().warning).child(hint))
+                    .when_some(self.body_hint, |v, hint| {
+                        v.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child(hint.text()),
+                        )
                     })
                     .into_any_element(),
                 BodyMode::FormData => v_flex()
@@ -186,8 +192,13 @@ impl RequestTab {
                             .overflow_y_scroll()
                             .child(self.form_data.clone()),
                     )
-                    .when_some(self.body_hint.clone(), |v, hint| {
-                        v.child(div().text_xs().text_color(cx.theme().warning).child(hint))
+                    .when_some(self.body_hint, |v, hint| {
+                        v.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child(hint.text()),
+                        )
                     })
                     .into_any_element(),
                 BodyMode::FormUrlEncoded => div()
@@ -214,7 +225,7 @@ impl RequestTab {
                         Button::new("choose-file")
                             .outline()
                             .small()
-                            .label("选择文件…")
+                            .label(tr!("common.choose_file"))
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.choose_file(window, cx)),
                             ),
@@ -224,7 +235,7 @@ impl RequestTab {
                             Button::new("clear-file")
                                 .ghost()
                                 .small()
-                                .label("清除")
+                                .label(tr!("common.clear"))
                                 .on_click(cx.listener(|this, _, _, cx| this.clear_file(cx))),
                         )
                     }),
@@ -252,7 +263,7 @@ impl RequestTab {
                 None => div()
                     .text_sm()
                     .text_color(muted)
-                    .child("尚未选择文件；发送时将以流式方式上传，内容不进入内存")
+                    .child(tr!("request.no_file"))
                     .into_any_element(),
             })
             .into_any_element()

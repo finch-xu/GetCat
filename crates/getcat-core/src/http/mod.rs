@@ -286,7 +286,7 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
                     FormValue::File { path, content_type } => {
                         if path.as_os_str().is_empty() {
                             return Err(RequestError::FileBody(format!(
-                                "字段 \"{}\" 未选择文件",
+                                "Field \"{}\" has no file selected",
                                 f.key
                             )));
                         }
@@ -312,7 +312,7 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
         }
         BodyKind::Binary { path, content_type } => {
             if path.as_os_str().is_empty() {
-                return Err(RequestError::FileBody("未选择文件".to_string()));
+                return Err(RequestError::FileBody("No file selected".to_string()));
             }
             OutboundBody::File {
                 path: path.clone(),
@@ -355,7 +355,7 @@ fn file_err(path: &Path, e: std::io::Error) -> RequestError {
 }
 
 fn part_err(field: &str, path: &Path, e: std::io::Error) -> RequestError {
-    RequestError::FileBody(format!("字段 \"{field}\"：{}：{e}", path.display()))
+    RequestError::FileBody(format!("Field \"{field}\": {}: {e}", path.display()))
 }
 
 /// 打开待上传的文件，确认它是普通文件，返回句柄与字节数。
@@ -366,7 +366,7 @@ fn part_err(field: &str, path: &Path, e: std::io::Error) -> RequestError {
 async fn open_upload_file(path: &Path) -> std::io::Result<(tokio::fs::File, u64)> {
     let meta = tokio::fs::metadata(path).await?;
     if !meta.is_file() {
-        return Err(std::io::Error::other("不是普通文件"));
+        return Err(std::io::Error::other("Not a regular file"));
     }
     let file = tokio::fs::File::open(path).await?;
     // 长度取自已打开的句柄而非上面那次 stat：两次调用之间文件可能被改写，
@@ -464,7 +464,7 @@ pub(crate) async fn execute_with_threshold(
                         .mime_str(&mime)
                         .map_err(|e| {
                             RequestError::FileBody(format!(
-                                "字段 \"{name}\"：Content-Type 无效：{e}"
+                                "Field \"{name}\": invalid Content-Type: {e}"
                             ))
                         })?;
                         form.part(name, p)
@@ -1237,7 +1237,8 @@ mod tests {
         let err = prepare(&d).unwrap_err();
         assert!(matches!(err, RequestError::FileBody(_)), "{err:?}");
         assert!(
-            err.to_string().contains("字段 \"avatar\" 未选择文件"),
+            err.to_string()
+                .contains("Field \"avatar\" has no file selected"),
             "{err}"
         );
     }
@@ -1266,7 +1267,7 @@ mod tests {
             fields: vec![FormField::file("doc", dir.clone())],
         };
         let err = run(&d).await.unwrap_err();
-        assert!(err.to_string().contains("不是普通文件"), "{err}");
+        assert!(err.to_string().contains("Not a regular file"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

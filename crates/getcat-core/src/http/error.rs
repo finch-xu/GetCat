@@ -1,47 +1,31 @@
 //! 请求错误分类：把 reqwest 的错误链映射成用户可理解的类别。
+//!
+//! `Display` 是英文的技术文案（日志与测试用）；界面上的种类标签与说明由 app 层按变体翻译。
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RequestError {
-    #[error("无效的 URL：{0}")]
+    #[error("Invalid URL: {0}")]
     InvalidUrl(String),
-    #[error("非法的 Header：{0}")]
+    #[error("Invalid header: {0}")]
     InvalidHeader(String),
     #[error("{0}")]
     Unsupported(String),
-    #[error("DNS 解析失败：{0}")]
+    #[error("DNS lookup failed: {0}")]
     Dns(String),
-    #[error("连接被拒绝：{0}")]
+    #[error("Connection refused: {0}")]
     ConnectionRefused(String),
-    #[error("TLS 错误：{0}")]
+    #[error("TLS error: {0}")]
     Tls(String),
-    #[error("连接超时")]
+    #[error("Connection timed out")]
     Timeout,
-    #[error("临时文件写入失败：{0}")]
+    #[error("Couldn't write temp file: {0}")]
     Spill(String),
-    #[error("无法读取文件：{0}")]
+    #[error("Couldn't read file: {0}")]
     FileBody(String),
-    #[error("已取消")]
+    #[error("Cancelled")]
     Cancelled,
-    #[error("网络错误：{0}")]
+    #[error("Network error: {0}")]
     Other(String),
-}
-
-impl RequestError {
-    pub fn kind_label(&self) -> &'static str {
-        match self {
-            RequestError::InvalidUrl(_) => "URL 无效",
-            RequestError::InvalidHeader(_) => "Header 无效",
-            RequestError::Unsupported(_) => "暂不支持",
-            RequestError::Dns(_) => "DNS 失败",
-            RequestError::ConnectionRefused(_) => "连接被拒绝",
-            RequestError::Tls(_) => "TLS 错误",
-            RequestError::Timeout => "超时",
-            RequestError::Spill(_) => "落盘失败",
-            RequestError::FileBody(_) => "文件不可读",
-            RequestError::Cancelled => "已取消",
-            RequestError::Other(_) => "网络错误",
-        }
-    }
 }
 
 /// 完整错误链（含顶层）——只用于展示文本。

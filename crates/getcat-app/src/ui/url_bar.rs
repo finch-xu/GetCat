@@ -12,8 +12,10 @@ use gpui_component::{
 };
 
 use crate::SaveRequest;
+use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
 use crate::ui::method_color;
+use crate::ui::text::prepare_error_line;
 
 impl RequestTab {
     pub fn render_url_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -23,13 +25,13 @@ impl RequestTab {
         let action_button = if in_flight {
             Button::new("cancel")
                 .outline()
-                .label("取消")
+                .label(tr!("url_bar.cancel"))
                 .icon(IconName::Close)
                 .on_click(cx.listener(|this, _, _, cx| this.cancel(cx)))
         } else {
             Button::new("send")
                 .primary()
-                .label("发送")
+                .label(tr!("url_bar.send"))
                 .icon(IconName::Play)
                 .on_click(cx.listener(|this, _, window, cx| this.send(window, cx)))
         };
@@ -51,30 +53,36 @@ impl RequestTab {
                         div()
                             .id("method-select")
                             .role(Role::Group)
-                            .aria_label("请求方法")
+                            .aria_label(tr!("url_bar.method_aria"))
                             .w_32()
                             .flex_none()
                             .child(Select::new(&self.method).text_color(method_color(method, cx))),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Input::new(&self.url).cleanable(true).aria_label("请求 URL")),
+                        div().flex_1().min_w_0().child(
+                            Input::new(&self.url)
+                                .cleanable(true)
+                                .aria_label(tr!("url_bar.url_aria")),
+                        ),
                     )
                     .child(
                         Button::new("save-request")
                             .outline()
-                            .label("保存")
-                            .tooltip_with_action("保存请求", &SaveRequest, None)
+                            .label(tr!("url_bar.save"))
+                            .tooltip_with_action(tr!("url_bar.save_tooltip"), &SaveRequest, None)
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(SaveRequest), cx)
                             }),
                     )
                     .child(action_button),
             )
-            .when_some(self.prepare_error.clone(), |v, err| {
-                v.child(div().text_xs().text_color(cx.theme().danger).child(err))
+            .when_some(self.prepare_error.as_ref(), |v, err| {
+                v.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(prepare_error_line(err)),
+                )
             })
     }
 }

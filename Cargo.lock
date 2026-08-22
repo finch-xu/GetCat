@@ -2295,6 +2295,8 @@ dependencies = [
  "gpui-updater",
  "gpui_platform",
  "gpui_tokio",
+ "rust-i18n",
+ "sys-locale",
  "tempfile",
  "tokio",
  "tracing",

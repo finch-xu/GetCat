@@ -31,6 +31,9 @@ bytes = "1.12"
 futures = "0.3.34"
 memchr = "2.8"
 thiserror = "2.0"
+# i18n：与 gpui-component 共用同一个 rust-i18n（set_locale 是跨 crate 的全局），sys-locale 读系统首选语言
+rust-i18n = "4.2"
+sys-locale = "0.3"
 anyhow = "1.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

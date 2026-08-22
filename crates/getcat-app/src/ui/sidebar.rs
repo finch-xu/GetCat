@@ -23,9 +23,11 @@ use gpui_component::{
 use getcat_core::model::ThemePref;
 
 use crate::assets::LOGO_PATH;
+use crate::i18n::tr;
 use crate::state::request_tab::tab_title;
 use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::method_color;
+use crate::ui::text::theme_label;
 use crate::{OpenSettings, SaveRequest, ToggleSidebar};
 
 /// 列表行高：布局用 `h_11()`（2.75 rem），默认 rem 下等于 44 px；
@@ -42,9 +44,9 @@ fn theme_icon(pref: ThemePref) -> IconName {
 }
 
 impl SidebarSection {
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> SharedString {
         match self {
-            SidebarSection::Saved => "已保存请求",
+            SidebarSection::Saved => tr!("sidebar.saved.title"),
         }
     }
 
@@ -65,7 +67,7 @@ impl Workspace {
         v_flex()
             .id("sidebar-rail")
             .role(Role::Group)
-            .aria_label("功能栏")
+            .aria_label(tr!("sidebar.rail_aria"))
             // 48 px：与 gpui-component `Sidebar` 的折叠宽度一致
             .w_12()
             .h_full()
@@ -97,9 +99,9 @@ impl Workspace {
                 let section = *section;
                 let tooltip: SharedString = match (section, saved_count) {
                     (SidebarSection::Saved, n) if n > 0 => {
-                        format!("{}（{n}）", section.title()).into()
+                        tr!("sidebar.saved.title_with_count", count = n)
                     }
-                    _ => section.title().into(),
+                    _ => section.title(),
                 };
                 Button::new(("rail-section", section as usize))
                     .ghost()
@@ -115,14 +117,14 @@ impl Workspace {
                 Button::new("rail-theme")
                     .ghost()
                     .icon(Icon::new(theme_icon(theme)).size_4())
-                    .tooltip(format!("主题：{}（点击切换）", theme.label()))
+                    .tooltip(tr!("sidebar.theme_tooltip", theme = theme_label(theme)))
                     .on_click(cx.listener(|this, _, window, cx| this.cycle_theme(window, cx))),
             )
             .child(
                 Button::new("rail-settings")
                     .ghost()
                     .icon(Icon::new(IconName::Settings).size_4())
-                    .tooltip_with_action("设置…", &OpenSettings, None)
+                    .tooltip_with_action(tr!("sidebar.settings"), &OpenSettings, None)
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
             )
     }
@@ -161,7 +163,7 @@ impl Workspace {
                             .ghost()
                             .xsmall()
                             .icon(Icon::new(IconName::PanelLeftClose).size_4())
-                            .tooltip_with_action("收起", &ToggleSidebar, None)
+                            .tooltip_with_action(tr!("sidebar.collapse"), &ToggleSidebar, None)
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
                     ),
             )
@@ -183,15 +185,15 @@ impl Workspace {
                 .text_sm()
                 .text_center()
                 .text_color(cx.theme().muted_foreground)
-                .child("尚无已保存的请求")
+                .child(tr!("sidebar.saved.empty_title"))
                 .child(
                     h_flex()
                         .gap_1()
                         .items_center()
                         .text_xs()
-                        .child("按")
+                        .child(tr!("sidebar.saved.empty_hint_prefix"))
                         .children(save_key)
-                        .child("保存当前请求"),
+                        .child(tr!("sidebar.saved.empty_hint_suffix")),
                 )
                 .into_any_element();
         }
@@ -227,7 +229,7 @@ impl Workspace {
                             .rounded(radius)
                             .when(selected, |row| row.bg(active_bg))
                             .hover(|style| style.bg(hover_bg))
-                            .aria_label(format!("已保存请求：{name}"))
+                            .aria_label(tr!("sidebar.saved.row_aria", name = name))
                             .on_click(move |_, window, cx| {
                                 if let Some(ws) = open.upgrade() {
                                     ws.update(cx, |ws, cx| ws.open_saved(id, window, cx));
@@ -258,7 +260,7 @@ impl Workspace {
                                     .icon(IconName::Delete)
                                     // Button 只实现 InteractiveElement（非 Stateful），没有
                                     // aria_label；tooltip 就是它对外的可读名字。
-                                    .tooltip("删除")
+                                    .tooltip(tr!("sidebar.saved.delete"))
                                     .on_click(move |_, window, cx| {
                                         // 不让点击冒泡成"打开"
                                         cx.stop_propagation();
@@ -274,22 +276,28 @@ impl Workspace {
                             .context_menu(move |menu, _, _| {
                                 let open = menu_ws.clone();
                                 let delete = menu_ws.clone();
-                                menu.item(PopupMenuItem::new("打开").on_click(
-                                    move |_, window, cx| {
-                                        if let Some(ws) = open.upgrade() {
-                                            ws.update(cx, |ws, cx| ws.open_saved(id, window, cx));
-                                        }
-                                    },
-                                ))
+                                menu.item(
+                                    PopupMenuItem::new(tr!("sidebar.saved.menu_open")).on_click(
+                                        move |_, window, cx| {
+                                            if let Some(ws) = open.upgrade() {
+                                                ws.update(cx, |ws, cx| {
+                                                    ws.open_saved(id, window, cx)
+                                                });
+                                            }
+                                        },
+                                    ),
+                                )
                                 .separator()
                                 .item(
-                                    PopupMenuItem::new("删除…").on_click(move |_, window, cx| {
-                                        if let Some(ws) = delete.upgrade() {
-                                            ws.update(cx, |ws, cx| {
-                                                ws.confirm_delete_saved(id, window, cx)
-                                            });
-                                        }
-                                    }),
+                                    PopupMenuItem::new(tr!("sidebar.saved.menu_delete")).on_click(
+                                        move |_, window, cx| {
+                                            if let Some(ws) = delete.upgrade() {
+                                                ws.update(cx, |ws, cx| {
+                                                    ws.confirm_delete_saved(id, window, cx)
+                                                });
+                                            }
+                                        },
+                                    ),
                                 )
                             }),
                     )
