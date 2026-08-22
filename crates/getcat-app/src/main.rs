@@ -1,3 +1,6 @@
+// Windows 的 release 构建不要附带控制台窗口（debug 构建保留，方便看 tracing 输出）
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod assets;
 mod bridge;
 mod state;
@@ -11,6 +14,7 @@ use gpui_component::{Root, TitleBar};
 use crate::assets::AppAssets;
 use crate::state::settings;
 use crate::state::store::{flush_on_exit, install};
+use crate::state::update;
 use crate::state::workspace::Workspace;
 
 actions!(
@@ -49,7 +53,8 @@ fn main() {
             theme::install(cx);
             bridge::init(cx);
 
-            // 上次崩溃 / 被 kill 时来不及清理的落盘目录：后台清扫 24 h 以上的 getcat-<pid>（不碰本进程的）
+            // 上次崩溃 / 被 kill 时来不及清理的落盘目录：后台清扫 24 h 以上的 getcat-<pid>（不碰本进程的）；
+            // 顺便清掉上次更新留下的安装包与旧可执行文件
             cx.background_spawn(async {
                 let removed = getcat_core::body::spill::sweep_stale_session_dirs(
                     getcat_core::body::spill::STALE_SESSION_AGE,
@@ -57,6 +62,7 @@ fn main() {
                 if removed > 0 {
                     tracing::info!(removed, "stale spill directories removed");
                 }
+                update::cleanup_leftovers();
             })
             .detach();
 
@@ -95,6 +101,8 @@ fn main() {
                     install(cx, opened);
                     // 设置在开窗前生效：HTTP client 与编辑器字号都要在第一帧就是用户的值
                     settings::install(cx, loaded.settings.take());
+                    // 更新器在开窗前安装：Workspace 构造时要订阅它
+                    update::install(cx);
                     cx.open_window(options, |window, cx| {
                         // TitlebarOptions.title 为 None（标题由 TitleBar 自绘）；OS 层的窗口标题给 Dock / 任务栏 / 屏幕阅读器
                         window.set_window_title("GetCat");
@@ -123,7 +131,11 @@ fn main() {
                 });
                 // AsyncApp::update 在本版本直接返回闭包结果（不再包一层 Result）
                 match opened_window {
-                    Ok(_) => cx.update(|cx| cx.activate(true)),
+                    Ok(_) => cx.update(|cx| {
+                        cx.activate(true);
+                        // 启动后延迟几秒检查一次新版本（设置可关；开发构建默认不查）
+                        update::schedule_launch_check(cx);
+                    }),
                     // 开窗失败没有任何可交互的界面，只记日志会留下一个无窗僵尸进程：显式退出
                     Err(e) => {
                         tracing::error!("failed to open window: {e}");

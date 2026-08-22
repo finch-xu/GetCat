@@ -27,8 +27,11 @@ use gpui_component::{
     v_flex,
 };
 
+use gpui_updater::UpdateStatus;
+
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
+use crate::state::update;
 use crate::ui::settings_dialog::open_settings;
 use crate::{
     CloseTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest, ToggleSidebar,
@@ -66,6 +69,8 @@ pub struct Workspace {
     /// 侧栏列表的滚动句柄。
     saved_scroll: UniformListScrollHandle,
     focus_handle: FocusHandle,
+    /// 全局更新器状态的副本（观察到变化时同步），状态栏提示与「关于」页据此渲染。
+    update_status: UpdateStatus,
     _subs: Vec<Subscription>,
 }
 
@@ -104,8 +109,17 @@ impl Workspace {
             saved: Rc::new(saved),
             saved_scroll: UniformListScrollHandle::new(),
             focus_handle: cx.focus_handle(),
+            update_status: update::status(cx),
             _subs: Vec::new(),
         };
+
+        // 更新器状态变化 → 刷新状态栏提示；设置对话框层在本实体的 render 里，同一次 notify 也刷新「关于」页
+        if let Some(updater) = update::updater(cx) {
+            ws._subs.push(cx.observe(&updater, |this, updater, cx| {
+                this.update_status = updater.read(cx).status().clone();
+                cx.notify();
+            }));
+        }
 
         let (drafts, active) = order_drafts(&state, drafts);
         let split = ws.split;
@@ -198,6 +212,11 @@ impl Workspace {
     #[cfg(test)]
     pub fn sidebar_width(&self) -> Option<f32> {
         self.sidebar_width
+    }
+
+    #[cfg(test)]
+    pub fn update_status(&self) -> &UpdateStatus {
+        &self.update_status
     }
 
     pub fn theme(&self) -> ThemePref {

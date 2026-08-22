@@ -36,6 +36,7 @@ use crate::state::request_tab::{
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::settings;
 use crate::state::store;
+use crate::state::update::{self, InstallKind};
 use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::{KvTable, RowKind};
@@ -1858,4 +1859,215 @@ fn settings_shortcut_keystroke_parses() {
     for ks in ["cmd-,", "ctrl-,"] {
         assert!(gpui::Keystroke::parse(ks).is_ok(), "{ks}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// 应用内更新：用假源驱动 gpui-updater，不碰网络
+// ---------------------------------------------------------------------------
+
+/// 返回固定结果的 `UpdateSource`；闭包每次调用构造新值（`Error` 不是 Clone）。
+struct FakeSource(Box<dyn Fn() -> gpui_updater::Result<gpui_updater::Release> + Send + Sync>);
+
+impl gpui_updater::UpdateSource for FakeSource {
+    fn fetch_latest(&self) -> gpui_updater::Result<gpui_updater::Release> {
+        (self.0)()
+    }
+}
+
+/// 带签名与校验和声明的 release：`Verification::Strict` 在检查阶段只验"有没有"，不访问网络。
+fn fake_release(version: gpui_updater::Version) -> gpui_updater::Release {
+    gpui_updater::Release {
+        version,
+        notes: None,
+        asset: gpui_updater::Asset {
+            name: "GetCat-macos-arm64.dmg".into(),
+            url: "https://example.invalid/GetCat-macos-arm64.dmg".into(),
+            size: 0,
+        },
+        signature: Some("untrusted comment: test\nRUSTtest".into()),
+        signature_url: None,
+        sha256: Some("00".repeat(32)),
+    }
+}
+
+fn install_fake_updater(
+    cx: &mut VisualTestContext,
+    kind: InstallKind,
+    fetch: impl Fn() -> gpui_updater::Result<gpui_updater::Release> + Send + Sync + 'static,
+) {
+    cx.update(|_, cx| {
+        update::install_with_source(
+            cx,
+            FakeSource(Box::new(fetch)),
+            update::engine_config(),
+            kind,
+        )
+    });
+}
+
+fn v(major: u64) -> gpui_updater::Version {
+    gpui_updater::Version::new(major, 0, 0)
+}
+
+#[gpui::test]
+async fn update_check_surfaces_new_version_in_workspace(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    install_fake_updater(cx, InstallKind::Installed, || Ok(fake_release(v(99))));
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    assert_eq!(
+        cx.update(|_, cx| ws.read(cx).update_status().clone()),
+        gpui_updater::UpdateStatus::Idle
+    );
+
+    cx.update(|_, cx| update::check(cx));
+    cx.run_until_parked();
+
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::Available(v(99))
+    );
+    // Workspace 通过 observe 同步到了同一状态
+    let status = cx.update(|_, cx| ws.read(cx).update_status().clone());
+    assert_eq!(update::hint_version(&status), Some((&v(99), false)));
+    assert!(cx.update(|_, cx| update::can_install(cx)));
+
+    // 状态栏带提示时能画出一帧
+    // 聚焦中的 URL 输入框在测试窗口里渲染会碰真实平台句柄（见 sidebar 测试的说明），先 blur
+    cx.update(|window, _| window.blur());
+    let ws_element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1000.), px(800.)), |_, _| {
+        ws_element.into_any_element()
+    });
+}
+
+#[gpui::test]
+async fn update_check_up_to_date_has_no_hint(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    install_fake_updater(cx, InstallKind::Installed, || Ok(fake_release(v(0))));
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+
+    cx.update(|_, cx| update::check(cx));
+    cx.run_until_parked();
+
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::UpToDate
+    );
+    let status = cx.update(|_, cx| ws.read(cx).update_status().clone());
+    assert_eq!(update::hint_version(&status), None);
+    assert!(!cx.update(|_, cx| update::can_install(cx)));
+}
+
+#[gpui::test]
+async fn update_check_error_is_surfaced(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    install_fake_updater(cx, InstallKind::Installed, || {
+        Err(gpui_updater::Error::Http("offline".into()))
+    });
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+
+    cx.update(|_, cx| update::check(cx));
+    cx.run_until_parked();
+
+    let status = cx.update(|_, cx| update::status(cx));
+    assert!(
+        matches!(&status, gpui_updater::UpdateStatus::Errored(msg) if msg.contains("offline")),
+        "{status:?}"
+    );
+    assert_eq!(update::hint_version(&status), None);
+    assert_eq!(
+        cx.update(|_, cx| ws.read(cx).update_status().clone()),
+        status
+    );
+    // 离线启动不能把状态栏搞坏
+    cx.update(|window, _| window.blur());
+    let ws_element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1000.), px(800.)), |_, _| {
+        ws_element.into_any_element()
+    });
+}
+
+#[gpui::test]
+async fn launch_check_respects_setting(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    install_fake_updater(cx, InstallKind::Installed, || Ok(fake_release(v(99))));
+    cx.update(|_, cx| {
+        settings::install(
+            cx,
+            Some(AppSettings {
+                check_updates_on_launch: false,
+                ..Default::default()
+            }),
+        )
+    });
+
+    cx.update(|_, cx| update::schedule_launch_check(cx));
+    cx.executor()
+        .advance_clock(update::LAUNCH_CHECK_DELAY + Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::Idle,
+        "关闭开关后启动不应检查"
+    );
+
+    cx.update(|_, cx| settings::update(cx, |s| s.check_updates_on_launch = true));
+    cx.update(|_, cx| update::schedule_launch_check(cx));
+    // 延迟未到：仍未开始
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::Idle
+    );
+    cx.executor()
+        .advance_clock(update::LAUNCH_CHECK_DELAY + Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::Available(v(99))
+    );
+}
+
+#[gpui::test]
+async fn dev_builds_can_check_but_not_install(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    install_fake_updater(cx, InstallKind::DevBuild, || Ok(fake_release(v(99))));
+
+    cx.update(|_, cx| update::check(cx));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::Available(v(99))
+    );
+    assert!(!cx.update(|_, cx| update::can_install(cx)));
+
+    cx.update(|_, cx| update::download_and_install(cx));
+    cx.run_until_parked();
+    // 没有进入 Downloading / Errored：开发构建直接拒绝安装
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::Available(v(99))
+    );
+}
+
+#[gpui::test]
+async fn unsupported_platform_has_no_updater(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    assert!(!cx.update(|_, cx| update::supported(cx)));
+    assert_eq!(
+        cx.update(|_, cx| update::status(cx)),
+        gpui_updater::UpdateStatus::Idle
+    );
+    // 没有更新器时这些动作都是空操作，不能 panic
+    cx.update(|_, cx| {
+        update::check(cx);
+        update::download_and_install(cx);
+        update::schedule_launch_check(cx);
+    });
+    cx.run_until_parked();
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    assert_eq!(
+        cx.update(|_, cx| ws.read(cx).update_status().clone()),
+        gpui_updater::UpdateStatus::Idle
+    );
 }
