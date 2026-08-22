@@ -4,9 +4,11 @@
 
 # GetCat
 
-**用 Rust + [GPUI](https://gpui.rs) 构建的跨平台 HTTP 接口调试工具**
+**用 Rust + [GPUI](https://gpui.rs) 打造的原生跨平台 HTTP 接口调试工具**
 
-No postman, Just GetCat! 原生渲染UI、高性能、低资源占用、不需要账号。
+No Postman, Just GetCat!
+
+GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -14,6 +16,8 @@ No postman, Just GetCat! 原生渲染UI、高性能、低资源占用、不需�
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
+
+[English](README.en.md) · **简体中文**
 
 </div>
 
@@ -35,8 +39,64 @@ No postman, Just GetCat! 原生渲染UI、高性能、低资源占用、不需�
 | 平台 | 文件 | 说明 |
 |---|---|---|
 | macOS（Apple Silicon / Intel） | `GetCat-macos-arm64.dmg` / `GetCat-macos-x64.dmg` | 已签名公证，拖进「应用程序」即可 |
-| Linux x64 | `GetCat-linux-x64.tar.gz` | 解压得到 `getcat`；需要 Vulkan 驱动，glibc ≥ 2.35 |
-| Windows x64 | `GetCat-windows-x64.exe` | 单文件；需要 DirectX 12；首次运行可能有 SmartScreen 提示 |
+| Linux x64 | `GetCat-linux-x64.tar.gz` | 解压得到 `getcat`，系统要求见下 |
+| Windows x64 | `GetCat-windows-x64.exe` | 免安装单文件，系统要求见下 |
+
+<details>
+<summary>兼容的 Linux 系统版本</summary>
+
+支持 2022 年以后的主流桌面发行版：**Ubuntu 22.04+**、**Debian 12+**、**Fedora 36+**、**Linux Mint 21+**、**openSUSE Leap 15.6+**，以及 Arch、openSUSE Tumbleweed 等滚动发行版。这些系统的图形驱动开箱可用，不需要额外装什么。
+
+更老的发行版跑不了：Ubuntu 20.04、Debian 11，以及 RHEL / Rocky / AlmaLinux 9 —— 下限是 glibc 2.35，它们都在这之下。
+
+解压后装到 `~/.local/bin`，并加进应用菜单：
+
+```bash
+tar -xzf GetCat-linux-x64.tar.gz
+install -Dm755 getcat ~/.local/bin/getcat
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/getcat.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=GetCat
+Exec=$HOME/.local/bin/getcat
+Categories=Development;
+EOF
+```
+
+如果之后 `getcat` 命令找不到，说明 `~/.local/bin` 还不在 PATH 里，重新登录一次即可。
+
+</details>
+
+<details>
+<summary>Linux 版本启动后黑屏，或报 Vulkan / 找不到 GPU</summary>
+
+界面由 GPU 通过 Vulkan 渲染。桌面发行版通常自带驱动，先自检：
+
+```bash
+vulkaninfo --summary
+```
+
+没有输出、或提示找不到设备时，按显卡装驱动：
+
+| 环境 | 命令 |
+|---|---|
+| Ubuntu / Debian + Intel、AMD 显卡 | `sudo apt install mesa-vulkan-drivers` |
+| Fedora + Intel、AMD 显卡 | `sudo dnf install mesa-vulkan-drivers` |
+| Arch + Intel、AMD 显卡 | `sudo pacman -S vulkan-intel` 或 `vulkan-radeon` |
+| NVIDIA 显卡 | 装厂商专有驱动（如 `nvidia-driver-550`）；开源的 nouveau 不提供 Vulkan |
+| 虚拟机 / 无独显 | 装 `mesa-vulkan-drivers`，会退到 lavapipe 软件渲染，能用但慢 |
+
+</details>
+
+<details>
+<summary>兼容的 Windows 系统版本</summary>
+
+需要 **Windows 10 1803（2018 年 4 月更新）及以上**，或 Windows 11。界面走 Direct3D 11 渲染，2010 年前后的显卡就够（feature level 10.1 起），不要求 DirectX 12。
+
+`GetCat-windows-x64.exe` 是免安装的单文件，放哪都能跑。它还没做代码签名，首次运行 SmartScreen 会拦一下：点「更多信息」→「仍要运行」。
+
+</details>
 
 ## 使用
 
@@ -89,7 +149,7 @@ crates/
 
 ### 构建与调试
 
-- Rust ≥ 1.97（edition 2024）。macOS 不需要额外工具链；Linux 需要 Vulkan 与 Wayland / X11 / fontconfig 头文件（清单见 `.github/workflows/ci.yml`）；Windows 需要 DirectX 12。
+- Rust ≥ 1.97（edition 2024）。macOS 不需要额外工具链；Linux 需要 Vulkan 与 Wayland / X11 / fontconfig 头文件（清单见 `.github/workflows/ci.yml`）；Windows 需要 MSVC 工具链，Direct3D 11 已含在 Windows SDK 里。
 - 应用 logo：`crates/getcat-app/assets/logo/cat.png` 是去背的原画，`scripts/gen-logo.py` 把它合成成 app 内嵌的 `getcat.png` 与 macOS 图标用的 `resources/macos/getcat-1024.png`；改 logo 后手动重跑脚本并提交产物（CI 不生成，需要 `pip install pillow numpy`）。
 
 ```bash
