@@ -154,7 +154,7 @@ pub struct RequestTab {
     /// binary Body：所选文件路径与大小（大小只用于显示）。
     pub file_path: Option<PathBuf>,
     pub file_size: Option<u64>,
-    /// 文本 Body 过大时的非阻塞提示。
+    /// 非阻塞的 Body 提示：raw 模式下是文本过大提示，form-data 模式下是 Content-Type 冲突提示。
     pub body_hint: Option<SharedString>,
     body_editors: Vec<(RawFormat, Entity<EditorState>)>,
     response_editors: Vec<(&'static str, Entity<EditorState>)>,
