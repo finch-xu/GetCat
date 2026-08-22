@@ -27,3 +27,7 @@ docs/
 .superpowers/
 
 .claude/
+
+mydata/
+
+.DS_Store
