@@ -19,9 +19,10 @@ impl RequestTab {
     pub fn render_url_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let in_flight = self.response.is_in_flight();
         let method = self.current_method(cx);
+        // 取消请求不是破坏性提交：按设计指南用 outline，danger 只留给删除类动作
         let action_button = if in_flight {
             Button::new("cancel")
-                .danger()
+                .outline()
                 .label("取消")
                 .icon(IconName::Close)
                 .on_click(cx.listener(|this, _, _, cx| this.cancel(cx)))
@@ -65,7 +66,7 @@ impl RequestTab {
                         Button::new("save-request")
                             .outline()
                             .label("保存")
-                            .tooltip("保存请求（⌘S / Ctrl S）")
+                            .tooltip_with_action("保存请求", &SaveRequest, None)
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(SaveRequest), cx)
                             }),

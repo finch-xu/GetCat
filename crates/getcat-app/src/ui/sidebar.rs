@@ -14,6 +14,7 @@ use gpui_component::{
     ActiveTheme, Icon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
+    kbd::Kbd,
     scroll::Scrollbar,
     v_flex,
 };
@@ -24,6 +25,7 @@ use crate::assets::LOGO_PATH;
 use crate::state::request_tab::tab_title;
 use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::method_color;
+use crate::{OpenSettings, SaveRequest, ToggleSidebar};
 
 /// 列表行高（uniform_list 要求等高）。
 pub const SAVED_ROW_HEIGHT: f32 = 44.;
@@ -121,13 +123,13 @@ impl Workspace {
                 Button::new("rail-settings")
                     .ghost()
                     .icon(Icon::new(IconName::Settings).size_4())
-                    .tooltip("设置（⌘, / Ctrl ,）")
+                    .tooltip_with_action("设置…", &OpenSettings, None)
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
             )
     }
 
     /// 展开的功能面板：标题行 + 当前功能的内容。
-    pub fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let section = self.sidebar_section();
         v_flex()
             .id("sidebar-panel")
@@ -160,17 +162,19 @@ impl Workspace {
                             .ghost()
                             .xsmall()
                             .icon(Icon::new(IconName::PanelLeftClose).size_4())
-                            .tooltip("收起（⌘B / Ctrl B）")
+                            .tooltip_with_action("收起", &ToggleSidebar, None)
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
                     ),
             )
             .child(match section {
-                SidebarSection::Saved => self.render_saved_list(cx),
+                SidebarSection::Saved => self.render_saved_list(window, cx),
             })
     }
 
-    fn render_saved_list(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_saved_list(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.saved().is_empty() {
+            // 快捷键用 Kbd 按当前绑定渲染（平台自动显示 ⌘ 或 Ctrl），不手写字符串
+            let save_key = Kbd::binding_for_action(&SaveRequest, None, window);
             return v_flex()
                 .flex_1()
                 .items_center()
@@ -181,7 +185,15 @@ impl Workspace {
                 .text_center()
                 .text_color(cx.theme().muted_foreground)
                 .child("尚无已保存的请求")
-                .child(div().text_xs().child("用 ⌘S / Ctrl S 保存当前请求"))
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .text_xs()
+                        .child("按")
+                        .children(save_key)
+                        .child("保存当前请求"),
+                )
                 .into_any_element();
         }
         // 渲染闭包只持有 Rc 与弱引用：每帧 O(可见行)，不复制列表内容。

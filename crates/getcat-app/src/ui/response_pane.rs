@@ -6,10 +6,13 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
     ActiveTheme, IconName, Sizable,
+    alert::Alert,
     button::{Button, ButtonVariants},
     h_flex,
     input::Editor,
+    kbd::Kbd,
     tab::{Tab, TabBar},
+    tag::Tag,
     v_flex,
 };
 
@@ -17,8 +20,13 @@ use crate::state::request_tab::{RequestTab, ResponseSection};
 use crate::state::response::{ResponseState, ResponseView};
 use crate::ui::body_view::{render_header_rows, render_text_lines};
 use crate::ui::{format_bytes, format_duration, status_color};
+use crate::{FindInResponse, SendRequest};
 
 fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    empty_state_frame(cx).child(text.into()).into_any_element()
+}
+
+fn empty_state_frame(cx: &App) -> Div {
     div()
         .size_full()
         .flex()
@@ -26,23 +34,22 @@ fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
         .justify_center()
         .text_sm()
         .text_color(cx.theme().muted_foreground)
-        .child(text.into())
-        .into_any_element()
 }
 
-fn notice_bar(text: impl Into<SharedString>, cx: &App) -> AnyElement {
-    div()
-        .px_3()
-        .py_1()
-        .text_xs()
-        .bg(cx.theme().warning.opacity(0.15))
-        .text_color(cx.theme().warning)
-        .child(text.into())
+/// 档位提示：官方 `Alert` 的 banner 形态，底色 / 边框 / 图标全部来自主题。
+fn notice_bar(text: impl Into<SharedString>) -> AnyElement {
+    Alert::warning("tier-notice", text.into())
+        .banner()
+        .xsmall()
         .into_any_element()
 }
 
 impl RequestTab {
-    pub fn render_response_pane(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_response_pane(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let (is_done, has_pretty, headers_count) = match &self.response {
             ResponseState::Done { view, .. } => (true, view.has_pretty(), view.header_rows.len()),
             _ => (false, false, 0),
@@ -83,7 +90,7 @@ impl RequestTab {
                                         .ghost()
                                         .xsmall()
                                         .icon(IconName::Search)
-                                        .tooltip("响应内搜索（⌘F / Ctrl F）")
+                                        .tooltip_with_action("在响应中查找", &FindInResponse, None)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.find_in_response(window, cx)
                                         })),
@@ -92,7 +99,7 @@ impl RequestTab {
                                     Button::new("save-body")
                                         .ghost()
                                         .xsmall()
-                                        .label("保存到文件")
+                                        .label("保存到文件…")
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.save_body(window, cx)
                                         })),
@@ -142,13 +149,29 @@ impl RequestTab {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .child(self.render_response_body(section, cx)),
+                    .child(self.render_response_body(section, window, cx)),
             )
     }
 
-    fn render_response_body(&self, section: ResponseSection, cx: &mut Context<Self>) -> AnyElement {
+    fn render_response_body(
+        &self,
+        section: ResponseSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         match &self.response {
-            ResponseState::Idle => empty_state("输入 URL 后点击发送，或按 ⌘⏎ / Ctrl+Enter", cx),
+            ResponseState::Idle => {
+                let send_key = Kbd::binding_for_action(&SendRequest, None, window);
+                empty_state_frame(cx)
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child("输入 URL 后点击发送，或按")
+                            .children(send_key),
+                    )
+                    .into_any_element()
+            }
             ResponseState::InFlight {
                 received, total, ..
             } => {
@@ -232,7 +255,7 @@ impl RequestTab {
         };
         v_flex()
             .size_full()
-            .when_some(doc.tier.notice(), |v, text| v.child(notice_bar(text, cx)))
+            .when_some(doc.tier.notice(), |v, text| v.child(notice_bar(text)))
             .when(view.is_preview(), |v| {
                 v.child(self.render_preview_summary(body, view, cx))
             })
@@ -320,12 +343,10 @@ impl RequestTab {
                     .items_center()
                     .text_sm()
                     .child(
-                        div()
-                            .px_2()
-                            .py_0p5()
-                            .rounded_md()
-                            .bg(color.opacity(0.15))
-                            .text_color(color)
+                        // 状态码用官方 Tag 的描边形态：圆角与内边距跟主题走，不再手调透明度
+                        Tag::custom(color, color, color)
+                            .outline()
+                            .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(format!("{} {}", view.meta.status, view.meta.status_text)),
                     )

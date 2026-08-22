@@ -17,8 +17,9 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
-    button::{Button, ButtonVariants},
-    dialog::{DialogAction, DialogClose, DialogFooter},
+    alert::Alert,
+    button::{Button, ButtonVariant, ButtonVariants},
+    dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
     h_flex,
     input::{Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
@@ -460,26 +461,19 @@ impl Workspace {
             return;
         };
         let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, _| {
+        // 破坏性确认走 AlertDialog（设计指南）：标题点名对象，正文只写后果，
+        // 按钮由 button_props 自动生成，确认键用结果动词。
+        window.open_alert_dialog(cx, move |alert, _, _| {
             let weak = weak.clone();
-            let name = name.clone();
-            dialog
-                .title("删除已保存请求")
-                .content(move |content, _, _| {
-                    content.child(format!("确定删除「{name}」？此操作不可撤销。"))
-                })
-                // 与 prompt_save_name 同理：普通 Dialog 不会自动生成 footer，
-                // button_props 只对 AlertDialog 生效，按钮必须自己拼。
-                .footer(
-                    DialogFooter::new()
-                        .child(
-                            DialogClose::new()
-                                .child(Button::new("cancel-delete").outline().label("取消")),
-                        )
-                        .child(
-                            DialogAction::new()
-                                .child(Button::new("ok-delete").danger().label("删除")),
-                        ),
+            alert
+                .title(SharedString::from(format!("删除“{name}”？")))
+                .description("此操作不可撤销。")
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text("删除")
+                        .ok_variant(ButtonVariant::Danger)
+                        .cancel_text("取消")
+                        .show_cancel(true),
                 )
                 .on_ok(move |_, _, cx| {
                     if let Some(ws) = weak.upgrade() {
@@ -669,7 +663,7 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::Plus)
-                        .tooltip("新建请求（⌘T / Ctrl T）")
+                        .tooltip_with_action("新建请求", &NewTab, None)
                         .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
                 ),
             )
@@ -815,15 +809,9 @@ impl Workspace {
 }
 
 /// 持久化不可用 / 写入失败的顶部横幅（spec §9.4 / §11）：一行文字，不阻塞任何操作。
-fn render_banner(text: String, cx: &App) -> impl IntoElement {
-    div()
-        .w_full()
-        .px_3()
-        .py_1()
-        .text_xs()
-        .bg(cx.theme().danger.opacity(0.12))
-        .text_color(cx.theme().danger)
-        .child(text)
+/// 用官方 `Alert` 的 banner 形态：图标、底色、边框都来自主题，不再手调透明度。
+fn render_banner(text: String) -> impl IntoElement {
+    Alert::error("store-banner", text).banner().xsmall()
 }
 
 impl Render for Workspace {
@@ -866,7 +854,7 @@ impl Render for Workspace {
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
             )
             .child(self.render_title_bar(cx))
-            .when_some(banner(cx), |d, text| d.child(render_banner(text, cx)))
+            .when_some(banner(cx), |d, text| d.child(render_banner(text)))
             .child(
                 h_flex()
                     .flex_1()
@@ -890,7 +878,7 @@ impl Render for Workspace {
                                         .size(sidebar_width)
                                         .size_range(px(180.)..px(420.))
                                         .visible(!self.sidebar_collapsed)
-                                        .child(self.render_sidebar(cx)),
+                                        .child(self.render_sidebar(window, cx)),
                                 )
                                 .child(
                                     resizable_panel().child(

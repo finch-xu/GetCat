@@ -845,7 +845,7 @@ impl RequestTab {
 }
 
 impl Render for RequestTab {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 两个方向各用一个 id：ResizablePanelGroup 按 id 记住拖出来的尺寸，上下与左右互不串扰
         let group = match self.split {
             SplitDirection::Vertical => v_resizable("request-response-v"),
@@ -863,7 +863,7 @@ impl Render for RequestTab {
             div().flex_1().min_h_0().min_w_0().child(
                 group
                     .child(half().child(self.render_request_pane(cx)))
-                    .child(half().child(self.render_response_pane(cx))),
+                    .child(half().child(self.render_response_pane(window, cx))),
             ),
         )
     }

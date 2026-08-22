@@ -214,7 +214,7 @@ impl RequestTab {
                         Button::new("choose-file")
                             .outline()
                             .small()
-                            .label("选择文件")
+                            .label("选择文件…")
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.choose_file(window, cx)),
                             ),

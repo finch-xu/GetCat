@@ -470,7 +470,7 @@ impl KvTable {
                 Button::new(("kv-choose-file", ix))
                     .outline()
                     .xsmall()
-                    .label("选择文件")
+                    .label("选择文件…")
                     .tooltip(row_aria_label(ix, "选择文件"))
                     .on_click(
                         cx.listener(move |this, _, window, cx| {
