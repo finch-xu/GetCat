@@ -20,6 +20,7 @@ gpui_platform.workspace = true
 gpui_tokio.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
+gpui-updater.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

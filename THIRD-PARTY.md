@@ -10,7 +10,7 @@ Linux、Windows 三个平台的依赖并集，已排除仅测试期使用的 dev
 > 依赖变化后请重新生成本文件：`python3 scripts/gen-third-party.py`
 
 
-共 **895** 个第三方依赖，分属 **36** 种许可证声明。
+共 **905** 个第三方依赖，分属 **36** 种许可证声明。
 
 
 ## 已知许可证问题
@@ -41,7 +41,7 @@ getcat-app -> gpui -> sum_tree (Apache-2.0) -> ztracing
 
 ### Apache-2.0 OR MIT
 
-_536 个依赖_
+_544 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
@@ -90,6 +90,7 @@ _536 个依赖_
 | `autocfg` | 1.5.1 | [github.com/cuviper/autocfg](https://github.com/cuviper/autocfg) |  |
 | `backtrace` | 0.3.76 | [github.com/rust-lang/backtrace-rs](https://github.com/rust-lang/backtrace-rs) |  |
 | `base64` | 0.22.1 | [github.com/marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) |  |
+| `base64` | 0.23.1 | [github.com/marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) |  |
 | `bit-set` | 0.8.0 | [github.com/contain-rs/bit-set](https://github.com/contain-rs/bit-set) |  |
 | `bit-set` | 0.9.1 | [github.com/contain-rs/bit-set](https://github.com/contain-rs/bit-set) |  |
 | `bit-vec` | 0.8.0 | [github.com/contain-rs/bit-vec](https://github.com/contain-rs/bit-vec) |  |
@@ -126,6 +127,8 @@ _536 个依赖_
 | `const-oid` | 0.10.2 | [github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |  |
 | `const-random` | 0.1.18 | [github.com/tkaitchuck/constrandom](https://github.com/tkaitchuck/constrandom) |  |
 | `const-random-macro` | 0.1.16 | [github.com/tkaitchuck/constrandom](https://github.com/tkaitchuck/constrandom) |  |
+| `cookie` | 0.18.2 | [github.com/SergioBenitez/cookie-rs](https://github.com/SergioBenitez/cookie-rs) |  |
+| `cookie_store` | 0.22.1 | [github.com/pfernie/cookie_store](https://github.com/pfernie/cookie_store) |  |
 | `core-foundation` | 0.9.4 | [github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |  |
 | `core-foundation` | 0.10.1 | [github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |  |
 | `core-foundation-sys` | 0.8.7 | [github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |  |
@@ -209,6 +212,7 @@ _536 个依赖_
 | `gpu-allocator` | 0.28.0 | [github.com/Traverse-Research/gpu-allocator](https://github.com/Traverse-Research/gpu-allocator) |  |
 | `gpu-descriptor` | 0.3.2 | [github.com/zakarumych/gpu-descriptor](https://github.com/zakarumych/gpu-descriptor) |  |
 | `gpu-descriptor-types` | 0.2.0 | [github.com/zakarumych/gpu-descriptor](https://github.com/zakarumych/gpu-descriptor) |  |
+| `gpui-updater` | 0.0.7 | [github.com/AprilNEA/gpui-updater](https://github.com/AprilNEA/gpui-updater) |  |
 | `granit-parser` | 0.0.7 | [github.com/bourumir-wyngs/granit-parser](https://github.com/bourumir-wyngs/granit-parser) |  |
 | `half` | 2.7.1 | [github.com/VoidStarKat/half-rs](https://github.com/VoidStarKat/half-rs) |  |
 | `hash32` | 0.3.1 | [github.com/japaric/hash32](https://github.com/japaric/hash32) |  |
@@ -451,6 +455,7 @@ _536 个依赖_
 | `thread_local` | 1.1.10 | [github.com/Amanieu/thread_local-rs](https://github.com/Amanieu/thread_local-rs) |  |
 | `time` | 0.3.55 | [github.com/time-rs/time](https://github.com/time-rs/time) |  |
 | `time-core` | 0.1.9 | [github.com/time-rs/time](https://github.com/time-rs/time) |  |
+| `time-macros` | 0.2.32 | [github.com/time-rs/time](https://github.com/time-rs/time) |  |
 | `tokio-rustls` | 0.26.4 | [github.com/rustls/tokio-rustls](https://github.com/rustls/tokio-rustls) |  |
 | `toml` | 0.8.23 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
 | `toml` | 1.1.4+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
@@ -477,10 +482,13 @@ _536 个依赖_
 | `unicode-vo` | 0.1.0 | [github.com/RazrFalcon/unicode-vo](https://github.com/RazrFalcon/unicode-vo) |  |
 | `unicode-width` | 0.2.2 | [github.com/unicode-rs/unicode-width](https://github.com/unicode-rs/unicode-width) |  |
 | `unicode-xid` | 0.2.6 | [github.com/unicode-rs/unicode-xid](https://github.com/unicode-rs/unicode-xid) |  |
+| `ureq` | 3.4.0 | [github.com/algesten/ureq](https://github.com/algesten/ureq) |  |
+| `ureq-proto` | 0.6.1 | [github.com/algesten/ureq-proto](https://github.com/algesten/ureq-proto) |  |
 | `url` | 2.5.8 | [github.com/servo/rust-url](https://github.com/servo/rust-url) |  |
 | `usvg` | 0.45.1 | [github.com/linebender/resvg](https://github.com/linebender/resvg) |  |
 | `usvg` | 0.46.0 | [github.com/linebender/resvg](https://github.com/linebender/resvg) |  |
 | `utf-8` | 0.7.6 | [github.com/SimonSapin/rust-utf8](https://github.com/SimonSapin/rust-utf8) |  |
+| `utf8-zero` | 0.8.1 | [github.com/algesten/utf8-zero](https://github.com/algesten/utf8-zero) |  |
 | `utf8_iter` | 1.0.4 | [github.com/hsivonen/utf8_iter](https://github.com/hsivonen/utf8_iter) |  |
 | `uuid` | 1.24.1 | [github.com/uuid-rs/uuid](https://github.com/uuid-rs/uuid) |  |
 | `value-bag` | 1.13.2 | [github.com/sval-rs/value-bag](https://github.com/sval-rs/value-bag) |  |
@@ -584,7 +592,7 @@ _536 个依赖_
 
 ### MIT
 
-_196 个依赖_
+_197 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
@@ -652,6 +660,7 @@ _196 个依赖_
 | `maybe-rayon` | 0.1.1 | [github.com/shssoichiro/maybe-rayon](https://github.com/shssoichiro/maybe-rayon) |  |
 | `memoffset` | 0.9.1 | [github.com/Gilnaa/memoffset](https://github.com/Gilnaa/memoffset) |  |
 | `mime_guess` | 2.0.5 | [github.com/abonander/mime_guess](https://github.com/abonander/mime_guess) |  |
+| `minisign-verify` | 0.2.5 | [github.com/jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) |  |
 | `mio` | 1.2.2 | [github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |  |
 | `new_debug_unreachable` | 1.0.6 | [github.com/mbrubeck/rust-debug-unreachable](https://github.com/mbrubeck/rust-debug-unreachable) |  |
 | `nom` | 7.1.3 | [github.com/Geal/nom](https://github.com/Geal/nom) |  |
@@ -1049,6 +1058,15 @@ _2 个依赖_
 | `r-efi` | 5.3.0 | [github.com/r-efi/r-efi](https://github.com/r-efi/r-efi) |  |
 | `r-efi` | 6.0.0 | [github.com/r-efi/r-efi](https://github.com/r-efi/r-efi) |  |
 
+### CDLA-Permissive-2.0
+
+_2 个依赖_
+
+| 依赖 | 版本 | 来源 | 备注 |
+| --- | --- | --- | --- |
+| `webpki-root-certs` | 1.0.9 | [github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |  |
+| `webpki-roots` | 1.0.9 | [github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |  |
+
 ### （未声明）
 
 _2 个依赖_
@@ -1169,14 +1187,6 @@ _1 个依赖_
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
 | `brotli-decompressor` | 5.0.3 | [github.com/dropbox/rust-brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) |  |
-
-### CDLA-Permissive-2.0
-
-_1 个依赖_
-
-| 依赖 | 版本 | 来源 | 备注 |
-| --- | --- | --- | --- |
-| `webpki-root-certs` | 1.0.9 | [github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |  |
 
 ### bzip2-1.0.6
 
