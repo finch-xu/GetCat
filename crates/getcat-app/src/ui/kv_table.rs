@@ -313,6 +313,7 @@ impl KvTable {
     }
 
     /// 系统打开对话框 → 后台读大小 → 写回该行（按行号；对话框期间行被删则丢弃结果）。
+    /// 写回走 `update_in`：在末尾空行上选文件会让那行不再为空，得顺手补出新的末尾空行。
     pub fn choose_row_file(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -333,17 +334,19 @@ impl KvTable {
                     async move { std::fs::metadata(&path).map(|m| m.len()).ok() }
                 })
                 .await;
-            let _ = this.update(cx, |this, cx| {
-                if let Some(row) = this.rows.get_mut(ix) {
-                    row.kind = RowKind::File;
-                    row.file = Some(FileCell {
-                        path,
-                        content_type: None,
-                        size,
-                    });
-                    cx.emit(KvTableEvent::Changed);
-                    cx.notify();
-                }
+            let _ = this.update_in(cx, |this, window, cx| {
+                let Some(row) = this.rows.get_mut(ix) else {
+                    return;
+                };
+                row.kind = RowKind::File;
+                row.file = Some(FileCell {
+                    path,
+                    content_type: None,
+                    size,
+                });
+                this.ensure_trailing_empty_row(window, cx);
+                cx.emit(KvTableEvent::Changed);
+                cx.notify();
             });
         })
         .detach();

@@ -1590,3 +1590,31 @@ fn kv_table_cancelled_row_file_dialog_keeps_row(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// 在末尾空行上选文件：该行变成有内容的一行，末尾必须再补一个空行，否则用户没法继续加字段。
+#[gpui::test]
+fn kv_table_choosing_file_on_trailing_row_appends_empty_row(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let file = temp_form_file("trailing.txt", b"hello");
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+    });
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_form_fields(&[], window, cx);
+            assert_eq!(t.row_count(), 1);
+            t.set_row_kind(0, RowKind::File, cx);
+            t.choose_row_file(0, window, cx);
+        })
+    });
+    let chosen = file.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![chosen]));
+    cx.run_until_parked();
+    cx.read(|app| {
+        let t = table.read(app);
+        assert_eq!(t.row_count(), 2);
+        assert_eq!(t.row_file_size(0), Some(5));
+        assert_eq!(t.form_fields(app), vec![FormField::file("", file.clone())]);
+    });
+    let _ = std::fs::remove_file(&file);
+}
