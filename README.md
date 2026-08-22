@@ -22,7 +22,7 @@ cargo test --workspace
 ## 当前功能（Plan 1–4）
 
 - GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS
-- Path 参数（URL 中 `{name}`）、Query 参数、Headers、Body（raw JSON/Text/XML、form-urlencoded、文件流式上传）
+- Path 参数（URL 中 `{name}`）、Query 参数、Headers（均带 Description 备注列）、Body（form-data：文本 / 文件字段，文件定长流式上传；x-www-form-urlencoded；raw JSON/Text/XML；binary 整文件流式上传）
 - 流式接收、实时进度与耗时、取消
 - 响应：状态/耗时/大小、Pretty/Raw、Headers 列表（虚拟化）、保存到文件
 - 大响应三档展示：≤ 5 MB 且 ≤ 20 万行用高亮编辑器；≤ 64 MB 用按行虚拟化的纯文本视图；> 64 MB 落盘到 `<临时目录>/getcat-<pid>/`，显示摘要 + 前 1 MB 预览 + 保存 / 用系统程序打开（临时文件随响应释放或应用退出删除）
