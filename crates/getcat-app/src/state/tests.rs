@@ -18,8 +18,8 @@ use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    BodyKind, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta, SavedRequest,
-    SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState,
+    BodyKind, FormField, FormValue, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta,
+    SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
 use gpui::{
@@ -36,7 +36,7 @@ use crate::state::response::{ResponseState, ResponseView};
 use crate::state::store;
 use crate::state::workspace::Workspace;
 use crate::ui::body_view::LINE_HEIGHT_PX;
-use crate::ui::kv_table::KvTable;
+use crate::ui::kv_table::{KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
@@ -1476,4 +1476,117 @@ fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
     // 新建的空 Tab 成为激活 Tab：副标题跟着变
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
     cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app).as_ref(), "新请求"));
+}
+
+fn temp_form_file(name: &str, bytes: &[u8]) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("getcat-form-{}-{name}", std::process::id()));
+    std::fs::write(&path, bytes).unwrap();
+    path
+}
+
+#[gpui::test]
+fn kv_table_form_fields_roundtrip_and_refresh_size(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let file = temp_form_file("doc.json", b"{}");
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+    });
+    let fields = vec![
+        FormField {
+            description: "备注".into(),
+            ..FormField::text("note", "hi")
+        },
+        FormField {
+            value: FormValue::File {
+                path: file.clone(),
+                content_type: Some("text/csv".into()),
+            },
+            ..FormField::file("doc", PathBuf::new())
+        },
+        FormField {
+            enabled: false,
+            ..FormField::text("off", "")
+        },
+        // 文件行未选文件：也是一行有效数据（draft 会据此报"未选择文件"）
+        FormField::file("avatar", PathBuf::new()),
+    ];
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_form_fields(&fields, window, cx);
+            assert_eq!(t.form_fields(cx), fields);
+            assert_eq!(t.row_count(), 5);
+        })
+    });
+    cx.run_until_parked();
+    cx.read(|app| assert_eq!(table.read(app).row_file_size(1), Some(2)));
+    let _ = std::fs::remove_file(&file);
+}
+
+#[gpui::test]
+fn kv_table_choose_row_file_sets_path_and_switching_back_drops_it(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let file = temp_form_file("pic.png", b"png!");
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+    });
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_form_fields(&[FormField::text("avatar", "")], window, cx);
+            t.set_row_kind(0, RowKind::File, cx);
+            t.choose_row_file(0, window, cx);
+        })
+    });
+    assert!(cx.did_prompt_for_paths());
+    let chosen = file.clone();
+    cx.simulate_path_prompt_response(move |opts| {
+        assert!(opts.files && !opts.directories && !opts.multiple);
+        Some(vec![chosen])
+    });
+    cx.run_until_parked();
+    cx.read(|app| {
+        let t = table.read(app);
+        assert_eq!(
+            t.form_fields(app)[0].value,
+            FormValue::File {
+                path: file.clone(),
+                content_type: None
+            }
+        );
+        assert_eq!(t.row_file_size(0), Some(4));
+    });
+    // 切回 Text：丢弃路径，值为空文本
+    cx.update(|_, cx| table.update(cx, |t, cx| t.set_row_kind(0, RowKind::Text, cx)));
+    cx.read(|app| {
+        let f = &table.read(app).form_fields(app)[0];
+        assert_eq!(f.key, "avatar");
+        assert_eq!(
+            f.value,
+            FormValue::Text {
+                value: String::new()
+            }
+        );
+    });
+    let _ = std::fs::remove_file(&file);
+}
+
+#[gpui::test]
+fn kv_table_cancelled_row_file_dialog_keeps_row(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true))
+    });
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_form_fields(&[FormField::file("doc", PathBuf::new())], window, cx);
+            t.choose_row_file(0, window, cx);
+        })
+    });
+    cx.simulate_path_prompt_response(|_| None);
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).form_fields(app),
+            vec![FormField::file("doc", PathBuf::new())]
+        );
+    });
 }

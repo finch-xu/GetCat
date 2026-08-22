@@ -1,12 +1,16 @@
 //! 键值表：Params / Headers / Form 共用。最后一行永远保留一个空行用于新增。
 
-use getcat_core::model::KeyValue;
+use std::path::PathBuf;
+
+use getcat_core::http::guess_content_type;
+use getcat_core::model::{FormField, FormValue, KeyValue};
 use gpui::prelude::FluentBuilder as _;
 // 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
 // `#[test]` 属性宏并与标准库同名冲突。编译器报"找不到 X"时把 X 加进这里，不要改回通配符。
 use gpui::{
-    App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
-    Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
+    ParentElement, PathPromptOptions, Render, Role, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IconName, Sizable,
@@ -14,8 +18,11 @@ use gpui_component::{
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
+    tooltip::Tooltip,
     v_flex,
 };
+
+use crate::ui::format_bytes;
 
 /// 每行控件的可访问名称带行号，屏幕阅读器才分得清"第 3 行的参数名"和"第 4 行的参数名"。
 pub fn row_aria_label(ix: usize, what: &str) -> String {
@@ -26,11 +33,41 @@ pub enum KvTableEvent {
     Changed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowKind {
+    Text,
+    File,
+}
+
+impl RowKind {
+    fn label(self) -> &'static str {
+        match self {
+            RowKind::Text => "Text",
+            RowKind::File => "File",
+        }
+    }
+    fn toggled(self) -> RowKind {
+        match self {
+            RowKind::Text => RowKind::File,
+            RowKind::File => RowKind::Text,
+        }
+    }
+}
+
+/// 文件行已选的文件；`size` 只用于显示，后台读取。
+struct FileCell {
+    path: PathBuf,
+    content_type: Option<String>,
+    size: Option<u64>,
+}
+
 struct KvRow {
     key: Entity<InputState>,
     value: Entity<InputState>,
     description: Entity<InputState>,
     enabled: bool,
+    kind: RowKind,
+    file: Option<FileCell>,
     _subs: Vec<Subscription>,
 }
 
@@ -40,6 +77,8 @@ pub struct KvTable {
     rows: Vec<KvRow>,
     /// Path 参数模式：key 只读、由 URL 驱动，不自动追加空行。
     locked_keys: bool,
+    /// form-data 模式：每行可在 Text / File 间切换。
+    file_capable: bool,
 }
 
 impl EventEmitter<KvTableEvent> for KvTable {}
@@ -56,6 +95,7 @@ impl KvTable {
             value_placeholder: value_placeholder.into(),
             rows: Vec::new(),
             locked_keys: false,
+            file_capable: false,
         };
         this.push_row("", "", "", true, window, cx);
         this
@@ -66,6 +106,15 @@ impl KvTable {
         if locked {
             self.rows.clear();
         }
+        self
+    }
+
+    /// form-data 模式：每行可在 Text / File 间切换，File 行按行选文件。
+    // form-data 面板还没接上 file_capable / form_fields / set_form_fields（目前只有测试调用），
+    // 接上以后把这三处 allow(dead_code) 删掉。
+    #[allow(dead_code)]
+    pub fn file_capable(mut self, yes: bool) -> Self {
+        self.file_capable = yes;
         self
     }
 
@@ -105,6 +154,8 @@ impl KvTable {
             value: value_state,
             description: description_state,
             enabled,
+            kind: RowKind::Text,
+            file: None,
             _subs: subs,
         });
     }
@@ -123,8 +174,12 @@ impl KvTable {
     }
 
     fn row_is_empty(&self, r: &KvRow, cx: &App) -> bool {
+        let value_empty = match r.kind {
+            RowKind::Text => r.value.read(cx).value().is_empty(),
+            RowKind::File => r.file.is_none(),
+        };
         r.key.read(cx).value().is_empty()
-            && r.value.read(cx).value().is_empty()
+            && value_empty
             && r.description.read(cx).value().is_empty()
     }
 
@@ -175,6 +230,156 @@ impl KvTable {
         cx.notify();
     }
 
+    #[allow(dead_code)]
+    pub fn form_fields(&self, cx: &App) -> Vec<FormField> {
+        self.rows
+            .iter()
+            .filter(|r| !self.row_is_empty(r, cx))
+            .map(|r| FormField {
+                key: r.key.read(cx).value().to_string(),
+                enabled: r.enabled,
+                description: r.description.read(cx).value().to_string(),
+                value: match r.kind {
+                    RowKind::Text => FormValue::Text {
+                        value: r.value.read(cx).value().to_string(),
+                    },
+                    RowKind::File => match &r.file {
+                        Some(f) => FormValue::File {
+                            path: f.path.clone(),
+                            content_type: f.content_type.clone(),
+                        },
+                        None => FormValue::File {
+                            path: PathBuf::new(),
+                            content_type: None,
+                        },
+                    },
+                },
+            })
+            .collect()
+    }
+
+    /// 程序化载入（不发 `Changed`）；末尾补空行；文件行后台读大小。
+    #[allow(dead_code)]
+    pub fn set_form_fields(
+        &mut self,
+        fields: &[FormField],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.rows.clear();
+        for f in fields {
+            match &f.value {
+                FormValue::Text { value } => {
+                    self.push_row(&f.key, value, &f.description, f.enabled, window, cx);
+                }
+                FormValue::File { path, content_type } => {
+                    self.push_row(&f.key, "", &f.description, f.enabled, window, cx);
+                    let has_path = !path.as_os_str().is_empty();
+                    {
+                        // 作用域限制可变借用，下面才能再借 self 去起后台任务
+                        let row = self.rows.last_mut().expect("just pushed");
+                        row.kind = RowKind::File;
+                        if has_path {
+                            row.file = Some(FileCell {
+                                path: path.clone(),
+                                content_type: content_type.clone(),
+                                size: None,
+                            });
+                        }
+                    }
+                    if has_path {
+                        self.refresh_row_file_size(path.clone(), cx);
+                    }
+                }
+            }
+        }
+        self.push_row("", "", "", true, window, cx);
+        cx.notify();
+    }
+
+    pub fn set_row_kind(&mut self, ix: usize, kind: RowKind, cx: &mut Context<Self>) {
+        let Some(row) = self.rows.get_mut(ix) else {
+            return;
+        };
+        if row.kind == kind {
+            return;
+        }
+        row.kind = kind;
+        if kind == RowKind::Text {
+            row.file = None;
+        }
+        cx.emit(KvTableEvent::Changed);
+        cx.notify();
+    }
+
+    /// 系统打开对话框 → 后台读大小 → 写回该行（按行号；对话框期间行被删则丢弃结果）。
+    pub fn choose_row_file(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("选择".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = rx.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let size = cx
+                .background_spawn({
+                    let path = path.clone();
+                    async move { std::fs::metadata(&path).map(|m| m.len()).ok() }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(row) = this.rows.get_mut(ix) {
+                    row.kind = RowKind::File;
+                    row.file = Some(FileCell {
+                        path,
+                        content_type: None,
+                        size,
+                    });
+                    cx.emit(KvTableEvent::Changed);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// 后台读大小，按路径写回（载入草稿时行号可能还会变，按路径更稳）。
+    fn refresh_row_file_size(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let size = cx
+                .background_spawn({
+                    let path = path.clone();
+                    async move { std::fs::metadata(&path).map(|m| m.len()).ok() }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                for row in this.rows.iter_mut() {
+                    if let Some(f) = row.file.as_mut()
+                        && f.path == path
+                    {
+                        f.size = size;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    #[cfg(test)]
+    pub fn row_file_size(&self, ix: usize) -> Option<u64> {
+        self.rows
+            .get(ix)
+            .and_then(|r| r.file.as_ref())
+            .and_then(|f| f.size)
+    }
+
     #[cfg(test)]
     pub fn row_count(&self) -> usize {
         self.rows.len()
@@ -214,6 +419,83 @@ impl KvTable {
         cx.notify();
     }
 
+    fn render_value_cell(&self, ix: usize, row: &KvRow, cx: &mut Context<Self>) -> AnyElement {
+        if row.kind == RowKind::Text {
+            return div()
+                .flex_1()
+                .child(
+                    Input::new(&row.value)
+                        .small()
+                        .aria_label(row_aria_label(ix, &self.value_placeholder)),
+                )
+                .into_any_element();
+        }
+        let muted = cx.theme().muted_foreground;
+        h_flex()
+            .flex_1()
+            .min_w_0()
+            .gap_2()
+            .items_center()
+            .child(
+                Button::new(("kv-choose-file", ix))
+                    .outline()
+                    .xsmall()
+                    .label("选择文件")
+                    .tooltip(row_aria_label(ix, "选择文件"))
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            this.choose_row_file(ix, window, cx)
+                        }),
+                    ),
+            )
+            .child(match &row.file {
+                Some(f) => {
+                    let full = f.path.display().to_string();
+                    let name = f
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| full.clone());
+                    let mime = f
+                        .content_type
+                        .clone()
+                        .unwrap_or_else(|| guess_content_type(&f.path).to_string());
+                    h_flex()
+                        .min_w_0()
+                        .gap_2()
+                        .text_sm()
+                        .child(
+                            div()
+                                .id(("kv-file-name", ix))
+                                .min_w_0()
+                                .truncate()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(full.clone()).build(window, cx)
+                                })
+                                .child(name),
+                        )
+                        .child(div().flex_none().text_xs().text_color(muted).child(mime))
+                        .when_some(f.size, |h, size| {
+                            h.child(
+                                div()
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(format_bytes(size)),
+                            )
+                        })
+                        .into_any_element()
+                }
+                None => div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child("未选择文件")
+                    .into_any_element(),
+            })
+            .into_any_element()
+    }
+
     fn remove_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         if ix < self.rows.len() {
             self.rows.remove(ix);
@@ -235,6 +517,7 @@ impl KvTable {
 impl Render for KvTable {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let locked = self.locked_keys;
+        let file_capable = self.file_capable;
         v_flex()
             .w_full()
             .gap_1()
@@ -246,6 +529,7 @@ impl Render for KvTable {
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w(px(28.)))
                     .child(div().flex_1().child("Key"))
+                    .when(file_capable, |h| h.child(div().w(px(52.)).flex_none()))
                     .child(div().flex_1().child("Value"))
                     .child(div().flex_1().child("Description"))
                     .child(div().w(px(28.))),
@@ -291,13 +575,25 @@ impl Render for KvTable {
                                 .aria_label(row_aria_label(ix, &self.key_placeholder)),
                         ),
                     )
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&row.value)
-                                .small()
-                                .aria_label(row_aria_label(ix, &self.value_placeholder)),
-                        ),
-                    )
+                    .when(file_capable, |h| {
+                        let kind = row.kind;
+                        h.child(
+                            div().w(px(52.)).flex_none().child(
+                                Button::new(("kv-kind", ix))
+                                    .outline()
+                                    .xsmall()
+                                    .label(kind.label())
+                                    .tooltip(row_aria_label(
+                                        ix,
+                                        "值类型：点击在 Text / File 间切换",
+                                    ))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.set_row_kind(ix, kind.toggled(), cx)
+                                    })),
+                            ),
+                        )
+                    })
+                    .child(self.render_value_cell(ix, row, cx))
                     .child(
                         div().flex_1().child(
                             Input::new(&row.description)
