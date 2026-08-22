@@ -31,3 +31,6 @@ docs/
 mydata/
 
 .DS_Store
+
+# 本地打包产物（scripts/bundle-macos.sh 等）
+dist/
