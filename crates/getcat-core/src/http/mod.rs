@@ -358,6 +358,23 @@ fn part_err(field: &str, path: &Path, e: std::io::Error) -> RequestError {
     RequestError::FileBody(format!("字段 \"{field}\"：{}：{e}", path.display()))
 }
 
+/// 打开待上传的文件，确认它是普通文件，返回句柄与字节数。
+///
+/// 先 stat 再 open：Windows 上 `File::open` 一个目录会直接失败（拒绝访问），
+/// 拿不到后续 `is_file()` 的判断机会，同一个误操作在三个平台会给出不同的错误。
+/// 「不是普通文件」包成 io::Error，交给 file_err / part_err 统一加路径与字段名前缀。
+async fn open_upload_file(path: &Path) -> std::io::Result<(tokio::fs::File, u64)> {
+    let meta = tokio::fs::metadata(path).await?;
+    if !meta.is_file() {
+        return Err(std::io::Error::other("不是普通文件"));
+    }
+    let file = tokio::fs::File::open(path).await?;
+    // 长度取自已打开的句柄而非上面那次 stat：两次调用之间文件可能被改写，
+    // Content-Length 与实际 body 不一致会让请求挂起或被服务端拒绝。
+    let len = file.metadata().await?.len();
+    Ok((file, len))
+}
+
 fn to_reqwest_method(m: Method) -> reqwest::Method {
     match m {
         Method::Get => reqwest::Method::GET,
@@ -428,19 +445,9 @@ pub(crate) async fn execute_with_threshold(
                         path,
                         content_type,
                     } => {
-                        let file = tokio::fs::File::open(&path)
+                        let (file, len) = open_upload_file(&path)
                             .await
                             .map_err(|e| part_err(&name, &path, e))?;
-                        let meta = file
-                            .metadata()
-                            .await
-                            .map_err(|e| part_err(&name, &path, e))?;
-                        if !meta.is_file() {
-                            return Err(RequestError::FileBody(format!(
-                                "字段 \"{name}\"：{}：不是普通文件",
-                                path.display()
-                            )));
-                        }
                         let file_name = path
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
@@ -451,7 +458,7 @@ pub(crate) async fn execute_with_threshold(
                         // 用 Part::stream 会退化为 chunked，很多上传入口直接拒绝。
                         let p = reqwest::multipart::Part::stream_with_length(
                             reqwest::Body::from(file),
-                            meta.len(),
+                            len,
                         )
                         .file_name(file_name)
                         .mime_str(&mime)
@@ -468,17 +475,9 @@ pub(crate) async fn execute_with_threshold(
             builder = builder.multipart(form);
         }
         OutboundBody::File { path, content_type } => {
-            let file = tokio::fs::File::open(&path)
+            let (file, len) = open_upload_file(&path)
                 .await
                 .map_err(|e| file_err(&path, e))?;
-            let meta = file.metadata().await.map_err(|e| file_err(&path, e))?;
-            if !meta.is_file() {
-                return Err(RequestError::FileBody(format!(
-                    "{}：不是普通文件",
-                    path.display()
-                )));
-            }
-            let len = meta.len();
             if !has_content_type && let Some(ct) = content_type {
                 builder = builder.header(CONTENT_TYPE, ct);
             }
