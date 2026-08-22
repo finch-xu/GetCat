@@ -270,19 +270,14 @@ impl KvTable {
                 FormValue::File { path, content_type } => {
                     self.push_row(&f.key, "", &f.description, f.enabled, window, cx);
                     let has_path = !path.as_os_str().is_empty();
-                    {
-                        // 作用域限制可变借用，下面才能再借 self 去起后台任务
-                        let row = self.rows.last_mut().expect("just pushed");
-                        row.kind = RowKind::File;
-                        if has_path {
-                            row.file = Some(FileCell {
-                                path: path.clone(),
-                                content_type: content_type.clone(),
-                                size: None,
-                            });
-                        }
-                    }
+                    let row = self.rows.last_mut().expect("just pushed");
+                    row.kind = RowKind::File;
                     if has_path {
+                        row.file = Some(FileCell {
+                            path: path.clone(),
+                            content_type: content_type.clone(),
+                            size: None,
+                        });
                         self.refresh_row_file_size(path.clone(), cx);
                     }
                 }
@@ -307,7 +302,8 @@ impl KvTable {
         cx.notify();
     }
 
-    /// 系统打开对话框 → 后台读大小 → 写回该行（按行号；对话框期间行被删则丢弃结果）。
+    /// 系统打开对话框 → 立刻按行号写路径（对话框期间行被删则丢弃结果）→ 大小按路径后台补齐。
+    /// 路径不等后台读大小就写回：中间再 await 一次的话，期间删掉 `ix` 之上的行会把文件写到别人身上。
     /// 写回走 `update_in`：在末尾空行上选文件会让那行不再为空，得顺手补出新的末尾空行。
     pub fn choose_row_file(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions {
@@ -323,32 +319,27 @@ impl KvTable {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
-            let size = cx
-                .background_spawn({
-                    let path = path.clone();
-                    async move { std::fs::metadata(&path).map(|m| m.len()).ok() }
-                })
-                .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let Some(row) = this.rows.get_mut(ix) else {
                     return;
                 };
                 row.kind = RowKind::File;
                 row.file = Some(FileCell {
-                    path,
+                    path: path.clone(),
                     content_type: None,
-                    size,
+                    size: None,
                 });
                 this.ensure_trailing_empty_row(window, cx);
                 cx.emit(KvTableEvent::Changed);
                 cx.notify();
+                this.refresh_row_file_size(path, cx);
             });
         })
         .detach();
     }
 
     /// 后台读大小，按路径写回（载入草稿时行号可能还会变，按路径更稳）。
-    fn refresh_row_file_size(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn refresh_row_file_size(&self, path: PathBuf, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let size = cx
                 .background_spawn({
