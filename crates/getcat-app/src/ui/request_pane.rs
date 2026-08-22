@@ -102,8 +102,9 @@ impl RequestTab {
                                 this.mark_dirty(cx);
                             }))
                             .child("none")
+                            .child("form-data")
+                            .child("x-www-form-urlencoded")
                             .child("raw")
-                            .child("form-urlencoded")
                             .child("binary"),
                     )
                     .when(mode == BodyMode::Raw, |h| {
@@ -147,7 +148,23 @@ impl RequestTab {
                         v.child(div().text_xs().text_color(cx.theme().warning).child(hint))
                     })
                     .into_any_element(),
-                BodyMode::Form => div()
+                BodyMode::FormData => v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .gap_1()
+                    .child(
+                        div()
+                            .id("form-data-body")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .child(self.form_data.clone()),
+                    )
+                    .when_some(self.body_hint.clone(), |v, hint| {
+                        v.child(div().text_xs().text_color(cx.theme().warning).child(hint))
+                    })
+                    .into_any_element(),
+                BodyMode::FormUrlEncoded => div()
                     .id("form-body")
                     .flex_1()
                     .min_h_0()

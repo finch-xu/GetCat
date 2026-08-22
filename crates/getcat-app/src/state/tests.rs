@@ -30,7 +30,8 @@ use tempfile::TempDir;
 
 use crate::state::request_tab::{
     BINARY_SEARCH_NOTICE, BODY_HINT_BYTES, BodyMode, DRAFT_DEBOUNCE, EMPTY_BODY_SEARCH_NOTICE,
-    NO_RESPONSE_NOTICE, RequestTab, ResponseSection, VIRTUAL_SEARCH_NOTICE,
+    FORM_DATA_CONTENT_TYPE_HINT, NO_RESPONSE_NOTICE, RequestTab, ResponseSection,
+    VIRTUAL_SEARCH_NOTICE,
 };
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::store;
@@ -827,6 +828,21 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
             },
             ..Default::default()
         },
+        RequestDraft {
+            method: Method::Post,
+            url: "https://x.test/upload".into(),
+            body: BodyKind::FormData {
+                fields: vec![
+                    FormField {
+                        description: "说明".into(),
+                        ..FormField::text("note", "hi")
+                    },
+                    FormField::file("doc", file.clone()),
+                    FormField::file("pending", PathBuf::new()),
+                ],
+            },
+            ..Default::default()
+        },
         RequestDraft::default(),
     ];
     for draft in drafts {
@@ -844,6 +860,74 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
             "programmatic load must not dirty the tab"
         );
     }
+}
+
+#[gpui::test]
+fn form_data_mode_warns_when_user_sets_content_type(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.body_mode = BodyMode::FormData;
+            t.refresh_body_hint(cx);
+            assert_eq!(t.body_hint, None);
+            let headers = t.headers.clone();
+            headers.update(cx, |h, cx| {
+                h.set_values(&[KeyValue::new("content-type", "text/plain")], window, cx)
+            });
+            t.refresh_body_hint(cx);
+            assert_eq!(t.body_hint.as_deref(), Some(FORM_DATA_CONTENT_TYPE_HINT));
+            // 禁用那一行：提示消失
+            headers.update(cx, |h, cx| {
+                h.set_values(
+                    &[KeyValue {
+                        enabled: false,
+                        ..KeyValue::new("content-type", "text/plain")
+                    }],
+                    window,
+                    cx,
+                )
+            });
+            t.refresh_body_hint(cx);
+            assert_eq!(t.body_hint, None);
+            // 其他模式不提示
+            headers.update(cx, |h, cx| {
+                h.set_values(&[KeyValue::new("Content-Type", "text/plain")], window, cx)
+            });
+            t.body_mode = BodyMode::Raw;
+            t.refresh_body_hint(cx);
+            assert_eq!(t.body_hint, None);
+        })
+    });
+}
+
+#[gpui::test]
+fn form_data_and_urlencoded_tables_are_independent(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.load_draft(
+                &RequestDraft {
+                    body: BodyKind::FormUrlEncoded {
+                        fields: vec![KeyValue::new("a", "1")],
+                    },
+                    ..Default::default()
+                },
+                window,
+                cx,
+            );
+            t.body_mode = BodyMode::FormData;
+            assert_eq!(t.draft(cx).body, BodyKind::FormData { fields: vec![] });
+            t.body_mode = BodyMode::FormUrlEncoded;
+            assert_eq!(
+                t.draft(cx).body,
+                BodyKind::FormUrlEncoded {
+                    fields: vec![KeyValue::new("a", "1")]
+                }
+            );
+        })
+    });
 }
 
 #[gpui::test]

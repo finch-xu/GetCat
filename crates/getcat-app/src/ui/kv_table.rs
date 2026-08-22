@@ -110,9 +110,6 @@ impl KvTable {
     }
 
     /// form-data 模式：每行可在 Text / File 间切换，File 行按行选文件。
-    // form-data 面板还没接上 file_capable / form_fields / set_form_fields（目前只有测试调用），
-    // 接上以后把这三处 allow(dead_code) 删掉。
-    #[allow(dead_code)]
     pub fn file_capable(mut self, yes: bool) -> Self {
         self.file_capable = yes;
         self
@@ -230,7 +227,6 @@ impl KvTable {
         cx.notify();
     }
 
-    #[allow(dead_code)]
     pub fn form_fields(&self, cx: &App) -> Vec<FormField> {
         self.rows
             .iter()
@@ -259,7 +255,6 @@ impl KvTable {
     }
 
     /// 程序化载入（不发 `Changed`）；末尾补空行；文件行后台读大小。
-    #[allow(dead_code)]
     pub fn set_form_fields(
         &mut self,
         fields: &[FormField],

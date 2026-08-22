@@ -59,19 +59,22 @@ pub enum ResponseSection {
     Headers,
 }
 
+/// Body 模式；`ALL` 的顺序就是模式条顺序（Postman 顺序）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyMode {
     None,
+    FormData,
+    FormUrlEncoded,
     Raw,
-    Form,
     Binary,
 }
 
 impl BodyMode {
-    pub const ALL: [BodyMode; 4] = [
+    pub const ALL: [BodyMode; 5] = [
         BodyMode::None,
+        BodyMode::FormData,
+        BodyMode::FormUrlEncoded,
         BodyMode::Raw,
-        BodyMode::Form,
         BodyMode::Binary,
     ];
     pub fn index(self) -> usize {
@@ -100,6 +103,10 @@ pub fn body_hint_for(len: usize) -> Option<SharedString> {
         .into()
     })
 }
+
+/// form-data 模式下用户自设 Content-Type 的提示（发送时该头会被剔除，见 core::http）。
+pub const FORM_DATA_CONTENT_TYPE_HINT: &str =
+    "form-data 的 Content-Type（含 boundary）由 GetCat 生成，Headers 中的 Content-Type 将被忽略";
 
 /// 编辑后到投递草稿的去抖：主线程只在窗口结束时做一次 `draft()` 快照（rope → String 拷贝），
 /// 序列化与落盘都在写入线程；写入线程再按 500 ms 合并同一 Tab 的重复写入。
@@ -141,6 +148,7 @@ pub struct RequestTab {
     pub params: Entity<KvTable>,
     pub headers: Entity<KvTable>,
     pub form: Entity<KvTable>,
+    pub form_data: Entity<KvTable>,
     pub body_mode: BodyMode,
     pub raw_format: RawFormat,
     /// binary Body：所选文件路径与大小（大小只用于显示）。
@@ -179,6 +187,7 @@ impl RequestTab {
         let params = cx.new(|cx| KvTable::new("参数名", "值", window, cx));
         let headers = cx.new(|cx| KvTable::new("Header 名", "值", window, cx));
         let form = cx.new(|cx| KvTable::new("字段名", "值", window, cx));
+        let form_data = cx.new(|cx| KvTable::new("字段名", "值", window, cx).file_capable(true));
 
         let body_editors: Vec<(RawFormat, Entity<EditorState>)> = RawFormat::ALL
             .iter()
@@ -225,10 +234,15 @@ impl RequestTab {
             cx.subscribe_in(&params, window, |this, _, _: &KvTableEvent, _, cx| {
                 this.mark_dirty(cx)
             }),
+            // Headers 改动可能新增 / 删除 Content-Type，form-data 的冲突提示要跟着重算
             cx.subscribe_in(&headers, window, |this, _, _: &KvTableEvent, _, cx| {
+                this.refresh_body_hint(cx);
                 this.mark_dirty(cx)
             }),
             cx.subscribe_in(&form, window, |this, _, _: &KvTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
+            cx.subscribe_in(&form_data, window, |this, _, _: &KvTableEvent, _, cx| {
                 this.mark_dirty(cx)
             }),
         ];
@@ -249,6 +263,7 @@ impl RequestTab {
             params,
             headers,
             form,
+            form_data,
             body_mode: BodyMode::None,
             raw_format: RawFormat::Json,
             file_path: None,
@@ -309,19 +324,31 @@ impl RequestTab {
         self.mark_dirty(cx);
     }
 
-    /// 按当前 body_mode / raw_format 重新计算超大文本提示：不在 raw 模式时清空；
-    /// 切换 raw_format 或 body_mode 后都要调用，否则会残留上一个编辑器的提示，
+    /// 按当前 body_mode 重新计算 Body 区的非阻塞提示（raw 的超大文本提示、form-data 的
+    /// Content-Type 冲突提示共用 `body_hint`）：不在这两个模式时清空。
+    /// 切换 raw_format / body_mode、以及 Headers 改动后都要调用，否则会残留上一个模式的提示，
     /// 或者漏掉一个通过 `set_value`（不发 Change 事件）灌入内容的编辑器。
     pub(crate) fn refresh_body_hint(&mut self, cx: &mut Context<Self>) {
-        let hint = if self.body_mode == BodyMode::Raw {
-            body_hint_for(self.editor_for(self.raw_format).read(cx).text().len())
-        } else {
-            None
+        let hint = match self.body_mode {
+            BodyMode::Raw => body_hint_for(self.editor_for(self.raw_format).read(cx).text().len()),
+            BodyMode::FormData if self.has_user_content_type(cx) => {
+                Some(SharedString::from(FORM_DATA_CONTENT_TYPE_HINT))
+            }
+            _ => None,
         };
         if hint != self.body_hint {
             self.body_hint = hint;
             cx.notify();
         }
+    }
+
+    /// Headers 里是否有启用的 Content-Type（form-data 发送时会被剔除）。
+    fn has_user_content_type(&self, cx: &App) -> bool {
+        self.headers
+            .read(cx)
+            .values(cx)
+            .iter()
+            .any(|h| h.enabled && h.key.trim().eq_ignore_ascii_case("content-type"))
     }
 
     /// "选择文件"：系统打开对话框 → 后台读 metadata → 切到 file 模式。
@@ -405,7 +432,10 @@ impl RequestTab {
                 format: self.raw_format,
                 text: self.editor_for(self.raw_format).read(cx).text().to_string(),
             },
-            BodyMode::Form => BodyKind::FormUrlEncoded {
+            BodyMode::FormData => BodyKind::FormData {
+                fields: self.form_data.read(cx).form_fields(cx),
+            },
+            BodyMode::FormUrlEncoded => BodyKind::FormUrlEncoded {
                 fields: self.form.read(cx).values(cx),
             },
             BodyMode::Binary => BodyKind::Binary {
@@ -523,8 +553,13 @@ impl RequestTab {
                 let editor = self.editor_for(*format).clone();
                 editor.update(cx, |e, cx| e.set_value(text.clone(), window, cx));
             }
+            BodyKind::FormData { fields } => {
+                self.body_mode = BodyMode::FormData;
+                self.form_data
+                    .update(cx, |t, cx| t.set_form_fields(fields, window, cx));
+            }
             BodyKind::FormUrlEncoded { fields } => {
-                self.body_mode = BodyMode::Form;
+                self.body_mode = BodyMode::FormUrlEncoded;
                 self.form
                     .update(cx, |t, cx| t.set_values(fields, window, cx));
             }
@@ -535,8 +570,6 @@ impl RequestTab {
                     self.refresh_file_size(cx);
                 }
             }
-            // multipart/form-data 的 UI 由后续任务接入；此任务只加数据模型，暂不改变 body_mode。
-            BodyKind::FormData { .. } => {}
         }
         self.prepare_error = None;
         self.refresh_body_hint(cx);
@@ -890,6 +923,20 @@ mod tests {
             assert_eq!(BodyMode::from_index(ix), *mode);
         }
         assert_eq!(BodyMode::from_index(99), BodyMode::None);
+    }
+
+    #[test]
+    fn body_modes_follow_postman_order() {
+        assert_eq!(
+            BodyMode::ALL,
+            [
+                BodyMode::None,
+                BodyMode::FormData,
+                BodyMode::FormUrlEncoded,
+                BodyMode::Raw,
+                BodyMode::Binary
+            ]
+        );
     }
 
     #[test]
