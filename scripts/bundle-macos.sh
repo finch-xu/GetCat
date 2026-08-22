@@ -57,7 +57,7 @@ fi
 version="$(cargo metadata --no-deps --format-version 1 \
   | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="getcat-app"))')"
 [ -n "$version" ] || die "读不到 getcat-app 的版本号"
-log "版本 $version，目标 $TARGET（$ARCH_LABEL），签名身份：$APPLE_SIGNING_IDENTITY"
+log "版本 ${version}，目标 ${TARGET}（${ARCH_LABEL}），签名身份：$APPLE_SIGNING_IDENTITY"
 
 # ---------------------------------------------------------------------------
 # 构建
@@ -89,7 +89,7 @@ chmod 755 "$contents/MacOS/$bin_name"
 iconset="$stage/$app_name.iconset"
 mkdir -p "$iconset"
 png="$resources/getcat-1024.png"
-[ -f "$png" ] || die "缺少 $png（用 scripts/gen-macos-icon.sh 生成）"
+[ -f "$png" ] || die "缺少 ${png}（用 scripts/gen-macos-icon.sh 生成）"
 for size in 16 32 128 256 512; do
   double=$((size * 2))
   sips -z "$size" "$size" "$png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
@@ -127,7 +127,7 @@ notarize() {
   status="$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))')"
   id="$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')"
   if [ "$status" != "Accepted" ]; then
-    echo "公证失败（status=$status，id=$id），日志：" >&2
+    echo "公证失败（status=${status}，id=${id}），日志：" >&2
     [ -n "$id" ] && xcrun notarytool log "$id" \
       --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" >&2 || true
     exit 1

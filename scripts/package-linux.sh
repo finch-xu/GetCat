@@ -35,5 +35,5 @@ rm -f "$tarball"
 tar -C "$stage" -czf "$tarball" getcat LICENSE
 rm -rf "$stage"
 
-echo "已生成 $tarball："
+echo "已生成 ${tarball}："
 tar -tzvf "$tarball"
