@@ -4,27 +4,56 @@
 //! 主题偏好仍记在 [`Workspace`]（它属于布局状态，写进 `workspace.json`）。
 
 use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, ThemePref};
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, Entity, FontWeight, ParentElement, SharedString, Styled, WeakEntity, Window, div, px,
+    AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
+    WeakEntity, Window, div, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     dialog::DialogFooter,
     h_flex,
-    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
+    progress::Progress,
+    setting::{
+        NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
+        Settings,
+    },
     v_flex,
 };
+use gpui_updater::UpdateStatus;
 
 use crate::state::settings;
 use crate::state::store::store;
+use crate::state::update::{self, InstallKind};
 use crate::state::workspace::Workspace;
 
 const DIALOG_WIDTH: f32 = 760.;
 const CONTENT_HEIGHT: f32 = 460.;
 
-/// 打开设置对话框（⌘, / 侧栏齿轮）。已有对话框时不叠加第二个。
+/// 设置对话框的页；判别值就是 `render_settings` 里 `.page(..)` 的顺序。
+/// 目前只有「通用」（默认）与「关于」（状态栏更新提示）会被指定打开，其余变体留着对齐页序。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum SettingsPage {
+    General = 0,
+    Request = 1,
+    Data = 2,
+    About = 3,
+}
+
+/// 打开设置对话框（⌘, / 侧栏齿轮），停在「通用」页。
 pub fn open_settings(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) {
+    open_settings_page(workspace, SettingsPage::General, window, cx);
+}
+
+/// 打开设置对话框并停在指定页（状态栏的更新提示直接跳到「关于」）。已有对话框时不叠加第二个。
+pub fn open_settings_page(
+    workspace: Entity<Workspace>,
+    page: SettingsPage,
+    window: &mut Window,
+    cx: &mut App,
+) {
     if window.has_active_dialog(cx) {
         return;
     }
@@ -35,12 +64,11 @@ pub fn open_settings(workspace: Entity<Workspace>, window: &mut Window, cx: &mut
             .title("设置")
             .w(px(DIALOG_WIDTH))
             .content(move |content, _, cx| {
-                content.child(
-                    div()
-                        .w_full()
-                        .h(px(CONTENT_HEIGHT))
-                        .child(render_settings(weak.clone(), cx)),
-                )
+                content.child(div().w_full().h(px(CONTENT_HEIGHT)).child(render_settings(
+                    weak.clone(),
+                    page,
+                    cx,
+                )))
             })
             .footer(
                 // 不用 DialogClose 包按钮：它外面套了一层 size_full 的 div，会把按钮拉成整行
@@ -63,13 +91,21 @@ pub fn open_settings(workspace: Entity<Workspace>, window: &mut Window, cx: &mut
     });
 }
 
-fn render_settings(workspace: WeakEntity<Workspace>, cx: &App) -> Settings {
-    Settings::new("app-settings")
-        .sidebar_width(px(180.))
-        .page(general_page(workspace))
-        .page(request_page())
-        .page(data_page(cx))
-        .page(about_page())
+fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, cx: &App) -> Settings {
+    // id 按初始页区分：选中页记在按 id 索引的窗口状态里，同一个 id 会复用上一次的选择
+    Settings::new(SharedString::from(format!(
+        "app-settings-{}",
+        page as usize
+    )))
+    .default_selected_index(SelectIndex {
+        page_ix: page as usize,
+        group_ix: None,
+    })
+    .sidebar_width(px(180.))
+    .page(general_page(workspace))
+    .page(request_page())
+    .page(data_page(cx))
+    .page(about_page())
 }
 
 fn general_page(workspace: WeakEntity<Workspace>) -> SettingPage {
@@ -286,6 +322,155 @@ fn about_page() -> SettingPage {
                         )
                 })),
         )
+        .group(
+            SettingGroup::new()
+                .title("更新")
+                .item(
+                    SettingItem::new(
+                        "启动时检查更新",
+                        SettingField::switch(
+                            |cx| settings::settings(cx).check_updates_on_launch,
+                            |value, cx| settings::update(cx, |s| s.check_updates_on_launch = value),
+                        )
+                        .default_value(true),
+                    )
+                    .description("启动 5 秒后向 GitHub Releases 查询一次，不会自动下载"),
+                )
+                .item(SettingItem::render(|_, _, cx| render_update_row(cx))),
+        )
+}
+
+/// 「更新」组的状态行：左侧一句话状态，右侧按当前状态给出动作；下载中在下方画进度条。
+fn render_update_row(cx: &App) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    let danger = cx.theme().danger;
+
+    if !update::supported(cx) {
+        return h_flex()
+            .w_full()
+            .gap_3()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child("此平台暂无自动更新，请前往发布页下载"),
+            )
+            .child(releases_button("open-releases"))
+            .into_any_element();
+    }
+
+    let status = update::status(cx);
+    let kind = update::install_kind_of(cx);
+    let line = update::status_line(&status, env!("CARGO_PKG_VERSION"));
+    let is_error = matches!(status, UpdateStatus::Errored(_));
+
+    let mut actions = h_flex().gap_2().items_center().flex_shrink_0();
+    match &status {
+        UpdateStatus::Idle | UpdateStatus::UpToDate => actions = actions.child(check_button(false)),
+        UpdateStatus::Checking => actions = actions.child(check_button(true)),
+        UpdateStatus::Available(_) => {
+            let install = Button::new("install-update").small().label("下载并安装");
+            actions = actions
+                .child(if kind == InstallKind::Installed {
+                    install
+                        .primary()
+                        .on_click(|_, _, cx| update::download_and_install(cx))
+                } else {
+                    install.outline().disabled(true)
+                })
+                .child(releases_button("open-releases"));
+        }
+        UpdateStatus::Downloading { .. } | UpdateStatus::Installing => {}
+        UpdateStatus::Staged(_) => {
+            actions = actions.child(
+                Button::new("restart-update")
+                    .primary()
+                    .small()
+                    .label("重新启动")
+                    .on_click(|_, _, cx| update::restart(cx)),
+            );
+        }
+        UpdateStatus::Errored(_) => {
+            actions = actions
+                .child(
+                    Button::new("retry-update")
+                        .outline()
+                        .small()
+                        .label("重试")
+                        .on_click(|_, _, cx| update::check(cx)),
+                )
+                .child(releases_button("open-releases"));
+        }
+    }
+
+    let note = match (&status, kind) {
+        (UpdateStatus::Available(_), InstallKind::DevBuild) => {
+            Some("开发构建无法就地更新，请从发布页下载")
+        }
+        (UpdateStatus::Available(_), InstallKind::Translocated) => {
+            Some("请先把 GetCat 拖到「应用程序」文件夹，再进行更新")
+        }
+        _ => None,
+    };
+    let percent = update::progress_percent(&status);
+    let indeterminate = matches!(
+        status,
+        UpdateStatus::Downloading { total: None, .. } | UpdateStatus::Installing
+    );
+
+    v_flex()
+        .w_full()
+        .gap_2()
+        .child(
+            h_flex()
+                .w_full()
+                .gap_3()
+                .items_center()
+                .justify_between()
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .text_sm()
+                                .when(is_error, |d| d.text_color(danger))
+                                .child(line),
+                        )
+                        .when_some(note, |v, note| {
+                            v.child(div().text_xs().text_color(muted).child(note))
+                        }),
+                )
+                .child(actions),
+        )
+        .when_some(percent, |v, pct| {
+            v.child(Progress::new("update-progress").value(pct))
+        })
+        .when(indeterminate, |v| {
+            v.child(Progress::new("update-progress").loading(true))
+        })
+        .into_any_element()
+}
+
+fn check_button(checking: bool) -> Button {
+    Button::new("check-updates")
+        .outline()
+        .small()
+        .label("检查更新")
+        .loading(checking)
+        .on_click(|_, _, cx| update::check(cx))
+}
+
+fn releases_button(id: &'static str) -> Button {
+    Button::new(id)
+        .ghost()
+        .small()
+        .icon(IconName::ExternalLink)
+        .label("发布页")
+        .tooltip(update::RELEASES_URL)
+        .on_click(|_, _, cx| cx.open_url(update::RELEASES_URL))
 }
 
 fn theme_key(pref: ThemePref) -> SharedString {

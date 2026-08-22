@@ -32,7 +32,7 @@ use gpui_updater::UpdateStatus;
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
 use crate::state::update;
-use crate::ui::settings_dialog::open_settings;
+use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
 use crate::{
     CloseTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest, ToggleSidebar,
 };
@@ -207,6 +207,16 @@ impl Workspace {
 
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         open_settings(cx.entity(), window, cx);
+    }
+
+    /// 打开设置并停在指定页（状态栏的更新提示 → 「关于」）。
+    pub fn open_settings_page(
+        &mut self,
+        page: SettingsPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        open_settings_page(cx.entity(), page, window, cx);
     }
 
     #[cfg(test)]
@@ -747,10 +757,35 @@ pub(crate) fn apply_theme(pref: ThemePref, window: Option<&mut Window>, cx: &mut
 /// 底部状态栏：右侧是请求 / 响应的分栏方向（两段式），左侧留给以后的功能按钮。
 impl Workspace {
     fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // 只在"有新版本"与"已装好待重启"时提示；下载 / 安装进度只在「关于」页显示，
+        // 离线启动得到的错误也不在这里冒出来
+        let update_hint = update::hint_version(&self.update_status)
+            .map(|(version, staged)| (version.clone(), staged));
         StatusBar::new().py_0p5().right(
             h_flex()
                 .items_center()
                 .gap_0p5()
+                .when_some(update_hint, |bar, (version, staged)| {
+                    bar.child(if staged {
+                        Button::new("update-restart")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ArrowUp)
+                            .label(format!("重新启动以完成更新 v{version}"))
+                            .tooltip("新版本已安装，重新启动后生效")
+                            .on_click(|_, _, cx| update::restart(cx))
+                    } else {
+                        Button::new("update-available")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ArrowUp)
+                            .label(format!("有新版本 v{version}"))
+                            .tooltip("在「关于」页查看并安装")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_settings_page(SettingsPage::About, window, cx)
+                            }))
+                    })
+                })
                 // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
                 // 不用先读懂图标才知道按下去会变成什么。
                 .child(
