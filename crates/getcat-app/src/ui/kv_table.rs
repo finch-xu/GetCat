@@ -29,6 +29,7 @@ pub enum KvTableEvent {
 struct KvRow {
     key: Entity<InputState>,
     value: Entity<InputState>,
+    description: Entity<InputState>,
     enabled: bool,
     _subs: Vec<Subscription>,
 }
@@ -56,7 +57,7 @@ impl KvTable {
             rows: Vec::new(),
             locked_keys: false,
         };
-        this.push_row("", "", true, window, cx);
+        this.push_row("", "", "", true, window, cx);
         this
     }
 
@@ -72,6 +73,7 @@ impl KvTable {
         &mut self,
         key: &str,
         value: &str,
+        description: &str,
         enabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -88,13 +90,20 @@ impl KvTable {
                 .placeholder(value_ph)
                 .default_value(value.to_string())
         });
+        let description_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("描述")
+                .default_value(description.to_string())
+        });
         let subs = vec![
             cx.subscribe_in(&key_state, window, Self::on_input_event),
             cx.subscribe_in(&value_state, window, Self::on_input_event),
+            cx.subscribe_in(&description_state, window, Self::on_input_event),
         ];
         self.rows.push(KvRow {
             key: key_state,
             value: value_state,
+            description: description_state,
             enabled,
             _subs: subs,
         });
@@ -113,6 +122,12 @@ impl KvTable {
         }
     }
 
+    fn row_is_empty(&self, r: &KvRow, cx: &App) -> bool {
+        r.key.read(cx).value().is_empty()
+            && r.value.read(cx).value().is_empty()
+            && r.description.read(cx).value().is_empty()
+    }
+
     fn ensure_trailing_empty_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.locked_keys {
             return;
@@ -120,10 +135,10 @@ impl KvTable {
         let last_is_empty = self
             .rows
             .last()
-            .map(|r| r.key.read(cx).value().is_empty() && r.value.read(cx).value().is_empty())
+            .map(|r| self.row_is_empty(r, cx))
             .unwrap_or(false);
         if !last_is_empty {
-            self.push_row("", "", true, window, cx);
+            self.push_row("", "", "", true, window, cx);
             cx.notify();
         }
     }
@@ -131,15 +146,12 @@ impl KvTable {
     pub fn values(&self, cx: &App) -> Vec<KeyValue> {
         self.rows
             .iter()
-            .filter_map(|r| {
-                let key = r.key.read(cx).value().to_string();
-                let value = r.value.read(cx).value().to_string();
-                (!key.is_empty() || !value.is_empty()).then_some(KeyValue {
-                    key,
-                    value,
-                    enabled: r.enabled,
-                    description: String::new(),
-                })
+            .filter(|r| !self.row_is_empty(r, cx))
+            .map(|r| KeyValue {
+                key: r.key.read(cx).value().to_string(),
+                value: r.value.read(cx).value().to_string(),
+                enabled: r.enabled,
+                description: r.description.read(cx).value().to_string(),
             })
             .collect()
     }
@@ -155,10 +167,10 @@ impl KvTable {
     pub fn set_values(&mut self, values: &[KeyValue], window: &mut Window, cx: &mut Context<Self>) {
         self.rows.clear();
         for kv in values {
-            self.push_row(&kv.key, &kv.value, kv.enabled, window, cx);
+            self.push_row(&kv.key, &kv.value, &kv.description, kv.enabled, window, cx);
         }
         if !self.locked_keys {
-            self.push_row("", "", true, window, cx);
+            self.push_row("", "", "", true, window, cx);
         }
         cx.notify();
     }
@@ -170,32 +182,33 @@ impl KvTable {
 
     /// 让行的 key 集合等于 `names`（保持顺序），保留同名行已有的 value 与 enabled。
     pub fn sync_keys(&mut self, names: &[String], window: &mut Window, cx: &mut Context<Self>) {
-        let existing: Vec<(String, String, bool)> = self
+        let existing: Vec<(String, String, String, bool)> = self
             .rows
             .iter()
             .map(|r| {
                 (
                     r.key.read(cx).value().to_string(),
                     r.value.read(cx).value().to_string(),
+                    r.description.read(cx).value().to_string(),
                     r.enabled,
                 )
             })
             .collect();
         if existing
             .iter()
-            .map(|(k, _, _)| k.as_str())
+            .map(|(k, _, _, _)| k.as_str())
             .eq(names.iter().map(String::as_str))
         {
             return;
         }
         self.rows.clear();
         for name in names {
-            let (value, enabled) = existing
+            let (value, description, enabled) = existing
                 .iter()
-                .find(|(k, _, _)| k == name)
-                .map(|(_, v, e)| (v.clone(), *e))
-                .unwrap_or_else(|| (String::new(), true));
-            self.push_row(name, &value, enabled, window, cx);
+                .find(|(k, _, _, _)| k == name)
+                .map(|(_, v, d, e)| (v.clone(), d.clone(), *e))
+                .unwrap_or_else(|| (String::new(), String::new(), true));
+            self.push_row(name, &value, &description, enabled, window, cx);
         }
         cx.emit(KvTableEvent::Changed);
         cx.notify();
@@ -234,6 +247,7 @@ impl Render for KvTable {
                     .child(div().w(px(28.)))
                     .child(div().flex_1().child("Key"))
                     .child(div().flex_1().child("Value"))
+                    .child(div().flex_1().child("Description"))
                     .child(div().w(px(28.))),
             )
             .when(locked && self.rows.is_empty(), |v| {
@@ -282,6 +296,13 @@ impl Render for KvTable {
                             Input::new(&row.value)
                                 .small()
                                 .aria_label(row_aria_label(ix, &self.value_placeholder)),
+                        ),
+                    )
+                    .child(
+                        div().flex_1().child(
+                            Input::new(&row.description)
+                                .small()
+                                .aria_label(row_aria_label(ix, "描述")),
                         ),
                     )
                     .child(

@@ -723,10 +723,18 @@ fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
     let cx = init(cx);
     let table = cx.update(|window, cx| cx.new(|cx| KvTable::new("k", "v", window, cx)));
     let values = vec![
-        KeyValue::new("a", "1"),
+        KeyValue {
+            description: "查询词".into(),
+            ..KeyValue::new("a", "1")
+        },
         KeyValue {
             enabled: false,
             ..KeyValue::new("b", "")
+        },
+        // 只有描述也是一行有效数据，不能被当成空行丢掉
+        KeyValue {
+            description: "占位".into(),
+            ..KeyValue::new("", "")
         },
     ];
     cx.update(|window, cx| {
@@ -734,7 +742,7 @@ fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
             t.set_values(&values, window, cx);
             assert_eq!(t.values(cx), values);
             // 末尾保留一个空行用于新增
-            assert_eq!(t.row_count(), 3);
+            assert_eq!(t.row_count(), 4);
             t.set_values(&[], window, cx);
             assert!(t.values(cx).is_empty());
             assert_eq!(t.row_count(), 1);
@@ -746,8 +754,38 @@ fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         locked.update(cx, |t, cx| {
             t.set_values(&values, window, cx);
-            assert_eq!(t.row_count(), 2);
+            assert_eq!(t.row_count(), 3);
             assert_eq!(t.values(cx), values);
+        })
+    });
+}
+
+#[gpui::test]
+fn kv_table_sync_keys_keeps_description(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table =
+        cx.update(|window, cx| cx.new(|cx| KvTable::new("k", "v", window, cx).locked_keys(true)));
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_values(
+                &[KeyValue {
+                    description: "用户 ID".into(),
+                    ..KeyValue::new("id", "7")
+                }],
+                window,
+                cx,
+            );
+            t.sync_keys(&["tenant".into(), "id".into()], window, cx);
+            let v = t.values(cx);
+            assert_eq!(v.len(), 2);
+            assert_eq!(v[0].key, "tenant");
+            assert_eq!(
+                v[1],
+                KeyValue {
+                    description: "用户 ID".into(),
+                    ..KeyValue::new("id", "7")
+                }
+            );
         })
     });
 }
