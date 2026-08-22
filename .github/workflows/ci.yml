@@ -48,6 +48,13 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo fmt --all -- --check
 
+      # 发布用的打包脚本只在打 tag 时真正运行；这里先把语法错误挡在 PR 阶段
+      - name: Shell scripts
+        if: runner.os == 'Linux'
+        run: |
+          bash -n scripts/*.sh scripts/ci/*.sh
+          shellcheck -S warning scripts/*.sh scripts/ci/*.sh
+
       - name: Clippy
         if: runner.os == 'macOS'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

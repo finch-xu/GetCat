@@ -35,6 +35,7 @@ cargo test --workspace
 - "保存到文件"为原子写（同目录临时文件 → fsync → 替换），中断不会留下半个文件；对话框记住本次会话上次保存的目录
 - 后台处理（美化 / 建索引）被 `catch_unwind` 包裹：任何 panic 都显示为"后台处理异常"，不会让 Tab 停在"发送中"
 - 启动时后台清扫其它进程遗留超过 24 h 的 `<临时目录>/getcat-<pid>/`
+- 应用内更新：启动 5 秒后向 GitHub Releases 查询一次（设置 → 关于 可关），有新版本时状态栏右侧提示；关于页可下载并安装、重启生效。安装包经 SHA-256 + minisign 双重校验，未签名的版本不会被提示
 
 ## 数据目录与持久化
 
@@ -65,6 +66,69 @@ drafts/<tab-id>.json    # 一个 Tab 一个草稿（含未保存修改）
 ## 持续集成
 
 `.github/workflows/ci.yml` 在 macOS / Ubuntu / Windows 上 `cargo build --locked` + `cargo test --locked`（fmt 与 clippy 在 macOS 跑一次）。Ubuntu 需要 `libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libfontconfig-dev libvulkan1` 等头文件与 Vulkan 加载器（见 workflow）。性能回归测试带 `#[ignore]`，不在 CI 跑。
+
+## 发布
+
+`.github/workflows/release.yml` 由 `v*` tag 触发：`verify-version`（tag 必须等于根 `Cargo.toml` 的 `[workspace.package].version`）→ `create-draft` → 四个构建 job 并行 → `sign`（`SHA256SUMS` + 每个资产的 `.minisig`）→ `publish`（草稿翻正式）。tag 含 `-`（如 `v0.1.1-rc.1`）会发成 pre-release、不标 latest，正式用户的更新器看不到，可用于演练。
+
+产物命名固定、不带版本号：
+
+| 平台 | 资产 | 打包脚本 |
+|---|---|---|
+| macOS arm64 / x64 | `GetCat-macos-arm64.dmg` / `GetCat-macos-x64.dmg`（Developer ID 签名 + 公证 + staple） | `scripts/bundle-macos.sh` |
+| Linux x64 | `GetCat-linux-x64.tar.gz`（`getcat` + `LICENSE`，ubuntu-22.04 构建，glibc ≥ 2.35） | `scripts/package-linux.sh` |
+| Windows x64 | `GetCat-windows-x64.exe`（单文件，无 Authenticode 签名，首次运行会有 SmartScreen 提示） | `scripts/package-windows.ps1` |
+
+**Release 的资产只能由流水线产生**：手动上传或改名会让更新器匹配不到 `.minisig` / `SHA256SUMS`，对应平台的用户会看到"更新失败"。
+
+发布步骤：
+
+```bash
+# 1. 改根 Cargo.toml 的 [workspace.package].version，提交
+# 2. 打 tag 并推送
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+仓库需要一个名为 `prod` 的 GitHub Environment，含以下 secrets：
+
+| Secret | 用途 |
+|---|---|
+| `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` | Developer ID Application 证书（p12 的 base64）及其密码 |
+| `APPLE_SIGNING_IDENTITY` | 如 `Developer ID Application: Name (TEAMID)` |
+| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | notarytool 公证（`APPLE_PASSWORD` 是 app-specific password） |
+| `MINISIGN_SECRET_KEY` | 更新包签名私钥文件的**完整内容**（两行） |
+
+minisign 密钥对只生成一次：
+
+```bash
+brew install minisign
+minisign -G -W -p minisign.pub -s ~/.config/getcat/minisign.key   # -W：无密码，CI 才能非交互签名
+```
+
+`minisign.pub` 提交到仓库根目录（编译期嵌入为客户端唯一信任根），私钥内容填进 `MINISIGN_SECRET_KEY`。换密钥意味着旧版本客户端无法验证新 release——先发一个用旧钥签名、但携带新公钥的过渡版本。
+
+本地无证书时可 ad-hoc 跑通 macOS 打包（不公证）：
+
+```bash
+scripts/bundle-macos.sh            # dist/GetCat-macos-arm64.dmg
+```
+
+logo 改动后重新生成 macOS 图标位图：`scripts/gen-macos-icon.sh`。
+
+用户可手动校验下载的安装包：
+
+```bash
+minisign -V -p minisign.pub -m GetCat-macos-arm64.dmg
+```
+
+## 应用内更新
+
+由 [gpui-updater](https://github.com/AprilNEA/gpui-updater) 驱动（`crates/getcat-app/src/state/update.rs`），源是本仓库的 GitHub Releases，校验策略 `Strict`：没有 `SHA256SUMS` 条目或 `.minisig` 的版本在检查阶段就被拒绝。
+
+- 启动 5 秒后自动检查一次，不轮询；设置 → 关于 里可关闭，也可手动「检查更新」。
+- macOS：挂载 dmg → `ditto` 到 `.app` 同目录 → 原子交换；Linux：解 tar.gz 替换可执行文件；Windows：旧 exe 改名为 `.old.exe`、放入新文件（下次启动清理）。
+- 开发构建（`cargo run` / debug）与 macOS App Translocation（直接从 dmg 运行）只检查不安装，关于页会给出提示与发布页链接。
+- 环境变量：`GETCAT_UPDATE_CHECK=1` 让开发构建也在启动时检查；`GETCAT_UPDATE_PRERELEASE=1` 把 pre-release 也纳入候选（演练用）。
 
 ## 测试
 
