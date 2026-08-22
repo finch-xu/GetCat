@@ -57,3 +57,15 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+  licenses:
+    name: Licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 依赖许可证门禁：拦截混入依赖图的 copyleft 许可证。
+      # 规则与已知例外见仓库根目录的 deny.toml。
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses

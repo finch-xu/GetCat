@@ -1,0 +1,147 @@
+# 依赖许可证门禁。GetCat 以 Apache-2.0 分发，因此依赖图内不得混入
+# GPL/AGPL/LGPL 等强 copyleft 许可证。
+#
+#   cargo deny check licenses
+#
+# CI 会跑这项检查；本地提交前也建议手动跑一次。
+
+[graph]
+# 三个目标平台都要覆盖，否则 Windows/Linux 专属依赖会被漏掉
+# （例如 MPL-2.0 的 dwrote 只在 Windows 上出现）
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# allow 列表里未被用到的条目不必报警——OR 表达式常常只命中其中一项
+unused-allowed-license = "allow"
+
+# 与 Apache-2.0 分发相容的宽松许可证白名单。
+# 新增条目前请先确认它不是 copyleft。
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    "NCSA",
+    "CDLA-Permissive-2.0",
+    "bzip2-1.0.6",
+]
+
+# ---------------------------------------------------------------------------
+# 例外 1：MPL-2.0（弱 copyleft，文件级）
+#
+# MPL-2.0 只要求「被修改的 MPL 源文件」保持开源，不感染同一作品中的其他代码，
+# 与 Apache-2.0 可以合法共存。我们不修改这些 crate，因此只需在 THIRD-PARTY.md
+# 中列明出处即可。
+# ---------------------------------------------------------------------------
+[[licenses.exceptions]]
+name = "option-ext"   # dirs-sys -> dirs/directories，会链入二进制
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "dwrote"       # 仅 Windows，font-kit 的 DirectWrite 后端
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "cbindgen"     # build-dependency，仅构建期运行，不进入分发产物
+allow = ["MPL-2.0"]
+
+# ---------------------------------------------------------------------------
+# 例外 2：GPL-3.0-or-later —— 元数据层面的已知问题
+#
+# 传播路径（均为传递依赖，本项目 Cargo.toml 未直接引用）：
+#   getcat-app -> gpui (Apache-2.0) -> ztracing -> zlog
+#   getcat-app -> gpui -> sum_tree (Apache-2.0) -> ztracing
+#
+# Zed 上游在 gpui 与 sum_tree 中加了 13 处性能剖析埋点，用的是自家 GPL 授权的
+# ztracing，而 ztracing 又依赖 GPL 的 zlog：
+#   gpui/src/svg_renderer.rs        2 处 #[ztracing::instrument]
+#   sum_tree/src/cursor.rs          4 处 #[instrument]
+#   sum_tree/src/sum_tree.rs        3 处 #[instrument] + 1 处 zlog::init_test()
+#   两个 Cargo.toml 中共 3 行依赖声明
+#
+# 实际影响远小于依赖图所显示的：
+#   ztracing/build.rs 仅在环境变量 ZTRACING 存在时才打开 ztracing cfg，本项目
+#   从未设置该变量。默认构建下 #[instrument] 退化为恒等宏（ztracing_macro 全部
+#   源码就是原样返回 item），span 宏退化为空结构体，zlog 的两处调用点分别位于
+#   #[cfg(ztracing)] 与 #[cfg(test)] 内，均不参与编译。
+#
+#   实测：release 二进制（target/release/getcat）中 gpui 符号 15077 个，
+#   zlog 与 ztracing 符号各 0 个 —— GPL 代码未进入分发产物。
+#
+# 因此这是元数据层面而非产物层面的问题。仍建议清理，理由有三：
+#   1. GitHub 依赖图与企业合规扫描读的是 Cargo 元数据，会把本项目标记为含 GPL；
+#   2. 这份「干净」依赖于 cfg 默认关闭这一实现细节，上游一个改动即可失效；
+#   3. 源码分发层面仍引用着 GPL 代码。
+#
+# 处置方案：
+#   a) Zed 上游将 zlog/ztracing 改为 Apache-2.0，或解除 gpui/sum_tree 对其依赖；
+#   b) 本项目改用 fork 的 zed 并通过 [patch] 摘除这 13 处埋点
+#      （因埋点在默认构建下本就是空操作，删除后行为完全不变）；
+#   c) 本项目整体改用 GPL-3.0-or-later 分发。
+#
+# 已排除的方案：改用 crates.io 上发布的 gpui（2026-08-22 核实）
+#   crates.io 上的 gpui 0.2.2（2025-10-22）确实不含 ztracing/zlog，但不可用：
+#   - gpui_platform / gpui_tokio / gpui_web / gpui_wgpu / sum_tree / collections
+#     等均为 publish = false，crates.io 上不存在，而本项目与 gpui-component 都
+#     直接依赖其中若干个；
+#   - crates.io 版是 blade 渲染后端时代的单体架构，git 版已迁至 wgpu 并拆成多
+#     crate，两者 API 不兼容；
+#   - crates.io 上的 reqwest_client 属于 i18n-site，与 Zed 无关，勿误用。
+#
+# 附带发现：git 版 gpui 声明 publish = true 却依赖 publish = false 的 ztracing，
+# 因此当前 gpui 无法执行 cargo publish。上游迟早需要处理，这是提 issue 时比
+# 「许可证标注有误」更有力的切入点。
+#
+# 解决后请删除以下三条例外。
+# ---------------------------------------------------------------------------
+[[licenses.exceptions]]
+name = "zlog"
+allow = ["GPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "ztracing"
+allow = ["GPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "ztracing_macro"
+allow = ["GPL-3.0-or-later"]
+
+# ---------------------------------------------------------------------------
+# 澄清：以下 crate 的 Cargo.toml 缺 license 字段，但其源码目录内均带有
+# LICENSE-APACHE 文件（zed 仓库惯例）。此处显式声明，避免 CI 噪音。
+# ---------------------------------------------------------------------------
+[[licenses.clarify]]
+name = "gpui_shared_string"
+expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "gpui_util"
+expression = "Apache-2.0"
+license-files = []
+
+[bans]
+multiple-versions = "allow"
+
+[advisories]
+version = 2
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "allow"   # gpui / gpui-component 走 git 依赖
