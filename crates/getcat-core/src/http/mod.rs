@@ -18,7 +18,7 @@ use url::Url;
 pub use error::RequestError;
 
 use crate::body::spill::{HEAD_BYTES, SpillFile};
-use crate::model::{BodyKind, Method, RequestDraft, ResponseMeta};
+use crate::model::{BodyKind, FormValue, Method, RequestDraft, ResponseMeta};
 use crate::url::build_url;
 
 pub type Client = reqwest::Client;
@@ -36,9 +36,27 @@ pub enum OutboundBody {
         content_type: String,
         data: Vec<u8>,
     },
-    /// 文件流式上传：发送时打开、按块读取，内容不进内存。
+    /// multipart/form-data：文本 part 直接带值；文件 part 发送时打开、定长流式，内容不进内存。
+    Multipart {
+        parts: Vec<OutboundPart>,
+    },
+    /// 整文件流式上传（binary）：发送时打开、按块读取，内容不进内存。
     File {
         path: PathBuf,
+        content_type: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutboundPart {
+    Text {
+        name: String,
+        value: String,
+    },
+    File {
+        name: String,
+        path: PathBuf,
+        /// None 表示按扩展名猜。
         content_type: Option<String>,
     },
 }
@@ -241,6 +259,31 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
             content_type: format.content_type().to_string(),
             data: text.as_bytes().to_vec(),
         },
+        BodyKind::FormData { fields } => {
+            let mut parts = Vec::new();
+            for f in fields.iter().filter(|f| f.enabled && !f.key.is_empty()) {
+                match &f.value {
+                    FormValue::Text { value } => parts.push(OutboundPart::Text {
+                        name: f.key.clone(),
+                        value: value.clone(),
+                    }),
+                    FormValue::File { path, content_type } => {
+                        if path.as_os_str().is_empty() {
+                            return Err(RequestError::FileBody(format!(
+                                "字段 \"{}\" 未选择文件",
+                                f.key
+                            )));
+                        }
+                        parts.push(OutboundPart::File {
+                            name: f.key.clone(),
+                            path: path.clone(),
+                            content_type: content_type.clone(),
+                        });
+                    }
+                }
+            }
+            OutboundBody::Multipart { parts }
+        }
         BodyKind::FormUrlEncoded { fields } => {
             let mut ser = url::form_urlencoded::Serializer::new(String::new());
             for f in fields.iter().filter(|f| f.enabled && !f.key.is_empty()) {
@@ -250,12 +293,6 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
                 content_type: "application/x-www-form-urlencoded".to_string(),
                 data: ser.finish().into_bytes(),
             }
-        }
-        // multipart/form-data 的实际发送逻辑由后续任务实现；此任务只加数据模型。
-        BodyKind::FormData { .. } => {
-            return Err(RequestError::Unsupported(
-                "multipart/form-data 暂不支持发送".to_string(),
-            ));
         }
         BodyKind::Binary { path, content_type } => {
             if path.as_os_str().is_empty() {
@@ -301,6 +338,10 @@ fn file_err(path: &Path, e: std::io::Error) -> RequestError {
     RequestError::FileBody(format!("{}：{e}", path.display()))
 }
 
+fn part_err(field: &str, path: &Path, e: std::io::Error) -> RequestError {
+    RequestError::FileBody(format!("字段 \"{field}\"：{}：{e}", path.display()))
+}
+
 fn to_reqwest_method(m: Method) -> reqwest::Method {
     match m {
         Method::Get => reqwest::Method::GET,
@@ -331,9 +372,15 @@ pub(crate) async fn execute_with_threshold(
     let started = Instant::now();
     let mut builder = client.request(to_reqwest_method(req.method), req.url.clone());
 
+    // multipart 的 Content-Type 含 boundary，只能由 reqwest 生成；reqwest 的 header() 是 append 语义，
+    // 不剔除用户自设的 Content-Type 会发出两个。
+    let is_multipart = matches!(req.body, OutboundBody::Multipart { .. });
     let mut has_content_type = false;
     for (k, v) in &req.headers {
         if k.eq_ignore_ascii_case("content-type") {
+            if is_multipart {
+                continue;
+            }
             has_content_type = true;
         }
         // Content-Length / Transfer-Encoding / Host 由 reqwest/hyper 根据实际 body 与连接
@@ -353,6 +400,55 @@ pub(crate) async fn execute_with_threshold(
                 builder = builder.header(CONTENT_TYPE, content_type);
             }
             builder = builder.body(data);
+        }
+        OutboundBody::Multipart { parts } => {
+            let mut form = reqwest::multipart::Form::new();
+            for part in parts {
+                form = match part {
+                    OutboundPart::Text { name, value } => form.text(name, value),
+                    OutboundPart::File {
+                        name,
+                        path,
+                        content_type,
+                    } => {
+                        let file = tokio::fs::File::open(&path)
+                            .await
+                            .map_err(|e| part_err(&name, &path, e))?;
+                        let meta = file
+                            .metadata()
+                            .await
+                            .map_err(|e| part_err(&name, &path, e))?;
+                        if !meta.is_file() {
+                            return Err(RequestError::FileBody(format!(
+                                "字段 \"{name}\"：{}：不是普通文件",
+                                path.display()
+                            )));
+                        }
+                        let file_name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "file".to_string());
+                        let mime =
+                            content_type.unwrap_or_else(|| guess_content_type(&path).to_string());
+                        // 定长流式：每个 part 长度已知，Form 才能算出总长并带 Content-Length；
+                        // 用 Part::stream 会退化为 chunked，很多上传入口直接拒绝。
+                        let p = reqwest::multipart::Part::stream_with_length(
+                            reqwest::Body::from(file),
+                            meta.len(),
+                        )
+                        .file_name(file_name)
+                        .mime_str(&mime)
+                        .map_err(|e| {
+                            RequestError::FileBody(format!(
+                                "字段 \"{name}\"：Content-Type 无效：{e}"
+                            ))
+                        })?;
+                        form.part(name, p)
+                    }
+                };
+            }
+            // multipart() 自行设置含 boundary 的 Content-Type 与 Content-Length
+            builder = builder.multipart(form);
         }
         OutboundBody::File { path, content_type } => {
             let file = tokio::fs::File::open(&path)
@@ -439,9 +535,13 @@ pub(crate) async fn execute_with_threshold(
 mod tests {
     use super::*;
     use crate::body::spill::HEAD_BYTES;
-    use crate::model::{BodyKind, KeyValue, Method, RawFormat, RequestDraft};
+    use crate::model::{BodyKind, FormField, FormValue, KeyValue, Method, RawFormat, RequestDraft};
     use std::io::Write;
-    use wiremock::matchers::{body_bytes, body_string, header, method, path, query_param};
+    use std::path::PathBuf;
+    use wiremock::matchers::{
+        body_bytes, body_string, body_string_contains, header, header_regex, method, path,
+        query_param,
+    };
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn draft(m: Method, url: String) -> RequestDraft {
@@ -913,5 +1013,182 @@ mod tests {
             guess_content_type(Path::new("a.weird")),
             "application/octet-stream"
         );
+    }
+
+    /// Content-Type 恰好一个且是 multipart；有 Content-Length、无 Transfer-Encoding（定长而非 chunked）。
+    struct MultipartFixedLength;
+    impl wiremock::Match for MultipartFixedLength {
+        fn matches(&self, req: &wiremock::Request) -> bool {
+            let cts: Vec<_> = req.headers.get_all("content-type").iter().collect();
+            cts.len() == 1
+                && cts[0]
+                    .to_str()
+                    .map(|v| v.starts_with("multipart/form-data; boundary="))
+                    .unwrap_or(false)
+                && req.headers.contains_key("content-length")
+                && !req.headers.contains_key("transfer-encoding")
+        }
+    }
+
+    #[tokio::test]
+    async fn form_data_is_sent_as_fixed_length_multipart() {
+        // 300 KB：大于 ReaderStream 单块，保证文件 part 走多块流式路径
+        let payload: Vec<u8> = (0..300_000u32).map(|i| b'0' + (i % 10) as u8).collect();
+        let path = temp_upload_file("upload.json", &payload);
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(MultipartFixedLength)
+            .and(body_string_contains("name=\"note\""))
+            .and(body_string_contains("hi there"))
+            .and(body_string_contains(
+                "name=\"doc\"; filename=\"upload.json\"",
+            ))
+            .and(body_string_contains("Content-Type: application/json"))
+            .and(body_string_contains(
+                std::str::from_utf8(&payload[..4096]).unwrap(),
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Post, server.uri());
+        d.body = BodyKind::FormData {
+            fields: vec![
+                FormField::text("note", "hi there"),
+                FormField::file("doc", path.clone()),
+            ],
+        };
+        assert_eq!(run(&d).await.unwrap().meta.status, 200);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn form_data_ignores_user_content_type_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(MultipartFixedLength)
+            .and(header("x-keep", "1"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Post, server.uri());
+        d.headers = vec![
+            KeyValue::new("Content-Type", "text/plain"),
+            KeyValue::new("X-Keep", "1"),
+        ];
+        d.body = BodyKind::FormData {
+            fields: vec![FormField::text("a", "1")],
+        };
+        assert_eq!(run(&d).await.unwrap().meta.status, 200);
+    }
+
+    #[tokio::test]
+    async fn empty_form_data_still_sends_multipart() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(header_regex(
+                "content-type",
+                "^multipart/form-data; boundary=",
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Post, server.uri());
+        d.body = BodyKind::FormData { fields: vec![] };
+        assert_eq!(run(&d).await.unwrap().meta.status, 204);
+    }
+
+    #[tokio::test]
+    async fn form_file_part_uses_explicit_content_type_when_given() {
+        let path = temp_upload_file("data.json", b"a,b\n1,2\n");
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("filename=\"data.json\""))
+            .and(body_string_contains("Content-Type: text/csv"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Post, server.uri());
+        d.body = BodyKind::FormData {
+            fields: vec![FormField {
+                value: FormValue::File {
+                    path: path.clone(),
+                    content_type: Some("text/csv".into()),
+                },
+                ..FormField::file("f", PathBuf::new())
+            }],
+        };
+        assert_eq!(run(&d).await.unwrap().meta.status, 200);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn prepare_skips_disabled_and_unnamed_form_fields() {
+        let mut d = draft(Method::Post, "https://x.com".into());
+        d.body = BodyKind::FormData {
+            fields: vec![
+                FormField::text("a", "1"),
+                FormField {
+                    enabled: false,
+                    ..FormField::text("b", "2")
+                },
+                FormField::text("", "3"),
+                FormField {
+                    enabled: false,
+                    ..FormField::file("f", PathBuf::new())
+                },
+            ],
+        };
+        let req = prepare(&d).unwrap();
+        assert_eq!(
+            req.body,
+            OutboundBody::Multipart {
+                parts: vec![OutboundPart::Text {
+                    name: "a".into(),
+                    value: "1".into()
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn prepare_rejects_form_file_without_path_and_names_the_field() {
+        let mut d = draft(Method::Post, "https://x.com".into());
+        d.body = BodyKind::FormData {
+            fields: vec![FormField::file("avatar", PathBuf::new())],
+        };
+        let err = prepare(&d).unwrap_err();
+        assert!(matches!(err, RequestError::FileBody(_)), "{err:?}");
+        assert!(
+            err.to_string().contains("字段 \"avatar\" 未选择文件"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_form_file_is_reported_with_field_name() {
+        let mut d = draft(Method::Post, "http://127.0.0.1:1/".into());
+        d.body = BodyKind::FormData {
+            fields: vec![FormField::file(
+                "doc",
+                "/nonexistent/getcat/report.pdf".into(),
+            )],
+        };
+        let err = run(&d).await.unwrap_err();
+        assert!(matches!(err, RequestError::FileBody(_)), "{err:?}");
+        let msg = err.to_string();
+        assert!(msg.contains("doc") && msg.contains("report.pdf"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn directory_as_form_file_is_reported_as_file_body_error() {
+        let dir = std::env::temp_dir().join(format!("getcat-formdir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut d = draft(Method::Post, "http://127.0.0.1:1/".into());
+        d.body = BodyKind::FormData {
+            fields: vec![FormField::file("doc", dir.clone())],
+        };
+        let err = run(&d).await.unwrap_err();
+        assert!(err.to_string().contains("不是普通文件"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
