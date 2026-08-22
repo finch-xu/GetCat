@@ -402,7 +402,8 @@ pub(crate) async fn execute_with_threshold(
             builder = builder.body(data);
         }
         OutboundBody::Multipart { parts } => {
-            let mut form = reqwest::multipart::Form::new();
+            // 字段名原样 UTF-8，与浏览器 / Postman 一致；默认 PathSegment 编码会变成 `name*=utf-8''…`，很多服务端不识别。
+            let mut form = reqwest::multipart::Form::new().percent_encode_noop();
             for part in parts {
                 form = match part {
                     OutboundPart::Text { name, value } => form.text(name, value),
@@ -1095,6 +1096,22 @@ mod tests {
         let mut d = draft(Method::Post, server.uri());
         d.body = BodyKind::FormData { fields: vec![] };
         assert_eq!(run(&d).await.unwrap().meta.status, 204);
+    }
+
+    #[tokio::test]
+    async fn form_data_sends_non_ascii_field_names_raw() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("name=\"用户名\""))
+            .and(body_string_contains("小明"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Post, server.uri());
+        d.body = BodyKind::FormData {
+            fields: vec![FormField::text("用户名", "小明")],
+        };
+        assert_eq!(run(&d).await.unwrap().meta.status, 200);
     }
 
     #[tokio::test]
