@@ -353,6 +353,9 @@ pub struct AppSettings {
     /// 请求 / 响应编辑器的等宽字号（px）。
     #[serde(default = "default_editor_font_size")]
     pub editor_font_size: u32,
+    /// 启动后自动向 GitHub Releases 查询一次新版本（只检查，不下载）。
+    #[serde(default = "default_true")]
+    pub check_updates_on_launch: bool,
 }
 
 pub const EDITOR_FONT_SIZE_RANGE: std::ops::RangeInclusive<u32> = 10..=24;
@@ -366,6 +369,7 @@ impl Default for AppSettings {
         Self {
             request: RequestSettings::default(),
             editor_font_size: default_editor_font_size(),
+            check_updates_on_launch: true,
         }
     }
 }
@@ -550,13 +554,16 @@ mod tests {
         assert_eq!(s.request.max_redirects, 10);
         assert!(s.request.verify_tls);
         assert_eq!(s.editor_font_size, 13);
+        assert!(s.check_updates_on_launch);
 
-        let partial: AppSettings =
-            serde_json::from_str(r#"{"request":{"verify_tls":false},"editor_font_size":16}"#)
-                .unwrap();
+        let partial: AppSettings = serde_json::from_str(
+            r#"{"request":{"verify_tls":false},"editor_font_size":16,"check_updates_on_launch":false}"#,
+        )
+        .unwrap();
         assert!(!partial.request.verify_tls);
         assert_eq!(partial.request.timeout_secs, 30);
         assert_eq!(partial.editor_font_size, 16);
+        assert!(!partial.check_updates_on_launch);
 
         let back: AppSettings =
             serde_json::from_str(&serde_json::to_string(&partial).unwrap()).unwrap();
