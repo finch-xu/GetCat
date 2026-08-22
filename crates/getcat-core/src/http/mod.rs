@@ -912,6 +912,8 @@ mod tests {
         assert_eq!(req.headers, vec![("X-A".to_string(), "1".to_string())]);
     }
 
+    /// 同一测试二进制内的用例并行执行且共用此目录：`name` 必须每个用例唯一，
+    /// 否则一个用例 `fs::write` 截断重写时另一个正在流式读同一文件，会出现 body 比 Content-Length 短的偶发失败。
     fn temp_upload_file(name: &str, payload: &[u8]) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("getcat-filebody-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1035,14 +1037,14 @@ mod tests {
     async fn form_data_is_sent_as_fixed_length_multipart() {
         // 300 KB：大于 ReaderStream 单块，保证文件 part 走多块流式路径
         let payload: Vec<u8> = (0..300_000u32).map(|i| b'0' + (i % 10) as u8).collect();
-        let path = temp_upload_file("upload.json", &payload);
+        let path = temp_upload_file("form-upload.json", &payload);
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(MultipartFixedLength)
             .and(body_string_contains("name=\"note\""))
             .and(body_string_contains("hi there"))
             .and(body_string_contains(
-                "name=\"doc\"; filename=\"upload.json\"",
+                "name=\"doc\"; filename=\"form-upload.json\"",
             ))
             .and(body_string_contains("Content-Type: application/json"))
             .and(body_string_contains(
