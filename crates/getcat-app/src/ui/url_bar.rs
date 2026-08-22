@@ -37,7 +37,7 @@ impl RequestTab {
         v_flex()
             .gap_1()
             .px_3()
-            .py_2p5()
+            .py_2()
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
@@ -52,7 +52,7 @@ impl RequestTab {
                             .id("method-select")
                             .role(Role::Group)
                             .aria_label("请求方法")
-                            .w(px(120.))
+                            .w_32()
                             .flex_none()
                             .child(Select::new(&self.method).text_color(method_color(method, cx))),
                     )

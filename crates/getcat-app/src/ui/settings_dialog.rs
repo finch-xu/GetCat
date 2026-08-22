@@ -7,13 +7,15 @@ use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, ThemePref};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
-    WeakEntity, Window, div, px,
+    WeakEntity, Window, div, px, rems,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IconName, Sizable, WindowExt,
+    ActiveTheme, Disableable, Icon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
+    description_list::DescriptionList,
     dialog::DialogFooter,
     h_flex,
+    link::Link,
     progress::Progress,
     setting::{
         NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
@@ -305,9 +307,8 @@ fn about_page() -> SettingPage {
                 .item(SettingItem::render(|_, _, cx| {
                     let muted = cx.theme().muted_foreground;
                     v_flex()
-                        .gap_1()
+                        .gap_2()
                         .text_sm()
-                        .child(format!("版本 {}", env!("CARGO_PKG_VERSION")))
                         .child(
                             div()
                                 .text_xs()
@@ -315,10 +316,13 @@ fn about_page() -> SettingPage {
                                 .child("基于 gpui 与 gpui-component 构建的 HTTP 调试工具。"),
                         )
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .child("许可证：Apache-2.0"),
+                            DescriptionList::new()
+                                .columns(1)
+                                .bordered(false)
+                                .small()
+                                .label_width(rems(4.))
+                                .item("版本", env!("CARGO_PKG_VERSION"), 1)
+                                .item("许可证", "Apache-2.0", 1),
                         )
                 })),
         )
@@ -463,14 +467,15 @@ fn check_button(checking: bool) -> Button {
         .on_click(|_, _, cx| update::check(cx))
 }
 
-fn releases_button(id: &'static str) -> Button {
-    Button::new(id)
-        .ghost()
-        .small()
-        .icon(IconName::ExternalLink)
-        .label("发布页")
-        .tooltip(update::RELEASES_URL)
-        .on_click(|_, _, cx| cx.open_url(update::RELEASES_URL))
+/// 发布页是外部网页：按设计指南用 `Link`（手型光标、下划线），不是 Button。
+fn releases_button(id: &'static str) -> Link {
+    Link::new(id).href(update::RELEASES_URL).text_sm().child(
+        h_flex()
+            .gap_1()
+            .items_center()
+            .child("发布页")
+            .child(Icon::new(IconName::ExternalLink).size_3p5()),
+    )
 }
 
 fn theme_key(pref: ThemePref) -> SharedString {

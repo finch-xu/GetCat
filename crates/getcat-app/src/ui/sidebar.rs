@@ -15,6 +15,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     kbd::Kbd,
+    menu::{ContextMenuExt as _, PopupMenuItem},
     scroll::Scrollbar,
     v_flex,
 };
@@ -27,11 +28,10 @@ use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::method_color;
 use crate::{OpenSettings, SaveRequest, ToggleSidebar};
 
-/// 列表行高（uniform_list 要求等高）。
+/// 列表行高：布局用 `h_11()`（2.75 rem），默认 rem 下等于 44 px；
+/// 测试按这个像素值核对 uniform_list 的内容高度。
+#[cfg(test)]
 pub const SAVED_ROW_HEIGHT: f32 = 44.;
-
-/// 图标栏宽度。与 gpui-component `Sidebar` 的折叠宽度一致。
-pub const RAIL_WIDTH: f32 = 48.;
 
 fn theme_icon(pref: ThemePref) -> IconName {
     match pref {
@@ -66,7 +66,8 @@ impl Workspace {
             .id("sidebar-rail")
             .role(Role::Group)
             .aria_label("功能栏")
-            .w(px(RAIL_WIDTH))
+            // 48 px：与 gpui-component `Sidebar` 的折叠宽度一致
+            .w_12()
             .h_full()
             .flex_none()
             .items_center()
@@ -78,21 +79,19 @@ impl Workspace {
             .child(
                 div()
                     .id("logo")
-                    .size(px(36.))
+                    .size_9()
                     .flex()
                     .items_center()
                     .justify_center()
                     .tooltip(|window, cx| {
                         gpui_component::tooltip::Tooltip::new("GetCat").build(window, cx)
                     })
+                    // 26 px 是位图本身的尺寸：设计指南允许的像素例外
                     .child(img(LOGO_PATH).size(px(26.)).flex_none()),
             )
             .child(
-                div()
-                    .h(px(1.))
-                    .w(px(24.))
-                    .my_1()
-                    .bg(cx.theme().sidebar_border),
+                // 1 px 细线是物理边界，宽度走 rem 刻度
+                div().h(px(1.)).w_6().my_1().bg(cx.theme().sidebar_border),
             )
             .children(SidebarSection::ALL.iter().map(|section| {
                 let section = *section;
@@ -141,7 +140,7 @@ impl Workspace {
             .border_color(cx.theme().sidebar_border)
             .child(
                 h_flex()
-                    .h(px(40.))
+                    .h_10()
                     .flex_none()
                     .pl_4()
                     .pr_2()
@@ -215,8 +214,9 @@ impl Workspace {
                     let selected = active_saved == Some(id);
                     let open = weak.clone();
                     let delete = weak.clone();
+                    let menu_ws = weak.clone();
                     // 行本身留 2 px 上下间隙，让选中底色成为一个悬浮的圆角块而不是整条色带
-                    div().h(px(SAVED_ROW_HEIGHT)).w_full().py(px(2.)).child(
+                    div().h_11().w_full().py_0p5().child(
                         h_flex()
                             .id(("saved-row", ix))
                             .group("saved-row")
@@ -235,7 +235,7 @@ impl Workspace {
                             })
                             .child(
                                 div()
-                                    .w(px(48.))
+                                    .w_12()
                                     .flex_none()
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
@@ -268,7 +268,30 @@ impl Workspace {
                                             });
                                         }
                                     }),
-                            ),
+                            )
+                            // 对象级命令放右键菜单（设计指南）：与行内按钮是同一组动作，
+                            // 键盘与辅助技术用户多一条可达路径
+                            .context_menu(move |menu, _, _| {
+                                let open = menu_ws.clone();
+                                let delete = menu_ws.clone();
+                                menu.item(PopupMenuItem::new("打开").on_click(
+                                    move |_, window, cx| {
+                                        if let Some(ws) = open.upgrade() {
+                                            ws.update(cx, |ws, cx| ws.open_saved(id, window, cx));
+                                        }
+                                    },
+                                ))
+                                .separator()
+                                .item(
+                                    PopupMenuItem::new("删除…").on_click(move |_, window, cx| {
+                                        if let Some(ws) = delete.upgrade() {
+                                            ws.update(cx, |ws, cx| {
+                                                ws.confirm_delete_saved(id, window, cx)
+                                            });
+                                        }
+                                    }),
+                                )
+                            }),
                     )
                 })
                 .collect::<Vec<_>>()

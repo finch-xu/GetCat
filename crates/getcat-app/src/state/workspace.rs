@@ -16,7 +16,8 @@ use gpui::{
     UniformListScrollHandle, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
+    ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, ThemeStyled, TitleBar,
+    WindowExt,
     alert::Alert,
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
@@ -678,7 +679,12 @@ impl Workspace {
                 let mut tab = Tab::new().label(title).aria_label(aria);
                 if dirty {
                     // 未保存改动：标题前的圆点（spec §7.1）
-                    tab = tab.prefix(div().size(px(6.)).rounded_full().bg(cx.theme().primary));
+                    tab = tab.prefix(
+                        div()
+                            .size_1p5()
+                            .rounded_full_style(cx)
+                            .bg(cx.theme().primary),
+                    );
                 }
                 tab.suffix(
                     Button::new(("close-tab", ix))

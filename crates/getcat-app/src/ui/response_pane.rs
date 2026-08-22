@@ -8,6 +8,7 @@ use gpui_component::{
     ActiveTheme, IconName, Sizable,
     alert::Alert,
     button::{Button, ButtonVariants},
+    description_list::DescriptionList,
     h_flex,
     input::Editor,
     kbd::Kbd,
@@ -61,7 +62,7 @@ impl RequestTab {
             .min_h_0()
             .child(
                 h_flex()
-                    .h(px(40.))
+                    .h_10()
                     .px_3()
                     .gap_3()
                     .items_center()
@@ -79,7 +80,7 @@ impl RequestTab {
                                     div()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .max_w(px(360.))
+                                        .max_w_96()
                                         .truncate()
                                         .child(notice),
                                 )
@@ -270,32 +271,35 @@ impl RequestTab {
         view: &ResponseView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let row = |label: &'static str, value: String| {
-            h_flex()
-                .gap_2()
-                .text_sm()
-                .child(div().w(px(72.)).flex_none().text_color(muted).child(label))
-                .child(div().flex_1().min_w_0().truncate().child(value))
-        };
-        v_flex()
-            .gap_1()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(row("大小", format_bytes(view.meta.body_len)))
-            .child(row(
+        // 标签 / 值成对的元数据用官方 DescriptionList：标签列宽、间距与字色都由组件定
+        let list = DescriptionList::new()
+            .columns(1)
+            .bordered(false)
+            .small()
+            .label_width(rems(4.5))
+            .item("大小", format_bytes(view.meta.body_len), 1)
+            .item(
                 "类型",
                 view.meta
                     .content_type
                     .clone()
                     .unwrap_or_else(|| view.kind.label().to_string()),
-            ))
-            .child(row("耗时", format_duration(view.meta.duration)))
-            .when_some(body.path(), |v, path| {
-                v.child(row("临时文件", path.display().to_string())).child(
-                    h_flex().pt_1().child(
+                1,
+            )
+            .item("耗时", format_duration(view.meta.duration), 1)
+            .when_some(body.path(), |list, path| {
+                list.item("临时文件", path.display().to_string(), 1)
+            });
+        v_flex()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(list)
+            .when(body.path().is_some(), |v| {
+                v.child(
+                    h_flex().child(
                         Button::new("open-with-system")
                             .outline()
                             .xsmall()

@@ -9,12 +9,96 @@
 //! `Theme::sync_system_appearance` 自动用这两套，跟随系统外观也不会退回
 //! gpui-component 的默认灰。
 
-use gpui::App;
-use gpui_component::{Theme, ThemeRegistry};
+use getcat_core::model::Method;
+use gpui::{App, Hsla, rgb};
+use gpui_component::{ActiveTheme, Theme, ThemeRegistry};
 
 const THEME_JSON: &str = include_str!("theme.json");
 const LIGHT: &str = "GetCat Light";
 const DARK: &str = "GetCat Dark";
+
+/// 产品级调色板：gpui-component 的 Theme 没有「HTTP 方法」「状态码」这两个语义角色，
+/// 按设计指南它们属于产品自己的 token 层——原始色值只允许出现在这里，
+/// 调用点一律通过 [`palette`] 按语义取色。
+///
+/// 方法色不复用语义色：方法名在侧栏是 11px 粗体、URL 栏 12px 粗体，
+/// 直接取 success / warning / info / primary 在浅色底上只有 2.9–4.2:1。
+/// 这两组是在 OKLCH 里保持色相与彩度、只调明度求出来的，在各自主题的
+/// 背景 / 面板 / 侧栏 / 选中行四种底色上都 ≥ 4.8:1。
+/// 状态码色比方法色再深一档：它压在同色描边的 Tag 里，不是压在页面背景上。
+pub struct Palette {
+    method_get: u32,
+    method_post: u32,
+    method_put: u32,
+    method_patch: u32,
+    method_delete: u32,
+    method_other: u32,
+    status_2xx: u32,
+    status_3xx: u32,
+    status_4xx: u32,
+    status_5xx: u32,
+}
+
+const LIGHT_PALETTE: Palette = Palette {
+    method_get: 0x007762,
+    method_post: 0x925d0c,
+    method_put: 0x226ea2,
+    method_patch: 0x6d5ea6,
+    method_delete: 0xb74131,
+    method_other: 0x5e6a77,
+    status_2xx: 0x007460,
+    status_3xx: 0x67599f,
+    status_4xx: 0x8a5600,
+    status_5xx: 0xaf3829,
+};
+
+const DARK_PALETTE: Palette = Palette {
+    method_get: 0x4bb39a,
+    method_post: 0xd7a042,
+    method_put: 0x6fa8d4,
+    method_patch: 0xa596d8,
+    method_delete: 0xe77968,
+    method_other: 0x8f9aa3,
+    status_2xx: 0x6ccbb2,
+    status_3xx: 0xb5a8e0,
+    status_4xx: 0xe0ad50,
+    status_5xx: 0xe58474,
+};
+
+impl Palette {
+    pub fn method(&self, method: Method) -> Hsla {
+        rgb(match method {
+            Method::Get => self.method_get,
+            Method::Post => self.method_post,
+            Method::Put => self.method_put,
+            Method::Patch => self.method_patch,
+            Method::Delete => self.method_delete,
+            Method::Head | Method::Options => self.method_other,
+        })
+        .into()
+    }
+
+    /// 范围外的状态码（如 HTTP/0.9 或异常值）不给语义色。
+    pub fn status(&self, status: u16) -> Option<Hsla> {
+        let hex = match status {
+            200..=299 => self.status_2xx,
+            300..=399 => self.status_3xx,
+            400..=499 => self.status_4xx,
+            500..=599 => self.status_5xx,
+            _ => return None,
+        };
+        Some(rgb(hex).into())
+    }
+}
+
+/// 当前主题模式对应的产品调色板。
+pub fn palette(cx: &App) -> &'static Palette {
+    if cx.theme().is_dark() {
+        &DARK_PALETTE
+    } else {
+        &LIGHT_PALETTE
+    }
+}
 
 /// 把 GetCat 的浅色 / 深色配色装成当前主题。
 ///

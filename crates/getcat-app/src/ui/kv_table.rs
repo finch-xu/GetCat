@@ -13,7 +13,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px, relative,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IconName, Sizable,
+    ActiveTheme, Disableable, IconName, Sizable, Size,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     h_flex,
@@ -77,9 +77,9 @@ pub const COLUMNS: usize = 3;
 pub const DEFAULT_COLUMN_FRACTIONS: [f32; COLUMNS] = [0.30, 0.42, 0.28];
 /// 单列最窄占比：再窄就连占位文字都放不下。
 pub const MIN_COLUMN_FRACTION: f32 = 0.12;
-/// 首列（启用复选框）与末列（删除按钮）的固定宽度。
-const EDGE_COLUMN_WIDTH: f32 = 32.;
-const ROW_HEIGHT: f32 = 30.;
+/// 表格密度：与 gpui-component `Table` 的 small 档对齐（行高 30 px），
+/// 行高与单元格内边距都从这个 `Size` 取，不再各写各的像素值。
+const TABLE_SIZE: Size = Size::Small;
 
 /// 拖动表头分隔线时携带的数据：正在拖第几条分隔线（在列 `ix` 与 `ix + 1` 之间）。
 /// gpui 的 `on_drag` 要求拖拽值同时是一个可渲染的"拖拽预览"，这里什么都不画。
@@ -576,19 +576,18 @@ impl KvTable {
 
     fn render_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let labels = ["Key", "Value", "Description"];
-        let muted = cx.theme().muted_foreground;
         let primary = cx.theme().primary;
         h_flex()
             .w_full()
-            .h(px(ROW_HEIGHT - 2.))
+            .h(TABLE_SIZE.table_row_height() - px(2.))
             .flex_none()
             .bg(cx.theme().table_head)
             .border_b_1()
             .border_color(cx.theme().table_row_border)
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(muted)
-            .child(div().w(px(EDGE_COLUMN_WIDTH)).flex_none())
+            .text_color(cx.theme().table_head_foreground)
+            .child(div().w_8().flex_none())
             .child(
                 h_flex()
                     .id("kv-header-columns")
@@ -624,7 +623,7 @@ impl KvTable {
                             })
                     })),
             )
-            .child(div().w(px(EDGE_COLUMN_WIDTH)).flex_none())
+            .child(div().w_8().flex_none())
             .into_any_element()
     }
 
@@ -637,7 +636,7 @@ impl KvTable {
         h_flex()
             .id(("kv-row", ix))
             .w_full()
-            .h(px(ROW_HEIGHT))
+            .h(TABLE_SIZE.table_row_height())
             .flex_none()
             .border_b_1()
             .border_color(cx.theme().table_row_border)
@@ -650,7 +649,7 @@ impl KvTable {
                     .id(("kv-enabled-cell", ix))
                     .role(Role::Group)
                     .aria_label(row_aria_label(ix, "启用"))
-                    .w(px(EDGE_COLUMN_WIDTH))
+                    .w_8()
                     .h_full()
                     .flex_none()
                     .flex()
@@ -719,7 +718,7 @@ impl KvTable {
             )
             .child(
                 div()
-                    .w(px(EDGE_COLUMN_WIDTH))
+                    .w_8()
                     .h_full()
                     .flex_none()
                     .flex()

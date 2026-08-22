@@ -11,8 +11,10 @@ pub mod url_bar;
 use std::time::Duration;
 
 use getcat_core::model::Method;
-use gpui::{App, Hsla, rgb};
+use gpui::{App, Hsla};
 use gpui_component::ActiveTheme;
+
+use crate::theme::palette;
 
 pub fn format_bytes(n: u64) -> String {
     const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
@@ -39,33 +41,16 @@ pub fn format_duration(d: Duration) -> String {
     }
 }
 
-/// 方法色不复用语义色：方法名在侧栏是 11px 粗体、URL 栏 12px 粗体，
-/// 直接取 success / warning / info / primary 在浅色底上只有 2.9–4.2:1。
-/// 下面两组是在 OKLCH 里保持色相与彩度、只调明度求出来的，在各自主题的
-/// 背景 / 面板 / 侧栏 / 选中行四种底色上都 ≥ 4.8:1。
+/// HTTP 方法的语义色，取自产品 token 层（见 [`crate::theme::Palette`]）。
 pub fn method_color(method: Method, cx: &App) -> Hsla {
-    let (light, dark) = match method {
-        Method::Get => (0x007762, 0x4bb39a),
-        Method::Post => (0x925d0c, 0xd7a042),
-        Method::Put => (0x226ea2, 0x6fa8d4),
-        Method::Patch => (0x6d5ea6, 0xa596d8),
-        Method::Delete => (0xb74131, 0xe77968),
-        Method::Head | Method::Options => (0x5e6a77, 0x8f9aa3),
-    };
-    rgb(if cx.theme().is_dark() { dark } else { light }).into()
+    palette(cx).method(method)
 }
 
-/// 状态码色比方法色再深一档：它的文字压在同色 16% 的 chip 底上，
-/// 而不是压在页面背景上。范围外的状态码不给语义色。
+/// 状态码的语义色；范围外的状态码退回 muted。
 pub fn status_color(status: u16, cx: &App) -> Hsla {
-    let (light, dark) = match status {
-        200..=299 => (0x007460, 0x6ccbb2),
-        300..=399 => (0x67599f, 0xb5a8e0),
-        400..=499 => (0x8a5600, 0xe0ad50),
-        500..=599 => (0xaf3829, 0xe58474),
-        _ => return cx.theme().muted_foreground,
-    };
-    rgb(if cx.theme().is_dark() { dark } else { light }).into()
+    palette(cx)
+        .status(status)
+        .unwrap_or(cx.theme().muted_foreground)
 }
 
 #[cfg(test)]

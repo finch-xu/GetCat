@@ -95,14 +95,14 @@ pub fn render_header_rows(
             .map(|ix| {
                 let (name, value) = &rows[ix];
                 h_flex()
-                    .h(px(24.))
+                    .h_6()
                     .items_center()
                     .gap_3()
                     .px_3()
                     .text_sm()
                     .child(
                         div()
-                            .w(px(260.))
+                            .w_64()
                             .flex_none()
                             .text_color(muted)
                             .truncate()
