@@ -1,9 +1,17 @@
-//! 左侧栏：标题 + 主题切换按钮 + 已保存请求列表（gpui uniform_list，按 updated_at 降序，O(可见行)）。
+//! 左侧栏 = 固定图标栏 + 可展开的功能面板。
+//!
+//! - **图标栏**（48 px，始终可见、从不移动）：顶部 logo，下面每个图标代表一个功能
+//!   （目前只有「已保存请求」），底部是主题切换（一个按钮三种图标）与设置。
+//! - **面板**（240 px，可拖宽）：点某个功能图标展开，顶部显示该功能的名字，下面是内容；
+//!   再点同一个图标（或顶部的收起按钮、⌘B）收起。
+//!
+//! 没有用 gpui-component 的 `Sidebar`：它要求子项实现 `SidebarItem`（菜单式），
+//! 而这里的列表是 `uniform_list` 虚拟化 + 每行带删除按钮，自绘更贴合。
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, IconName, Sizable,
+    ActiveTheme, Icon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     scroll::Scrollbar,
@@ -12,12 +20,16 @@ use gpui_component::{
 
 use getcat_core::model::ThemePref;
 
+use crate::assets::LOGO_PATH;
 use crate::state::request_tab::tab_title;
-use crate::state::workspace::Workspace;
+use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::method_color;
 
 /// 列表行高（uniform_list 要求等高）。
 pub const SAVED_ROW_HEIGHT: f32 = 44.;
+
+/// 图标栏宽度。与 gpui-component `Sidebar` 的折叠宽度一致。
+pub const RAIL_WIDTH: f32 = 48.;
 
 fn theme_icon(pref: ThemePref) -> IconName {
     match pref {
@@ -27,10 +39,100 @@ fn theme_icon(pref: ThemePref) -> IconName {
     }
 }
 
+impl SidebarSection {
+    pub fn title(self) -> &'static str {
+        match self {
+            SidebarSection::Saved => "已保存请求",
+        }
+    }
+
+    fn icon(self) -> IconName {
+        match self {
+            SidebarSection::Saved => IconName::Inbox,
+        }
+    }
+}
+
 impl Workspace {
-    pub fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// 固定图标栏。
+    pub fn render_sidebar_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
+        let expanded = !self.sidebar_collapsed();
+        let current = self.sidebar_section();
+        let saved_count = self.saved().len();
         v_flex()
+            .id("sidebar-rail")
+            .role(Role::Group)
+            .aria_label("功能栏")
+            .w(px(RAIL_WIDTH))
+            .h_full()
+            .flex_none()
+            .items_center()
+            .py_2()
+            .gap_1()
+            .bg(cx.theme().sidebar)
+            .border_r_1()
+            .border_color(cx.theme().sidebar_border)
+            .child(
+                div()
+                    .id("logo")
+                    .size(px(36.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .tooltip(|window, cx| {
+                        gpui_component::tooltip::Tooltip::new("GetCat").build(window, cx)
+                    })
+                    .child(img(LOGO_PATH).size(px(26.)).flex_none()),
+            )
+            .child(
+                div()
+                    .h(px(1.))
+                    .w(px(24.))
+                    .my_1()
+                    .bg(cx.theme().sidebar_border),
+            )
+            .children(SidebarSection::ALL.iter().map(|section| {
+                let section = *section;
+                let tooltip: SharedString = match (section, saved_count) {
+                    (SidebarSection::Saved, n) if n > 0 => {
+                        format!("{}（{n}）", section.title()).into()
+                    }
+                    _ => section.title().into(),
+                };
+                Button::new(("rail-section", section as usize))
+                    .ghost()
+                    .selected(expanded && current == section)
+                    .icon(Icon::new(section.icon()).size_4())
+                    .tooltip(tooltip)
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.open_sidebar_section(section, cx)),
+                    )
+            }))
+            .child(div().flex_1())
+            .child(
+                Button::new("rail-theme")
+                    .ghost()
+                    .icon(Icon::new(theme_icon(theme)).size_4())
+                    .tooltip(format!("主题：{}（点击切换）", theme.label()))
+                    .on_click(cx.listener(|this, _, window, cx| this.cycle_theme(window, cx))),
+            )
+            .child(
+                Button::new("rail-settings")
+                    .ghost()
+                    .icon(Icon::new(IconName::Settings).size_4())
+                    .tooltip("设置（⌘, / Ctrl ,）")
+                    .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
+            )
+    }
+
+    /// 展开的功能面板：标题行 + 当前功能的内容。
+    pub fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section = self.sidebar_section();
+        v_flex()
+            .id("sidebar-panel")
+            .role(Role::Group)
+            .aria_label(section.title())
             .size_full()
             .bg(cx.theme().sidebar)
             .border_r_1()
@@ -38,28 +140,33 @@ impl Workspace {
             .child(
                 h_flex()
                     .h(px(40.))
-                    .px_3()
+                    .flex_none()
+                    .pl_4()
+                    .pr_2()
+                    .gap_2()
                     .items_center()
-                    .justify_between()
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().sidebar_foreground)
-                            .child("已保存请求"),
+                            .truncate()
+                            .child(section.title()),
                     )
                     .child(
-                        Button::new("theme-toggle")
+                        Button::new("collapse-sidebar")
                             .ghost()
                             .xsmall()
-                            .icon(theme_icon(theme))
-                            .tooltip(format!("主题：{}（点击切换）", theme.label()))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.cycle_theme(window, cx)),
-                            ),
+                            .icon(Icon::new(IconName::PanelLeftClose).size_4())
+                            .tooltip("收起（⌘B / Ctrl B）")
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
                     ),
             )
-            .child(self.render_saved_list(cx))
+            .child(match section {
+                SidebarSection::Saved => self.render_saved_list(cx),
+            })
     }
 
     fn render_saved_list(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -69,7 +176,9 @@ impl Workspace {
                 .items_center()
                 .justify_center()
                 .gap_1()
+                .px_4()
                 .text_sm()
+                .text_center()
                 .text_color(cx.theme().muted_foreground)
                 .child("尚无已保存的请求")
                 .child(div().text_xs().child("用 ⌘S / Ctrl S 保存当前请求"))
@@ -83,6 +192,7 @@ impl Workspace {
             let active_bg = cx.theme().list_active;
             let hover_bg = cx.theme().list_hover;
             let muted = cx.theme().muted_foreground;
+            let radius = cx.theme().radius;
             range
                 .map(|ix| {
                     let request = &saved[ix];
@@ -93,56 +203,61 @@ impl Workspace {
                     let selected = active_saved == Some(id);
                     let open = weak.clone();
                     let delete = weak.clone();
-                    h_flex()
-                        .id(("saved-row", ix))
-                        .w_full()
-                        .h(px(SAVED_ROW_HEIGHT))
-                        .px_2()
-                        .gap_2()
-                        .items_center()
-                        .rounded_md()
-                        .when(selected, |row| row.bg(active_bg))
-                        .hover(|style| style.bg(hover_bg))
-                        .aria_label(format!("已保存请求：{name}"))
-                        .on_click(move |_, window, cx| {
-                            if let Some(ws) = open.upgrade() {
-                                ws.update(cx, |ws, cx| ws.open_saved(id, window, cx));
-                            }
-                        })
-                        .child(
-                            div()
-                                .w(px(52.))
-                                .flex_none()
-                                .text_xs()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(method_color(method, cx))
-                                .child(method.as_str()),
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .child(div().text_sm().truncate().child(name))
-                                .child(div().text_xs().text_color(muted).truncate().child(tail)),
-                        )
-                        .child(
-                            Button::new(("saved-delete", ix))
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::Delete)
-                                // Button 只实现 InteractiveElement（非 Stateful），没有
-                                // aria_label；tooltip 就是它对外的可读名字。
-                                .tooltip("删除")
-                                .on_click(move |_, window, cx| {
-                                    // 不让点击冒泡成"打开"
-                                    cx.stop_propagation();
-                                    if let Some(ws) = delete.upgrade() {
-                                        ws.update(cx, |ws, cx| {
-                                            ws.confirm_delete_saved(id, window, cx)
-                                        });
-                                    }
-                                }),
-                        )
+                    // 行本身留 2 px 上下间隙，让选中底色成为一个悬浮的圆角块而不是整条色带
+                    div().h(px(SAVED_ROW_HEIGHT)).w_full().py(px(2.)).child(
+                        h_flex()
+                            .id(("saved-row", ix))
+                            .group("saved-row")
+                            .size_full()
+                            .px_2()
+                            .gap_2()
+                            .items_center()
+                            .rounded(radius)
+                            .when(selected, |row| row.bg(active_bg))
+                            .hover(|style| style.bg(hover_bg))
+                            .aria_label(format!("已保存请求：{name}"))
+                            .on_click(move |_, window, cx| {
+                                if let Some(ws) = open.upgrade() {
+                                    ws.update(cx, |ws, cx| ws.open_saved(id, window, cx));
+                                }
+                            })
+                            .child(
+                                div()
+                                    .w(px(48.))
+                                    .flex_none()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(method_color(method, cx))
+                                    .child(method.as_str()),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(div().text_sm().truncate().child(name))
+                                    .child(
+                                        div().text_xs().text_color(muted).truncate().child(tail),
+                                    ),
+                            )
+                            .child(
+                                Button::new(("saved-delete", ix))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Delete)
+                                    // Button 只实现 InteractiveElement（非 Stateful），没有
+                                    // aria_label；tooltip 就是它对外的可读名字。
+                                    .tooltip("删除")
+                                    .on_click(move |_, window, cx| {
+                                        // 不让点击冒泡成"打开"
+                                        cx.stop_propagation();
+                                        if let Some(ws) = delete.upgrade() {
+                                            ws.update(cx, |ws, cx| {
+                                                ws.confirm_delete_saved(id, window, cx)
+                                            });
+                                        }
+                                    }),
+                            ),
+                    )
                 })
                 .collect::<Vec<_>>()
         })
@@ -153,7 +268,8 @@ impl Workspace {
             .relative()
             .flex_1()
             .min_h_0()
-            .p_1()
+            .px_2()
+            .pb_2()
             .child(list)
             .child(Scrollbar::vertical(self.saved_scroll()))
             .into_any_element()

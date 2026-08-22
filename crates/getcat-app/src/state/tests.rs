@@ -18,8 +18,8 @@ use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    BodyKind, FormField, FormValue, KeyValue, Method, RawFormat, RequestDraft, ResponseMeta,
-    SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState,
+    AppSettings, BodyKind, FormField, FormValue, KeyValue, Method, RawFormat, RequestDraft,
+    ResponseMeta, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
 use gpui::{
@@ -34,8 +34,9 @@ use crate::state::request_tab::{
     VIRTUAL_SEARCH_NOTICE,
 };
 use crate::state::response::{ResponseState, ResponseView};
+use crate::state::settings;
 use crate::state::store;
-use crate::state::workspace::Workspace;
+use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::{KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
@@ -82,6 +83,11 @@ pub(crate) fn read_draft(store: &Store, id: TabId) -> Option<TabDraft> {
 
 pub(crate) fn read_workspace(store: &Store) -> Option<WorkspaceState> {
     let bytes = std::fs::read(store.layout().workspace_path()).ok()?;
+    decode(&bytes).ok()
+}
+
+pub(crate) fn read_settings(store: &Store) -> Option<AppSettings> {
+    let bytes = std::fs::read(store.layout().settings_path()).ok()?;
     decode(&bytes).ok()
 }
 
@@ -1031,7 +1037,7 @@ fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
         tab_order: vec![ids[2], ids[0], ids[1]],
         active: Some(ids[0]),
         sidebar_width: Some(300.),
-        sidebar_collapsed: true,
+        sidebar_collapsed: false,
         theme: ThemePref::Dark,
         split: SplitDirection::Horizontal,
     });
@@ -1057,7 +1063,8 @@ fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
         assert_eq!(ws.tab_at(1).read(app).id, ids[0]);
         assert!(ws.tab_at(2).read(app).dirty);
         assert!(!ws.tab_at(1).read(app).dirty);
-        assert!(ws.sidebar_collapsed());
+        // 文件里写的是展开（与默认值相反），证明读的是文件而不是默认
+        assert!(!ws.sidebar_collapsed());
         assert_eq!(ws.sidebar_width(), Some(300.));
         assert_eq!(ws.theme(), ThemePref::Dark);
         assert_eq!(ws.split(), SplitDirection::Horizontal);
@@ -1075,7 +1082,8 @@ fn restore_without_files_creates_one_tab(cx: &mut TestAppContext) {
         let ws = ws.read(app);
         assert_eq!(ws.tab_count(), 1);
         assert_eq!(ws.theme(), ThemePref::System);
-        assert!(!ws.sidebar_collapsed());
+        // 首次启动侧栏收成图标栏
+        assert!(ws.sidebar_collapsed());
     });
     // 新建的空 Tab 已经有草稿文件
     let id = cx.read(|app| ws.read(app).active_tab().read(app).id);
@@ -1147,7 +1155,8 @@ fn workspace_changes_are_persisted(cx: &mut TestAppContext) {
         assert_eq!(state.active, Some(ws.tab_at(0).read(app).id));
         assert!(app.theme().mode.is_dark());
     });
-    assert!(state.sidebar_collapsed);
+    // 默认收起，toggle 一次后是展开
+    assert!(!state.sidebar_collapsed);
     assert_eq!(state.theme, ThemePref::Dark);
     assert_eq!(state.sidebar_width, None);
 
@@ -1411,8 +1420,10 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
     });
 
     // 真正绘制一帧：侧栏 uniform_list 完成布局，内容高度 = 行高 × 2。
-    // 先 blur：聚焦中的 Input 在渲染时会调用 macOS 的 set_text_content_type，
+    // 侧栏默认收成图标栏（不画列表），先展开；
+    // 再 blur：聚焦中的 Input 在渲染时会调用 macOS 的 set_text_content_type，
     // 而测试窗口没有真实平台窗口句柄（gpui TestWindow::window_handle 是 unimplemented!）。
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_sidebar(cx)));
     cx.update(|window, _| window.blur());
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
@@ -1762,4 +1773,89 @@ fn kv_table_choosing_file_on_trailing_row_appends_empty_row(cx: &mut TestAppCont
         assert_eq!(t.form_fields(app), vec![FormField::file("", file.clone())]);
     });
     let _ = std::fs::remove_file(&file);
+}
+
+#[gpui::test]
+fn rail_click_expands_then_collapses_the_same_section(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.read(|app| assert!(ws.read(app).sidebar_collapsed()));
+
+    // 收起状态下点功能图标：展开并切到它
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_sidebar_section(SidebarSection::Saved, cx)
+        })
+    });
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert!(!ws.sidebar_collapsed());
+        assert_eq!(ws.sidebar_section(), SidebarSection::Saved);
+    });
+    // 再点同一个：收起
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_sidebar_section(SidebarSection::Saved, cx)
+        })
+    });
+    cx.read(|app| assert!(ws.read(app).sidebar_collapsed()));
+    // 折叠状态落盘
+    assert!(store.flush());
+    assert!(read_workspace(&store).unwrap().sidebar_collapsed);
+}
+
+#[gpui::test]
+fn settings_update_persists_and_applies_font_size(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    cx.update(|_, cx| settings::install(cx, None));
+    cx.read(|app| assert_eq!(settings::settings(app), AppSettings::default()));
+
+    cx.update(|_, cx| {
+        settings::update(cx, |s| {
+            s.editor_font_size = 16;
+            s.request.follow_redirects = false;
+        })
+    });
+    cx.read(|app| {
+        let s = settings::settings(app);
+        assert_eq!(s.editor_font_size, 16);
+        assert!(!s.request.follow_redirects);
+        assert_eq!(app.theme().mono_font_size, px(16.));
+    });
+    assert!(store.flush());
+    let on_disk = read_settings(&store).expect("settings.json written");
+    assert_eq!(on_disk.editor_font_size, 16);
+    assert!(!on_disk.request.follow_redirects);
+
+    // 字号越界被夹回范围；没有实际变化的 update 不写文件
+    let writes = store.write_count();
+    cx.update(|_, cx| settings::update(cx, |s| s.editor_font_size = 99));
+    cx.read(|app| assert_eq!(settings::settings(app).editor_font_size, 24));
+    cx.update(|_, cx| settings::update(cx, |_| {}));
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes + 1);
+
+    cx.update(|_, cx| settings::reset(cx));
+    cx.read(|app| assert_eq!(settings::settings(app), AppSettings::default()));
+}
+
+#[gpui::test]
+fn settings_dropdown_theme_change_needs_no_window(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.set_theme_global(ThemePref::Dark, cx)));
+    cx.read(|app| {
+        assert_eq!(ws.read(app).theme(), ThemePref::Dark);
+        assert!(app.theme().mode.is_dark());
+    });
+    assert!(store.flush());
+    assert_eq!(read_workspace(&store).unwrap().theme, ThemePref::Dark);
+}
+
+/// ⌘, 的按键串必须能被 gpui 解析，否则 `bind_keys` 会在启动时 panic。
+#[test]
+fn settings_shortcut_keystroke_parses() {
+    for ks in ["cmd-,", "ctrl-,"] {
+        assert!(gpui::Keystroke::parse(ks).is_ok(), "{ks}");
+    }
 }

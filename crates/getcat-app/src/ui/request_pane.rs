@@ -8,6 +8,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::Editor,
+    menu::{DropdownMenu as _, PopupMenuItem},
     tab::{Tab, TabBar},
     v_flex,
 };
@@ -43,6 +44,7 @@ impl RequestTab {
                 TabBar::new("request-sections")
                     .underline()
                     .small()
+                    .px_3()
                     .selected_index(section.index())
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
                         this.request_section = RequestSection::from_index(*ix);
@@ -60,7 +62,8 @@ impl RequestTab {
                     .id("request-section")
                     .flex_1()
                     .min_h_0()
-                    .p_3()
+                    .px_3()
+                    .py_3()
                     .when(section != RequestSection::Body, |d| d.overflow_y_scroll())
                     .child(match section {
                         RequestSection::Params => v_flex()
@@ -80,21 +83,23 @@ impl RequestTab {
 
     pub fn render_body_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let mode = self.body_mode;
-        let raw_ix = RawFormat::ALL
-            .iter()
-            .position(|f| *f == self.raw_format)
-            .unwrap_or(0);
+        let weak = cx.entity().downgrade();
+        let current_format = self.raw_format;
         v_flex()
             .size_full()
-            .gap_2()
+            .gap_3()
+            // 一行工具条：左边是 Body 类型分段控件，右边（raw 时）是格式下拉。
+            // flex_wrap 让格式下拉在请求区很窄时自动换到下一行，而不是把分段控件裁掉。
             .child(
                 h_flex()
-                    .gap_3()
+                    .flex_wrap()
                     .items_center()
+                    .justify_between()
+                    .gap_2()
                     .child(
                         TabBar::new("body-mode")
                             .segmented()
-                            .xsmall()
+                            .small()
                             .selected_index(mode.index())
                             .on_click(cx.listener(|this, ix: &usize, _, cx| {
                                 this.body_mode = BodyMode::from_index(*ix);
@@ -103,30 +108,44 @@ impl RequestTab {
                             }))
                             .child("none")
                             .child("form-data")
-                            .child("x-www-form-urlencoded")
+                            // 标签缩短；发出的 Content-Type 仍是 application/x-www-form-urlencoded
+                            .child("urlencoded")
                             .child("raw")
                             .child("binary"),
                     )
                     .when(mode == BodyMode::Raw, |h| {
                         h.child(
-                            TabBar::new("raw-format")
-                                .pill()
-                                .xsmall()
-                                .selected_index(raw_ix)
-                                .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                                    this.raw_format =
-                                        RawFormat::ALL.get(*ix).copied().unwrap_or(RawFormat::Json);
-                                    this.refresh_body_hint(cx);
-                                    this.mark_dirty(cx);
-                                }))
-                                .children(
-                                    RawFormat::ALL.iter().map(|f| Tab::new().label(f.label())),
-                                ),
+                            Button::new("raw-format")
+                                .outline()
+                                .small()
+                                .label(current_format.label())
+                                .tooltip("raw 内容的格式（决定高亮与 Content-Type）")
+                                .dropdown_caret(true)
+                                .dropdown_menu(move |mut menu, _, _| {
+                                    for format in RawFormat::ALL {
+                                        let weak = weak.clone();
+                                        menu = menu.item(
+                                            PopupMenuItem::new(format.label())
+                                                .checked(format == current_format)
+                                                .on_click(move |_, _, cx| {
+                                                    if let Some(tab) = weak.upgrade() {
+                                                        tab.update(cx, |this, cx| {
+                                                            this.raw_format = format;
+                                                            this.refresh_body_hint(cx);
+                                                            this.mark_dirty(cx);
+                                                        });
+                                                    }
+                                                }),
+                                        );
+                                    }
+                                    menu
+                                }),
                         )
                     }),
             )
             .child(match mode {
                 BodyMode::None => div()
+                    .py_2()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child("此请求没有 Body")
@@ -136,13 +155,20 @@ impl RequestTab {
                     .min_h_0()
                     .gap_1()
                     .child(
-                        div().flex_1().min_h_0().child(
-                            Editor::new(self.editor_for(self.raw_format))
-                                .aria_label("请求 Body 编辑器")
-                                .font_family(cx.theme().mono_font_family.clone())
-                                .text_size(cx.theme().mono_font_size)
-                                .size_full(),
-                        ),
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .rounded(cx.theme().radius)
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .overflow_hidden()
+                            .child(
+                                Editor::new(self.editor_for(self.raw_format))
+                                    .aria_label("请求 Body 编辑器")
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_size(cx.theme().mono_font_size)
+                                    .size_full(),
+                            ),
                     )
                     .when_some(self.body_hint.clone(), |v, hint| {
                         v.child(div().text_xs().text_color(cx.theme().warning).child(hint))

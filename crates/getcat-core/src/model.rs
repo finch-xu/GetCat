@@ -307,6 +307,69 @@ impl ThemePref {
     }
 }
 
+/// 发送请求的行为设置（`settings.json` 的 `request` 段）；改动后要重建 HTTP client。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestSettings {
+    /// 整个请求（连接 + 读完响应）的总超时，秒；0 表示不限。
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+    /// 是否自动跟随 3xx 跳转。
+    #[serde(default = "default_true")]
+    pub follow_redirects: bool,
+    /// 跟随跳转的最大次数（仅 follow_redirects 为真时有效）。
+    #[serde(default = "default_max_redirects")]
+    pub max_redirects: u32,
+    /// 校验 HTTPS 证书；关掉后自签证书也能请求（本地调试用）。
+    #[serde(default = "default_true")]
+    pub verify_tls: bool,
+}
+
+fn default_timeout_secs() -> u64 {
+    30
+}
+fn default_max_redirects() -> u32 {
+    10
+}
+fn default_true() -> bool {
+    true
+}
+
+impl Default for RequestSettings {
+    fn default() -> Self {
+        Self {
+            timeout_secs: default_timeout_secs(),
+            follow_redirects: true,
+            max_redirects: default_max_redirects(),
+            verify_tls: true,
+        }
+    }
+}
+
+/// 应用设置（`settings.json`）。布局类状态在 [`WorkspaceState`]，这里只放用户显式调整的偏好。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppSettings {
+    #[serde(default)]
+    pub request: RequestSettings,
+    /// 请求 / 响应编辑器的等宽字号（px）。
+    #[serde(default = "default_editor_font_size")]
+    pub editor_font_size: u32,
+}
+
+pub const EDITOR_FONT_SIZE_RANGE: std::ops::RangeInclusive<u32> = 10..=24;
+
+fn default_editor_font_size() -> u32 {
+    13
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            request: RequestSettings::default(),
+            editor_font_size: default_editor_font_size(),
+        }
+    }
+}
+
 /// 请求 / 响应分栏方向（spec §7.1）：左右（默认，响应区在右侧）或上下。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -317,7 +380,7 @@ pub enum SplitDirection {
 }
 
 /// 工作区状态（`workspace.json`）：只有布局与顺序，不含任何请求内容。
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceState {
     #[serde(default)]
     pub tab_order: Vec<TabId>,
@@ -326,13 +389,32 @@ pub struct WorkspaceState {
     /// 侧栏宽度（逻辑像素）；None 表示默认 240。
     #[serde(default)]
     pub sidebar_width: Option<f32>,
-    #[serde(default)]
+    /// 侧栏是否收成图标栏。首次启动默认收起：主工作区是请求 / 响应，
+    /// 列表按需展开；旧文件没有此字段时同样视为收起。
+    #[serde(default = "default_sidebar_collapsed")]
     pub sidebar_collapsed: bool,
     #[serde(default)]
     pub theme: ThemePref,
     /// 请求 / 响应分栏方向；旧文件没有此字段时为左右（响应区在右侧）。
     #[serde(default)]
     pub split: SplitDirection,
+}
+
+fn default_sidebar_collapsed() -> bool {
+    true
+}
+
+impl Default for WorkspaceState {
+    fn default() -> Self {
+        Self {
+            tab_order: Vec::new(),
+            active: None,
+            sidebar_width: None,
+            sidebar_collapsed: default_sidebar_collapsed(),
+            theme: ThemePref::default(),
+            split: SplitDirection::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -452,6 +534,33 @@ mod tests {
         let ws: WorkspaceState = serde_json::from_str("{}").unwrap();
         assert_eq!(ws, WorkspaceState::default());
         assert_eq!(ws.theme, ThemePref::System);
+        // 首次启动侧栏收成图标栏；旧文件缺字段时同样收起
+        assert!(ws.sidebar_collapsed);
+        let expanded: WorkspaceState =
+            serde_json::from_str(r#"{"sidebar_collapsed": false}"#).unwrap();
+        assert!(!expanded.sidebar_collapsed);
+    }
+
+    #[test]
+    fn app_settings_tolerate_missing_fields_and_round_trip() {
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s, AppSettings::default());
+        assert_eq!(s.request.timeout_secs, 30);
+        assert!(s.request.follow_redirects);
+        assert_eq!(s.request.max_redirects, 10);
+        assert!(s.request.verify_tls);
+        assert_eq!(s.editor_font_size, 13);
+
+        let partial: AppSettings =
+            serde_json::from_str(r#"{"request":{"verify_tls":false},"editor_font_size":16}"#)
+                .unwrap();
+        assert!(!partial.request.verify_tls);
+        assert_eq!(partial.request.timeout_secs, 30);
+        assert_eq!(partial.editor_font_size, 16);
+
+        let back: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&partial).unwrap()).unwrap();
+        assert_eq!(back, partial);
     }
 
     #[test]

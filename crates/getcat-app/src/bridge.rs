@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use getcat_core::http::{
     self, BodyStore, Client, HttpRequest, HttpResponse, Progress, RequestError,
 };
+use getcat_core::model::RequestSettings;
 use getcat_core::store::{copy_atomic_user, write_atomic_user};
 use gpui::{App, Global, Task};
 use gpui_tokio::Tokio;
@@ -16,6 +17,11 @@ impl Global for HttpClient {}
 pub fn init(cx: &mut App) {
     gpui_tokio::init(cx);
     cx.set_global(HttpClient(http::build_client()));
+}
+
+/// 按请求设置重建全局 client（设置改动后调用）。正在进行的请求继续用旧 client 直到结束。
+pub fn rebuild_client(cx: &mut App, settings: &RequestSettings) {
+    cx.set_global(HttpClient(http::build_client_with(settings)));
 }
 
 /// 在 tokio runtime 上执行请求；返回的 gpui Task 被 drop 时底层 tokio 任务自动 abort。

@@ -122,9 +122,9 @@ mod tests {
     #[test]
     fn decode_ignores_unknown_fields_and_fills_defaults() {
         let ws: WorkspaceState =
-            decode(br#"{"version": 1, "sidebar_collapsed": true, "future_field": [1, 2]}"#)
+            decode(br#"{"version": 1, "sidebar_collapsed": false, "future_field": [1, 2]}"#)
                 .unwrap();
-        assert!(ws.sidebar_collapsed);
+        assert!(!ws.sidebar_collapsed);
         assert!(ws.tab_order.is_empty());
     }
 
@@ -145,7 +145,7 @@ mod tests {
     fn encode_sorts_keys_deterministically_regardless_of_serde_json_features() {
         let bytes = encode(&WorkspaceState::default()).unwrap();
         let text = std::str::from_utf8(&bytes).unwrap();
-        let expected = "{\n  \"active\": null,\n  \"sidebar_collapsed\": false,\n  \"sidebar_width\": null,\n  \"split\": \"horizontal\",\n  \"tab_order\": [],\n  \"theme\": \"system\",\n  \"version\": 1\n}\n";
+        let expected = "{\n  \"active\": null,\n  \"sidebar_collapsed\": true,\n  \"sidebar_width\": null,\n  \"split\": \"horizontal\",\n  \"tab_order\": [],\n  \"theme\": \"system\",\n  \"version\": 1\n}\n";
         assert_eq!(text, expected);
     }
 

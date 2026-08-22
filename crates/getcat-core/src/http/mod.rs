@@ -18,7 +18,7 @@ use url::Url;
 pub use error::RequestError;
 
 use crate::body::spill::{HEAD_BYTES, SpillFile};
-use crate::model::{BodyKind, FormValue, Method, RequestDraft, ResponseMeta};
+use crate::model::{BodyKind, FormValue, Method, RequestDraft, RequestSettings, ResponseMeta};
 use crate::url::build_url;
 
 pub type Client = reqwest::Client;
@@ -228,12 +228,28 @@ pub struct Progress {
     pub elapsed: Duration,
 }
 
+/// 默认设置的 client（测试与启动兜底）。
 pub fn build_client() -> Client {
-    Client::builder()
+    build_client_with(&RequestSettings::default())
+}
+
+/// 按设置构建 reqwest client。设置改动后整个 client 要重建：超时、跳转策略与 TLS 校验
+/// 都是 builder 级别的选项。`timeout_secs == 0` 表示不设总超时（连接超时仍然固定 10 s）。
+pub fn build_client_with(settings: &RequestSettings) -> Client {
+    let redirect = if settings.follow_redirects {
+        reqwest::redirect::Policy::limited(settings.max_redirects as usize)
+    } else {
+        reqwest::redirect::Policy::none()
+    };
+    let mut builder = Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .user_agent(USER_AGENT_VALUE)
-        .build()
-        .expect("reqwest client")
+        .redirect(redirect)
+        .danger_accept_invalid_certs(!settings.verify_tls);
+    if settings.timeout_secs > 0 {
+        builder = builder.timeout(Duration::from_secs(settings.timeout_secs));
+    }
+    builder.build().expect("reqwest client")
 }
 
 pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
@@ -585,6 +601,50 @@ mod tests {
                 .iter()
                 .any(|(k, v)| k == "x-test" && v == "1")
         );
+    }
+
+    #[tokio::test]
+    async fn redirects_are_followed_only_when_the_setting_says_so() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/old"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", "/new"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/new"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("moved"))
+            .mount(&server)
+            .await;
+        let d = draft(Method::Get, format!("{}/old", server.uri()));
+
+        let follow = build_client_with(&RequestSettings::default());
+        let resp = execute(&follow, prepare(&d).unwrap(), None).await.unwrap();
+        assert_eq!(resp.meta.status, 200);
+        assert_eq!(resp.body.memory().unwrap(), b"moved");
+
+        let stay = build_client_with(&RequestSettings {
+            follow_redirects: false,
+            ..Default::default()
+        });
+        let resp = execute(&stay, prepare(&d).unwrap(), None).await.unwrap();
+        assert_eq!(resp.meta.status, 302);
+    }
+
+    #[test]
+    fn every_settings_combination_builds_a_client() {
+        for timeout_secs in [0, 5] {
+            for follow_redirects in [true, false] {
+                for verify_tls in [true, false] {
+                    let _ = build_client_with(&RequestSettings {
+                        timeout_secs,
+                        follow_redirects,
+                        max_redirects: 3,
+                        verify_tls,
+                    });
+                }
+            }
+        }
     }
 
     #[tokio::test]

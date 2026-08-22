@@ -35,7 +35,8 @@ impl RequestTab {
 
         v_flex()
             .gap_1()
-            .p_3()
+            .px_3()
+            .py_2p5()
             .border_b_1()
             .border_color(cx.theme().border)
             .child(

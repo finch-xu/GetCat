@@ -4,6 +4,7 @@ pub mod body_view;
 pub mod kv_table;
 pub mod request_pane;
 pub mod response_pane;
+pub mod settings_dialog;
 pub mod sidebar;
 pub mod url_bar;
 

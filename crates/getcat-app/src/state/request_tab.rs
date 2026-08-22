@@ -847,22 +847,23 @@ impl RequestTab {
 impl Render for RequestTab {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 两个方向各用一个 id：ResizablePanelGroup 按 id 记住拖出来的尺寸，上下与左右互不串扰
-        let (group, request_size) = match self.split {
-            SplitDirection::Vertical => (v_resizable("request-response-v"), px(300.)),
-            // 左右分栏的请求区初始宽度要给响应区留出可用空间：最小窗口 800 px 减去
-            // 240 px 侧栏后只剩 560 px，480 px 会让响应区只剩 ~80 px。
-            SplitDirection::Horizontal => (h_resizable("request-response-h"), px(360.)),
+        let group = match self.split {
+            SplitDirection::Vertical => v_resizable("request-response-v"),
+            SplitDirection::Horizontal => h_resizable("request-response-h"),
+        };
+        // 请求 / 响应默认各占一半：两块面板都不给初始像素尺寸，而是把 flex-basis 压到 0，
+        // 剩余空间由同为 flex-grow 1 的两者均分（basis 留 auto 时会按内容宽度分，不均）。
+        // 首帧量到的尺寸会被 ResizableState 记下，之后拖动与等比缩放照旧。
+        let half = || {
+            resizable_panel()
+                .flex_basis(px(0.))
+                .size_range(px(140.)..px(4000.))
         };
         v_flex().size_full().child(self.render_url_bar(cx)).child(
             div().flex_1().min_h_0().min_w_0().child(
                 group
-                    .child(
-                        resizable_panel()
-                            .size(request_size)
-                            .size_range(px(140.)..px(900.))
-                            .child(self.render_request_pane(cx)),
-                    )
-                    .child(resizable_panel().child(self.render_response_pane(cx))),
+                    .child(half().child(self.render_request_pane(cx)))
+                    .child(half().child(self.render_response_pane(cx))),
             ),
         )
     }

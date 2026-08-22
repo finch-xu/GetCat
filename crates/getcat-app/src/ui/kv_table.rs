@@ -8,9 +8,9 @@ use gpui::prelude::FluentBuilder as _;
 // 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
 // `#[test]` 属性宏并与标准库同名冲突。编译器报"找不到 X"时把 X 加进这里，不要改回通配符。
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    ParentElement, PathPromptOptions, Render, Role, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Window, div, px,
+    AnyElement, App, AppContext, Context, CursorStyle, DragMoveEvent, Entity, EventEmitter,
+    FontWeight, InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, Role,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px, relative,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IconName, Sizable,
@@ -71,6 +71,44 @@ struct KvRow {
     _subs: Vec<Subscription>,
 }
 
+/// 三个可拖宽的列：Key / Value / Description。
+pub const COLUMNS: usize = 3;
+/// 默认列宽占比（Value 略宽：值通常比名字长）。
+pub const DEFAULT_COLUMN_FRACTIONS: [f32; COLUMNS] = [0.30, 0.42, 0.28];
+/// 单列最窄占比：再窄就连占位文字都放不下。
+pub const MIN_COLUMN_FRACTION: f32 = 0.12;
+/// 首列（启用复选框）与末列（删除按钮）的固定宽度。
+const EDGE_COLUMN_WIDTH: f32 = 32.;
+const ROW_HEIGHT: f32 = 30.;
+
+/// 拖动表头分隔线时携带的数据：正在拖第几条分隔线（在列 `ix` 与 `ix + 1` 之间）。
+/// gpui 的 `on_drag` 要求拖拽值同时是一个可渲染的"拖拽预览"，这里什么都不画。
+#[derive(Clone, Copy)]
+struct ColumnDrag(usize);
+
+impl Render for ColumnDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
+/// 把第 `boundary` 条分隔线移到表格可变区域宽度的 `x` 处（0..1），只动它两侧的列，
+/// 其余列不变；两侧各自不小于 [`MIN_COLUMN_FRACTION`]。
+pub(crate) fn move_column_boundary(fractions: &mut [f32; COLUMNS], boundary: usize, x: f32) {
+    if boundary + 1 >= COLUMNS {
+        return;
+    }
+    let left_edge: f32 = fractions[..boundary].iter().sum();
+    let pair = fractions[boundary] + fractions[boundary + 1];
+    let min = MIN_COLUMN_FRACTION;
+    if pair < 2. * min {
+        return;
+    }
+    let left = (x - left_edge).clamp(min, pair - min);
+    fractions[boundary] = left;
+    fractions[boundary + 1] = pair - left;
+}
+
 pub struct KvTable {
     key_placeholder: SharedString,
     value_placeholder: SharedString,
@@ -79,6 +117,9 @@ pub struct KvTable {
     locked_keys: bool,
     /// form-data 模式：每行可在 Text / File 间切换。
     file_capable: bool,
+    /// 三列占可变区域的比例，和为 1；拖表头分隔线改。按比例而不是像素记，
+    /// 请求区被拖宽拖窄时各列跟着等比缩放。
+    column_fractions: [f32; COLUMNS],
 }
 
 impl EventEmitter<KvTableEvent> for KvTable {}
@@ -96,6 +137,7 @@ impl KvTable {
             rows: Vec::new(),
             locked_keys: false,
             file_capable: false,
+            column_fractions: DEFAULT_COLUMN_FRACTIONS,
         };
         this.push_row("", "", "", true, window, cx);
         this
@@ -410,19 +452,18 @@ impl KvTable {
 
     fn render_value_cell(&self, ix: usize, row: &KvRow, cx: &mut Context<Self>) -> AnyElement {
         if row.kind == RowKind::Text {
-            return div()
-                .flex_1()
-                .child(
-                    Input::new(&row.value)
-                        .small()
-                        .aria_label(row_aria_label(ix, &self.value_placeholder)),
-                )
+            return Input::new(&row.value)
+                .small()
+                .appearance(false)
+                .w_full()
+                .aria_label(row_aria_label(ix, &self.value_placeholder))
                 .into_any_element();
         }
         let muted = cx.theme().muted_foreground;
         h_flex()
-            .flex_1()
+            .w_full()
             .min_w_0()
+            .px_1()
             .gap_2()
             .items_center()
             .child(
@@ -503,117 +544,289 @@ impl KvTable {
     }
 }
 
+impl KvTable {
+    fn on_column_drag(&mut self, event: &DragMoveEvent<ColumnDrag>, cx: &mut Context<Self>) {
+        let width = event.bounds.size.width.as_f32();
+        if width <= 0. {
+            return;
+        }
+        let x = (event.event.position.x - event.bounds.origin.x).as_f32() / width;
+        let boundary = event.drag(cx).0;
+        let before = self.column_fractions;
+        move_column_boundary(&mut self.column_fractions, boundary, x);
+        if before != self.column_fractions {
+            cx.notify();
+        }
+    }
+
+    /// 一个表格单元：按比例占宽；除最后一列外右侧画分隔线。
+    fn cell(&self, col: usize, cx: &App) -> gpui::Div {
+        div()
+            // 顺序有讲究：flex_none() 会把 flex-basis 一并重置成 auto，必须先调它再给 basis
+            .flex_none()
+            .flex_basis(relative(self.column_fractions[col]))
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .when(col + 1 < COLUMNS, |d| {
+                d.border_r_1().border_color(cx.theme().table_row_border)
+            })
+    }
+
+    fn render_header(&self, cx: &mut Context<Self>) -> AnyElement {
+        let labels = ["Key", "Value", "Description"];
+        let muted = cx.theme().muted_foreground;
+        let primary = cx.theme().primary;
+        h_flex()
+            .w_full()
+            .h(px(ROW_HEIGHT - 2.))
+            .flex_none()
+            .bg(cx.theme().table_head)
+            .border_b_1()
+            .border_color(cx.theme().table_row_border)
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(muted)
+            .child(div().w(px(EDGE_COLUMN_WIDTH)).flex_none())
+            .child(
+                h_flex()
+                    .id("kv-header-columns")
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    // 拖拽期间 gpui 在捕获阶段把每次移动都送到这里（不要求悬停），
+                    // 并附带本元素的 bounds：正好是三列共享的可变区域。
+                    .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ColumnDrag>, _, cx| {
+                        this.on_column_drag(e, cx)
+                    }))
+                    .children((0..COLUMNS).map(|col| {
+                        self.cell(col, cx)
+                            .relative()
+                            .px_2()
+                            .child(labels[col])
+                            .when(col + 1 < COLUMNS, |d| {
+                                d.child(
+                                    // 盖在分隔线上的 7 px 把手：悬停变色、拖动改列宽
+                                    div()
+                                        .id(("kv-col-handle", col))
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .right(px(-4.))
+                                        .w(px(7.))
+                                        .cursor(CursorStyle::ResizeLeftRight)
+                                        .hover(|d| d.bg(primary.opacity(0.5)))
+                                        .on_drag(ColumnDrag(col), |drag, _, _, cx| {
+                                            cx.new(|_| *drag)
+                                        }),
+                                )
+                            })
+                    })),
+            )
+            .child(div().w(px(EDGE_COLUMN_WIDTH)).flex_none())
+            .into_any_element()
+    }
+
+    // 返回 AnyElement 而不是 impl IntoElement：2024 edition 的 impl Trait 会捕获 `cx` 的
+    // 生命周期，在 `rows.iter().map(...)` 里逐行调用时借用检查过不去。
+    fn render_row(&self, ix: usize, row: &KvRow, cx: &mut Context<Self>) -> AnyElement {
+        let locked = self.locked_keys;
+        let file_capable = self.file_capable;
+        let hover_bg = cx.theme().table_hover;
+        h_flex()
+            .id(("kv-row", ix))
+            .w_full()
+            .h(px(ROW_HEIGHT))
+            .flex_none()
+            .border_b_1()
+            .border_color(cx.theme().table_row_border)
+            .hover(|d| d.bg(hover_bg))
+            .child(
+                // 可访问名称：gpui-component Checkbox 只有可见 label 会进入 a11y 树（tooltip 不算），
+                // 每行加可见文字又会让表格变宽。折中：外面包一个带 role + aria_label 的组，
+                // 屏幕阅读器先读"启用（第 N 行）"再读复选框。上游加 Checkbox::aria_label 后可去掉包装。
+                div()
+                    .id(("kv-enabled-cell", ix))
+                    .role(Role::Group)
+                    .aria_label(row_aria_label(ix, "启用"))
+                    .w(px(EDGE_COLUMN_WIDTH))
+                    .h_full()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Checkbox::new(("kv-enabled", ix))
+                            .checked(row.enabled)
+                            .tooltip(row_aria_label(ix, "启用"))
+                            .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                this.toggle_row(ix, *checked, cx)
+                            })),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(
+                        self.cell(0, cx).child(
+                            Input::new(&row.key)
+                                .small()
+                                .appearance(false)
+                                .w_full()
+                                .readonly(locked)
+                                .aria_label(row_aria_label(ix, &self.key_placeholder)),
+                        ),
+                    )
+                    .child(
+                        self.cell(1, cx)
+                            .when(file_capable, |d| {
+                                let kind = row.kind;
+                                d.child(
+                                    div().pl_1().flex_none().child(
+                                        Button::new(("kv-kind", ix))
+                                            .ghost()
+                                            .xsmall()
+                                            .label(kind.label())
+                                            .tooltip(row_aria_label(
+                                                ix,
+                                                "值类型：点击在 Text / File 间切换",
+                                            ))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.set_row_kind(ix, kind.toggled(), cx)
+                                            })),
+                                    ),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(self.render_value_cell(ix, row, cx)),
+                            ),
+                    )
+                    .child(
+                        self.cell(2, cx).child(
+                            Input::new(&row.description)
+                                .small()
+                                .appearance(false)
+                                .w_full()
+                                .aria_label(row_aria_label(ix, "描述")),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(EDGE_COLUMN_WIDTH))
+                    .h_full()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Button::new(("kv-remove", ix))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Close)
+                            .tooltip(row_aria_label(ix, "删除"))
+                            .disabled(locked)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.remove_row(ix, window, cx)
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for KvTable {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let locked = self.locked_keys;
-        let file_capable = self.file_capable;
         v_flex()
             .w_full()
-            .gap_1()
-            .child(
-                h_flex()
-                    .px_1()
-                    .gap_2()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(div().w(px(28.)))
-                    .child(div().flex_1().child("Key"))
-                    .when(file_capable, |h| h.child(div().w(px(52.)).flex_none()))
-                    .child(div().flex_1().child("Value"))
-                    .child(div().flex_1().child("Description"))
-                    .child(div().w(px(28.))),
-            )
+            .rounded(cx.theme().radius)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().table)
+            .overflow_hidden()
+            .child(self.render_header(cx))
             .when(locked && self.rows.is_empty(), |v| {
                 v.child(
                     div()
-                        .px_1()
+                        .px_3()
+                        .py_2()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .child("URL 中没有 {name} 形式的 Path 参数"),
                 )
             })
-            .children(self.rows.iter().enumerate().map(|(ix, row)| {
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        // 可访问名称：gpui-component Checkbox 只有可见 label 会进入 a11y 树（tooltip 不算），
-                        // 每行加可见文字又会让表格变宽。折中：外面包一个带 role + aria_label 的组，
-                        // 屏幕阅读器先读"启用（第 N 行）"再读复选框。上游加 Checkbox::aria_label 后可去掉包装。
-                        div()
-                            .id(("kv-enabled-cell", ix))
-                            .role(Role::Group)
-                            .aria_label(row_aria_label(ix, "启用"))
-                            .w(px(28.))
-                            .flex()
-                            .justify_center()
-                            .child(
-                                Checkbox::new(("kv-enabled", ix))
-                                    .checked(row.enabled)
-                                    .tooltip(row_aria_label(ix, "启用"))
-                                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                        this.toggle_row(ix, *checked, cx)
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&row.key)
-                                .small()
-                                .readonly(locked)
-                                .aria_label(row_aria_label(ix, &self.key_placeholder)),
-                        ),
-                    )
-                    .when(file_capable, |h| {
-                        let kind = row.kind;
-                        h.child(
-                            div().w(px(52.)).flex_none().child(
-                                Button::new(("kv-kind", ix))
-                                    .outline()
-                                    .xsmall()
-                                    .label(kind.label())
-                                    .tooltip(row_aria_label(
-                                        ix,
-                                        "值类型：点击在 Text / File 间切换",
-                                    ))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.set_row_kind(ix, kind.toggled(), cx)
-                                    })),
-                            ),
-                        )
-                    })
-                    .child(self.render_value_cell(ix, row, cx))
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&row.description)
-                                .small()
-                                .aria_label(row_aria_label(ix, "描述")),
-                        ),
-                    )
-                    .child(
-                        div().w(px(28.)).child(
-                            Button::new(("kv-remove", ix))
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::Close)
-                                .tooltip(row_aria_label(ix, "删除"))
-                                .disabled(locked)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.remove_row(ix, window, cx)
-                                })),
-                        ),
-                    )
-            }))
+            .children(
+                self.rows
+                    .iter()
+                    .enumerate()
+                    .map(|(ix, row)| self.render_row(ix, row, cx))
+                    .collect::<Vec<_>>(),
+            )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::row_aria_label;
+    use super::{
+        COLUMNS, DEFAULT_COLUMN_FRACTIONS, MIN_COLUMN_FRACTION, move_column_boundary,
+        row_aria_label,
+    };
 
     #[test]
     fn row_aria_labels_carry_the_row_number() {
         assert_eq!(row_aria_label(0, "参数名"), "参数名（第 1 行）");
         assert_eq!(row_aria_label(2, "删除"), "删除（第 3 行）");
+    }
+
+    fn total(f: &[f32; COLUMNS]) -> f32 {
+        f.iter().sum()
+    }
+
+    #[test]
+    fn default_fractions_sum_to_one() {
+        assert!((total(&DEFAULT_COLUMN_FRACTIONS) - 1.).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dragging_a_boundary_only_moves_its_two_neighbours() {
+        let mut f = DEFAULT_COLUMN_FRACTIONS;
+        // 第一条分隔线拖到 40%：Key 变 0.40，Value 吸收差值，Description 不动
+        move_column_boundary(&mut f, 0, 0.40);
+        assert!((f[0] - 0.40).abs() < 1e-6);
+        assert!((f[1] - 0.32).abs() < 1e-6);
+        assert!((f[2] - 0.28).abs() < 1e-6);
+        assert!((total(&f) - 1.).abs() < 1e-6);
+
+        // 第二条分隔线拖到 60%：Key 不动，Value / Description 重新分
+        move_column_boundary(&mut f, 1, 0.60);
+        assert!((f[0] - 0.40).abs() < 1e-6);
+        assert!((f[1] - 0.20).abs() < 1e-6);
+        assert!((f[2] - 0.40).abs() < 1e-6);
+    }
+
+    #[test]
+    fn columns_never_shrink_below_the_minimum() {
+        let mut f = DEFAULT_COLUMN_FRACTIONS;
+        move_column_boundary(&mut f, 0, -1.);
+        assert!((f[0] - MIN_COLUMN_FRACTION).abs() < 1e-6);
+        assert!((total(&f) - 1.).abs() < 1e-6);
+
+        move_column_boundary(&mut f, 1, 2.);
+        assert!((f[2] - MIN_COLUMN_FRACTION).abs() < 1e-6);
+        assert!((total(&f) - 1.).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_last_column_has_no_boundary_to_drag() {
+        let mut f = DEFAULT_COLUMN_FRACTIONS;
+        move_column_boundary(&mut f, COLUMNS - 1, 0.5);
+        assert_eq!(f, DEFAULT_COLUMN_FRACTIONS);
     }
 }

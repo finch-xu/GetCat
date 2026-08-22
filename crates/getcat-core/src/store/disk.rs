@@ -10,10 +10,11 @@ use serde::de::DeserializeOwned;
 use tempfile::NamedTempFile;
 use tracing::warn;
 
-use crate::model::{SavedRequest, TabDraft, TabId, Ulid, WorkspaceState, now_ms};
+use crate::model::{AppSettings, SavedRequest, TabDraft, TabId, Ulid, WorkspaceState, now_ms};
 use crate::store::codec::{StoreError, decode};
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
+pub const SETTINGS_FILE: &str = "settings.json";
 pub const REQUESTS_DIR: &str = "requests";
 pub const DRAFTS_DIR: &str = "drafts";
 /// 可写性探测文件：创建后立即删除。
@@ -36,6 +37,10 @@ impl Layout {
 
     pub fn workspace_path(&self) -> PathBuf {
         self.root.join(WORKSPACE_FILE)
+    }
+
+    pub fn settings_path(&self) -> PathBuf {
+        self.root.join(SETTINGS_FILE)
     }
 
     pub fn requests_dir(&self) -> PathBuf {
@@ -182,6 +187,7 @@ pub struct LoadError {
 #[derive(Debug, Default)]
 pub struct Loaded {
     pub workspace: Option<WorkspaceState>,
+    pub settings: Option<AppSettings>,
     pub drafts: Vec<TabDraft>,
     pub requests: Vec<SavedRequest>,
     pub errors: Vec<LoadError>,
@@ -191,12 +197,14 @@ pub struct Loaded {
 pub fn load_all(layout: &Layout) -> Loaded {
     let mut errors = Vec::new();
     let workspace = load_file(&layout.workspace_path(), &mut errors);
+    let settings = load_file(&layout.settings_path(), &mut errors);
     let mut requests = Vec::new();
     load_dir(&layout.requests_dir(), &mut requests, &mut errors);
     let mut drafts = Vec::new();
     load_dir(&layout.drafts_dir(), &mut drafts, &mut errors);
     Loaded {
         workspace,
+        settings,
         drafts,
         requests,
         errors,
@@ -288,6 +296,26 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn settings_file_round_trips_and_is_optional() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path().to_path_buf());
+        layout.ensure().unwrap();
+        // 没有文件：None，不算错误
+        let loaded = load_all(&layout);
+        assert!(loaded.settings.is_none());
+        assert!(loaded.errors.is_empty());
+
+        let settings = AppSettings {
+            editor_font_size: 15,
+            ..Default::default()
+        };
+        write_atomic(&layout.settings_path(), &encode(&settings).unwrap()).unwrap();
+        let loaded = load_all(&layout);
+        assert_eq!(loaded.settings, Some(settings));
+        assert!(loaded.errors.is_empty());
     }
 
     #[test]

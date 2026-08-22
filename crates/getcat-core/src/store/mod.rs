@@ -12,12 +12,12 @@ use std::{
 
 pub use codec::{FORMAT_VERSION, StoreError};
 pub use disk::{
-    DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, WORKSPACE_FILE, copy_atomic,
-    copy_atomic_user, load_all, write_atomic, write_atomic_user,
+    DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, SETTINGS_FILE, WORKSPACE_FILE,
+    copy_atomic, copy_atomic_user, load_all, write_atomic, write_atomic_user,
 };
 pub use writer::{COALESCE_WINDOW, FLUSH_TIMEOUT, StoreWriter};
 
-use crate::model::{SavedRequest, TabDraft, TabId, Ulid, WorkspaceState};
+use crate::model::{AppSettings, SavedRequest, TabDraft, TabId, Ulid, WorkspaceState};
 
 /// 持久化门面：路径布局 + 写入线程。可 Clone（共享同一线程）。
 #[derive(Clone)]
@@ -73,6 +73,11 @@ impl Store {
     pub fn write_workspace(&self, state: WorkspaceState) {
         let path = self.layout.workspace_path();
         self.writer.write(path, move || codec::encode(&state));
+    }
+
+    pub fn write_settings(&self, settings: AppSettings) {
+        let path = self.layout.settings_path();
+        self.writer.write(path, move || codec::encode(&settings));
     }
 
     pub fn delete_request(&self, id: Ulid) {

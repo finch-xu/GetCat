@@ -1,5 +1,6 @@
 pub mod request_tab;
 pub mod response;
+pub mod settings;
 pub mod store;
 pub mod workspace;
 

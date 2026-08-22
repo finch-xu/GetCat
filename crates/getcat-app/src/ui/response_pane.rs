@@ -56,13 +56,15 @@ impl RequestTab {
                 h_flex()
                     .h(px(40.))
                     .px_3()
+                    .gap_3()
                     .items_center()
                     .justify_between()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(self.render_status_line(cx))
+                    .child(div().min_w_0().child(self.render_status_line(cx)))
                     .child(
                         h_flex()
+                            .flex_none()
                             .gap_3()
                             .items_center()
                             .when_some(self.notice.clone(), |h, notice| {

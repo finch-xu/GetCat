@@ -22,21 +22,39 @@ use gpui_component::{
     h_flex,
     input::{Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
+    status_bar::StatusBar,
     tab::{Tab, TabBar},
     v_flex,
 };
 
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
-use crate::{CloseTab, FindInResponse, NewTab, SaveRequest, SendRequest, ToggleSidebar};
+use crate::ui::settings_dialog::open_settings;
+use crate::{
+    CloseTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest, ToggleSidebar,
+};
 
 /// 侧栏默认宽度（spec §7.1）。
 pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.;
+
+/// 图标栏上的功能；展开的面板显示其中一个的内容。目前只有已保存请求，
+/// 枚举留着是为了之后加历史 / 环境等面板时图标栏与面板的切换逻辑不用重写。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarSection {
+    #[default]
+    Saved,
+}
+
+impl SidebarSection {
+    pub const ALL: [SidebarSection; 1] = [SidebarSection::Saved];
+}
 
 pub struct Workspace {
     tabs: Vec<Entity<RequestTab>>,
     active: usize,
     sidebar_collapsed: bool,
+    /// 面板当前显示的功能（图标栏高亮的那一个）。
+    sidebar_section: SidebarSection,
     /// 用户拖出来的侧栏宽度；None 用默认值。
     sidebar_width: Option<f32>,
     sidebar_state: Entity<ResizableState>,
@@ -65,6 +83,8 @@ impl Workspace {
         // 只是保留字段供 UI 将来展示（目前只用于测试断言 `loaded.errors.is_empty()`）。
         let Loaded {
             workspace: state,
+            // 设置在开窗前已由 main 取走安装；这里不再用
+            settings: _,
             drafts,
             requests,
             errors: _,
@@ -76,6 +96,7 @@ impl Workspace {
             tabs: Vec::new(),
             active: 0,
             sidebar_collapsed: state.sidebar_collapsed,
+            sidebar_section: SidebarSection::default(),
             sidebar_width: state.sidebar_width,
             sidebar_state: cx.new(|_| ResizableState::default()),
             theme: state.theme,
@@ -115,7 +136,7 @@ impl Workspace {
             ws.active_tab().update(cx, |t, cx| t.focus_url(window, cx));
         }
 
-        apply_theme(ws.theme, window, cx);
+        apply_theme(ws.theme, Some(window), cx);
         // 跟随系统：系统外观变化时重新同步（固定明 / 暗时忽略）
         let weak = cx.entity().downgrade();
         ws._subs
@@ -150,9 +171,28 @@ impl Workspace {
         self.tabs[ix].clone()
     }
 
-    #[cfg(test)]
     pub fn sidebar_collapsed(&self) -> bool {
         self.sidebar_collapsed
+    }
+
+    pub fn sidebar_section(&self) -> SidebarSection {
+        self.sidebar_section
+    }
+
+    /// 图标栏点击：点当前展开的功能 → 收起；点别的（或收起状态下点任一个）→ 展开并切到它。
+    pub fn open_sidebar_section(&mut self, section: SidebarSection, cx: &mut Context<Self>) {
+        if !self.sidebar_collapsed && self.sidebar_section == section {
+            self.sidebar_collapsed = true;
+        } else {
+            self.sidebar_section = section;
+            self.sidebar_collapsed = false;
+        }
+        self.persist_workspace(cx);
+        cx.notify();
+    }
+
+    pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        open_settings(cx.entity(), window, cx);
     }
 
     #[cfg(test)]
@@ -244,6 +284,20 @@ impl Workspace {
     }
 
     pub fn set_theme(&mut self, pref: ThemePref, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_theme_with(pref, Some(window), cx);
+    }
+
+    /// 没有 Window 可用的调用点（设置对话框的字段回调只拿到 `&mut App`）。
+    pub fn set_theme_global(&mut self, pref: ThemePref, cx: &mut Context<Self>) {
+        self.set_theme_with(pref, None, cx);
+    }
+
+    fn set_theme_with(
+        &mut self,
+        pref: ThemePref,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         if self.theme == pref {
             return;
         }
@@ -543,22 +597,25 @@ impl Workspace {
         self.active_tab().read(cx).title(cx)
     }
 
-    /// 自绘标题栏（spec §7.2）：应用名 + 当前 Tab 标题；拖动 / 双击 / 平台控制按钮由 TitleBar 处理。
+    /// 自绘标题栏（spec §7.2）：只居中显示当前 Tab 标题（应用名与 logo 在侧栏左上角）；
+    /// 拖动 / 双击 / 平台控制按钮由 TitleBar 处理。
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         TitleBar::new().child(
             h_flex()
+                .size_full()
                 .items_center()
-                .gap_2()
+                .justify_center()
+                // macOS 的 TitleBar 左侧给红绿灯留了 80 px，右侧补同样的量才是窗口正中
+                .when(cfg!(target_os = "macos"), |h| h.pr(px(80.)))
                 .text_sm()
                 .min_w_0()
-                .child(div().font_weight(FontWeight::SEMIBOLD).child("GetCat"))
                 .child(
                     // flex 子项默认 min-width:auto，不会收缩到内容宽度以下，truncate 因此失效：
-                    // 必须显式 min_w_0()；flex_1() 让副标题占满 "GetCat" 之后的剩余宽度。
+                    // 必须显式 min_w_0()
                     div()
-                        .flex_1()
                         .min_w_0()
-                        .text_color(cx.theme().muted_foreground)
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(cx.theme().foreground)
                         .truncate()
                         .child(self.title_bar_subtitle(cx)),
                 ),
@@ -576,6 +633,17 @@ impl Workspace {
             .collect();
         TabBar::new("request-tabs")
             .w_full()
+            .pl_1()
+            .prefix(
+                div().pr_1().child(
+                    Button::new("new-tab")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Plus)
+                        .tooltip("新建请求（⌘T / Ctrl T）")
+                        .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
+                ),
+            )
             .selected_index(self.active)
             .on_click(cx.listener(|this, ix: &usize, _, cx| this.activate(*ix, cx)))
             .children(titles.into_iter().enumerate().map(|(ix, (title, dirty))| {
@@ -602,48 +670,6 @@ impl Workspace {
                         })),
                 )
             }))
-            .suffix(
-                h_flex()
-                    .items_center()
-                    .gap_1()
-                    // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
-                    // 不用先读懂图标才知道按下去会变成什么。
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_0p5()
-                            .child(
-                                Button::new("split-right")
-                                    .ghost()
-                                    .small()
-                                    .selected(self.split == SplitDirection::Horizontal)
-                                    .icon(IconName::PanelRight)
-                                    .tooltip("响应区在右侧")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.set_split(SplitDirection::Horizontal, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("split-bottom")
-                                    .ghost()
-                                    .small()
-                                    .selected(self.split == SplitDirection::Vertical)
-                                    .icon(IconName::PanelBottom)
-                                    .tooltip("响应区在下方")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.set_split(SplitDirection::Vertical, cx)
-                                    })),
-                            ),
-                    )
-                    .child(
-                        Button::new("new-tab")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Plus)
-                            .tooltip("新建请求")
-                            .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
-                    ),
-            )
     }
 }
 
@@ -690,11 +716,47 @@ pub(crate) fn sort_saved(list: &mut [SavedRequest]) {
 }
 
 /// 把主题偏好应用到 gpui-component 的主题系统：System 跟随窗口外观，其余固定。
-pub(crate) fn apply_theme(pref: ThemePref, window: &mut Window, cx: &mut App) {
+/// `window` 为 None 时只改全局主题（gpui-component 会刷新所有窗口）。
+pub(crate) fn apply_theme(pref: ThemePref, window: Option<&mut Window>, cx: &mut App) {
     match pref {
-        ThemePref::System => Theme::sync_system_appearance(Some(window), cx),
-        ThemePref::Light => Theme::change(ThemeMode::Light, Some(window), cx),
-        ThemePref::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
+        ThemePref::System => Theme::sync_system_appearance(window, cx),
+        ThemePref::Light => Theme::change(ThemeMode::Light, window, cx),
+        ThemePref::Dark => Theme::change(ThemeMode::Dark, window, cx),
+    }
+}
+
+/// 底部状态栏：右侧是请求 / 响应的分栏方向（两段式），左侧留给以后的功能按钮。
+impl Workspace {
+    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        StatusBar::new().py_0p5().right(
+            h_flex()
+                .items_center()
+                .gap_0p5()
+                // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
+                // 不用先读懂图标才知道按下去会变成什么。
+                .child(
+                    Button::new("split-right")
+                        .ghost()
+                        .xsmall()
+                        .selected(self.split == SplitDirection::Horizontal)
+                        .icon(IconName::PanelRight)
+                        .tooltip("响应区在右侧")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_split(SplitDirection::Horizontal, cx)
+                        })),
+                )
+                .child(
+                    Button::new("split-bottom")
+                        .ghost()
+                        .xsmall()
+                        .selected(self.split == SplitDirection::Vertical)
+                        .icon(IconName::PanelBottom)
+                        .tooltip("响应区在下方")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_split(SplitDirection::Vertical, cx)
+                        })),
+                ),
+        )
     }
 }
 
@@ -746,33 +808,49 @@ impl Render for Workspace {
                 this.active_tab()
                     .update(cx, |tab, cx| tab.find_in_response(window, cx))
             }))
+            .on_action(
+                cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
+            )
             .child(self.render_title_bar(cx))
             .when_some(banner(cx), |d, text| d.child(render_banner(text, cx)))
             .child(
-                div().flex_1().min_h_0().w_full().child(
-                    h_resizable("workspace")
-                        .with_state(&self.sidebar_state)
-                        .on_resize(cx.listener(|this, state: &Entity<ResizableState>, _, cx| {
-                            this.on_sidebar_resized(state, cx)
-                        }))
-                        .child(
-                            resizable_panel()
-                                .size(sidebar_width)
-                                .size_range(px(180.)..px(420.))
-                                .visible(!self.sidebar_collapsed)
-                                .child(self.render_sidebar(cx)),
-                        )
-                        .child(
-                            resizable_panel().child(
-                                v_flex()
-                                    .size_full()
-                                    .min_w_0()
-                                    .child(self.render_tab_bar(cx))
-                                    .child(div().flex_1().min_h_0().child(active)),
-                            ),
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .items_stretch()
+                    // 图标栏固定在最左、从不移动；功能面板是可拖宽的分栏面板，
+                    // 收起时 visible(false) 整块让出（宽度照旧记在 sidebar_width）。
+                    .child(self.render_sidebar_rail(cx))
+                    .child(
+                        div().flex_1().min_w_0().h_full().child(
+                            h_resizable("workspace")
+                                .with_state(&self.sidebar_state)
+                                .on_resize(cx.listener(
+                                    |this, state: &Entity<ResizableState>, _, cx| {
+                                        this.on_sidebar_resized(state, cx)
+                                    },
+                                ))
+                                .child(
+                                    resizable_panel()
+                                        .size(sidebar_width)
+                                        .size_range(px(180.)..px(420.))
+                                        .visible(!self.sidebar_collapsed)
+                                        .child(self.render_sidebar(cx)),
+                                )
+                                .child(
+                                    resizable_panel().child(
+                                        v_flex()
+                                            .size_full()
+                                            .min_w_0()
+                                            .child(self.render_tab_bar(cx))
+                                            .child(div().flex_1().min_h_0().child(active)),
+                                    ),
+                                ),
                         ),
-                ),
+                    ),
             )
+            .child(self.render_status_bar(cx))
             .children(dialog_layer)
     }
 }
