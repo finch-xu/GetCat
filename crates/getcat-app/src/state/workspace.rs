@@ -16,7 +16,7 @@ use gpui::{
     UniformListScrollHandle, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Root, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
+    ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
     button::{Button, ButtonVariants},
     dialog::{DialogAction, DialogClose, DialogFooter},
     h_flex,
@@ -258,9 +258,13 @@ impl Workspace {
         self.set_theme(self.theme.next(), window, cx);
     }
 
-    /// 切换请求 / 响应的分栏方向（上下 ↔ 左右）：作用于所有 Tab，并写入 workspace.json。
-    pub fn toggle_split(&mut self, cx: &mut Context<Self>) {
-        let split = self.split.toggled();
+    /// 指定响应区的位置（右侧 / 下方）：作用于所有 Tab，并写入 workspace.json。
+    /// Tab 栏那组按钮是两段式的，点当前那一段应当没有任何动静，所以这里直接
+    /// 指定方向而不是翻转，并在方向没变时提前返回，避免多余的落盘与重绘。
+    pub fn set_split(&mut self, split: SplitDirection, cx: &mut Context<Self>) {
+        if self.split == split {
+            return;
+        }
         self.split = split;
         for tab in &self.tabs {
             tab.update(cx, |t, cx| {
@@ -602,16 +606,34 @@ impl Workspace {
                 h_flex()
                     .items_center()
                     .gap_1()
+                    // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
+                    // 不用先读懂图标才知道按下去会变成什么。
                     .child(
-                        Button::new("toggle-split")
-                            .ghost()
-                            .small()
-                            .icon(match self.split {
-                                SplitDirection::Vertical => IconName::PanelBottom,
-                                SplitDirection::Horizontal => IconName::PanelRight,
-                            })
-                            .tooltip(format!("切换为{}", self.split.toggled().label()))
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_split(cx))),
+                        h_flex()
+                            .items_center()
+                            .gap_0p5()
+                            .child(
+                                Button::new("split-right")
+                                    .ghost()
+                                    .small()
+                                    .selected(self.split == SplitDirection::Horizontal)
+                                    .icon(IconName::PanelRight)
+                                    .tooltip("响应区在右侧")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.set_split(SplitDirection::Horizontal, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("split-bottom")
+                                    .ghost()
+                                    .small()
+                                    .selected(self.split == SplitDirection::Vertical)
+                                    .icon(IconName::PanelBottom)
+                                    .tooltip("响应区在下方")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.set_split(SplitDirection::Vertical, cx)
+                                    })),
+                            ),
                     )
                     .child(
                         Button::new("new-tab")

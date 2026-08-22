@@ -145,7 +145,7 @@ mod tests {
     fn encode_sorts_keys_deterministically_regardless_of_serde_json_features() {
         let bytes = encode(&WorkspaceState::default()).unwrap();
         let text = std::str::from_utf8(&bytes).unwrap();
-        let expected = "{\n  \"active\": null,\n  \"sidebar_collapsed\": false,\n  \"sidebar_width\": null,\n  \"split\": \"vertical\",\n  \"tab_order\": [],\n  \"theme\": \"system\",\n  \"version\": 1\n}\n";
+        let expected = "{\n  \"active\": null,\n  \"sidebar_collapsed\": false,\n  \"sidebar_width\": null,\n  \"split\": \"horizontal\",\n  \"tab_order\": [],\n  \"theme\": \"system\",\n  \"version\": 1\n}\n";
         assert_eq!(text, expected);
     }
 

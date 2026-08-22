@@ -1,5 +1,6 @@
 mod bridge;
 mod state;
+mod theme;
 mod ui;
 
 use getcat_core::store::{Layout, Loaded, Store, StoreError, load_all};
@@ -40,6 +41,7 @@ fn main() {
 
     gpui_platform::application().with_assets(Assets).run(|cx| {
         gpui_component::init(cx);
+        theme::install(cx);
         bridge::init(cx);
 
         // 上次崩溃 / 被 kill 时来不及清理的落盘目录：后台清扫 24 h 以上的 getcat-<pid>（不碰本进程的）

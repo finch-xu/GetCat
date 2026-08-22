@@ -28,9 +28,9 @@ cargo test --workspace
 - 大响应三档展示：≤ 5 MB 且 ≤ 20 万行用高亮编辑器；≤ 64 MB 用按行虚拟化的纯文本视图；> 64 MB 落盘到 `<临时目录>/getcat-<pid>/`，显示摘要 + 前 1 MB 预览 + 保存 / 用系统程序打开（临时文件随响应释放或应用退出删除）
 - 文本 Body 超过 10 MB 时提示改用文件 Body
 - 纯文件持久化（无数据库、不存历史、不存响应）：每个 Tab 的草稿随输入自动落盘并在重启后恢复；⌘S 保存请求到侧栏列表，可点开 / 删除；Tab 顺序、激活 Tab、侧栏宽度与折叠、主题偏好写入 `workspace.json`
-- 主题跟随系统，可在侧栏按钮固定为浅色 / 深色
+- 主题跟随系统，可在侧栏按钮固定为浅色 / 深色；配色取自 [BucketCat](https://github.com/finch-xu/BucketCat) 的主题变量（`crates/getcat-app/src/theme.json`）
 - 自绘标题栏（gpui-component `TitleBar`）：三平台统一外观；macOS 红绿灯 + 拖动 / 双击，Linux / Windows 由组件绘制最小化 / 最大化 / 关闭
-- 请求 / 响应分栏可在上下 ↔ 左右之间切换（Tab 栏右侧按钮），方向随 `workspace.json` 持久化
+- 响应区默认在右侧，可用 Tab 栏右侧那组两段按钮切到下方，方向随 `workspace.json` 持久化
 - ⌘F / Ctrl F 或工具栏放大镜：在响应编辑器内搜索（≤ 5 MB 且 ≤ 20 万行的高保真视图）；纯文本虚拟化视图只提示，不搜索
 - "保存到文件"为原子写（同目录临时文件 → fsync → 替换），中断不会留下半个文件；对话框记住本次会话上次保存的目录
 - 后台处理（美化 / 建索引）被 `catch_unwind` 包裹：任何 panic 都显示为"后台处理异常"，不会让 Tab 停在"发送中"
@@ -54,7 +54,7 @@ drafts/<tab-id>.json    # 一个 Tab 一个草稿（含未保存修改）
 - 写入走独立线程：同一文件 500 ms 内的多次改动只落盘最后一份；写入先写同目录临时文件再原子替换，崩溃不会留下半个文件。
 - 启动时解析失败的文件会被改名为 `<原名>.corrupt-<unix毫秒>` 并跳过（日志 `warn`）；数据目录不可写时窗口顶部显示横幅，其余功能照常（只读）。
 - 不存历史记录、不存响应。Header 中的 `Authorization` 等以明文落盘（与 Postman / Insomnia 本地库一致）（Unix 上数据目录内部文件权限为 0600，仅当前用户可读；用户另存的响应文件按系统 umask 创建，通常是 0644）。
-- `workspace.json` 的 `split` 字段（`vertical` / `horizontal`）记录分栏方向；旧文件没有该字段时按上下处理。
+- `workspace.json` 的 `split` 字段（`vertical` / `horizontal`）记录分栏方向；旧文件没有该字段时按左右处理（响应区在右侧）。
 
 ## 无障碍
 

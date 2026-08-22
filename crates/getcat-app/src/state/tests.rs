@@ -43,6 +43,7 @@ use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
     cx.update(|cx| {
         gpui_component::init(cx);
+        crate::theme::install(cx);
         crate::bridge::init(cx);
     });
     cx.add_empty_window()
@@ -1178,6 +1179,38 @@ fn cycle_theme_walks_system_light_dark(cx: &mut TestAppContext) {
     });
 }
 
+/// 主题偏好在 System / Light / Dark 之间循环时，每一档都必须还是 GetCat 的配色。
+/// `Theme::change` 会整套重刷 ThemeColor，若配色只是切换后打的补丁就会在这里丢掉。
+#[gpui::test]
+fn cycling_theme_keeps_the_getcat_palette(cx: &mut TestAppContext) {
+    fn hex(color: gpui::Hsla) -> u32 {
+        let rgba = gpui::Rgba::from(color);
+        let to8 = |v: f32| (v * 255.0).round() as u32;
+        (to8(rgba.r) << 16) | (to8(rgba.g) << 8) | to8(rgba.b)
+    }
+
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            for _ in 0..4 {
+                ws.cycle_theme(window, cx);
+                let expected = if cx.theme().mode.is_dark() {
+                    0x6fa8d4
+                } else {
+                    0x3f87bd
+                };
+                assert_eq!(
+                    hex(cx.theme().primary),
+                    expected,
+                    "主题切到 {:?} 后丢失了 GetCat 配色",
+                    ws.theme()
+                );
+            }
+        })
+    });
+}
+
 #[gpui::test]
 fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
@@ -1505,38 +1538,66 @@ fn find_in_response_on_an_empty_body_notices(cx: &mut TestAppContext) {
     });
 }
 
+/// 两段式按钮直接指定方向，而不是翻转：重复点当前那一段不应有任何变化。
 #[gpui::test]
-fn toggle_split_applies_to_all_tabs_and_persists(cx: &mut TestAppContext) {
+fn set_split_is_idempotent_for_the_current_direction(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     cx.update(|window, cx| {
         ws.update(cx, |ws, cx| {
             ws.new_tab(window, cx);
-            assert_eq!(ws.split(), SplitDirection::Vertical);
-            ws.toggle_split(cx);
+            assert_eq!(ws.split(), SplitDirection::Horizontal);
+            // 点「右侧」——已经是右侧，保持不变
+            ws.set_split(SplitDirection::Horizontal, cx);
             assert_eq!(ws.split(), SplitDirection::Horizontal);
             assert_eq!(ws.tab_at(0).read(cx).split, SplitDirection::Horizontal);
-            assert_eq!(ws.tab_at(1).read(cx).split, SplitDirection::Horizontal);
-            // 切换后新建的 Tab 继承方向
-            ws.new_tab(window, cx);
-            assert_eq!(ws.tab_at(2).read(cx).split, SplitDirection::Horizontal);
+            // 点「下方」
+            ws.set_split(SplitDirection::Vertical, cx);
+            assert_eq!(ws.split(), SplitDirection::Vertical);
+            ws.set_split(SplitDirection::Vertical, cx);
+            assert_eq!(ws.split(), SplitDirection::Vertical);
         })
     });
     assert!(store.flush());
     assert_eq!(
         read_workspace(&store).unwrap().split,
-        SplitDirection::Horizontal
+        SplitDirection::Vertical
     );
-    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_split(cx)));
+}
+
+#[gpui::test]
+fn split_direction_applies_to_all_tabs_and_persists(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.new_tab(window, cx);
+            // 默认左右分栏：响应区在右侧
+            assert_eq!(ws.split(), SplitDirection::Horizontal);
+            ws.set_split(SplitDirection::Vertical, cx);
+            assert_eq!(ws.split(), SplitDirection::Vertical);
+            assert_eq!(ws.tab_at(0).read(cx).split, SplitDirection::Vertical);
+            assert_eq!(ws.tab_at(1).read(cx).split, SplitDirection::Vertical);
+            // 切换后新建的 Tab 继承方向
+            ws.new_tab(window, cx);
+            assert_eq!(ws.tab_at(2).read(cx).split, SplitDirection::Vertical);
+        })
+    });
     assert!(store.flush());
     assert_eq!(
         read_workspace(&store).unwrap().split,
         SplitDirection::Vertical
     );
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.set_split(SplitDirection::Horizontal, cx)));
+    assert!(store.flush());
+    assert_eq!(
+        read_workspace(&store).unwrap().split,
+        SplitDirection::Horizontal
+    );
     cx.read(|app| {
         assert_eq!(
             ws.read(app).tab_at(2).read(app).split,
-            SplitDirection::Vertical
+            SplitDirection::Horizontal
         )
     });
 }

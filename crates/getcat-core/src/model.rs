@@ -307,29 +307,13 @@ impl ThemePref {
     }
 }
 
-/// 请求 / 响应分栏方向（spec §7.1）：上下（默认）或左右。
+/// 请求 / 响应分栏方向（spec §7.1）：左右（默认，响应区在右侧）或上下。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SplitDirection {
-    #[default]
     Vertical,
+    #[default]
     Horizontal,
-}
-
-impl SplitDirection {
-    pub fn toggled(self) -> SplitDirection {
-        match self {
-            SplitDirection::Vertical => SplitDirection::Horizontal,
-            SplitDirection::Horizontal => SplitDirection::Vertical,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            SplitDirection::Vertical => "上下分栏",
-            SplitDirection::Horizontal => "左右分栏",
-        }
-    }
 }
 
 /// 工作区状态（`workspace.json`）：只有布局与顺序，不含任何请求内容。
@@ -346,7 +330,7 @@ pub struct WorkspaceState {
     pub sidebar_collapsed: bool,
     #[serde(default)]
     pub theme: ThemePref,
-    /// 请求 / 响应分栏方向；旧文件没有此字段时为上下。
+    /// 请求 / 响应分栏方向；旧文件没有此字段时为左右（响应区在右侧）。
     #[serde(default)]
     pub split: SplitDirection,
 }
@@ -485,24 +469,16 @@ mod tests {
     }
 
     #[test]
-    fn split_direction_defaults_to_vertical_and_roundtrips() {
+    fn split_direction_defaults_to_horizontal_and_roundtrips() {
+        // 响应区默认在右侧：没有 split 字段的旧 workspace.json 也按左右处理
         let ws: WorkspaceState = serde_json::from_str("{}").unwrap();
-        assert_eq!(ws.split, SplitDirection::Vertical);
+        assert_eq!(ws.split, SplitDirection::Horizontal);
         let ws: WorkspaceState = serde_json::from_str(r#"{"split":"horizontal"}"#).unwrap();
         assert_eq!(ws.split, SplitDirection::Horizontal);
         assert_eq!(
             serde_json::to_string(&SplitDirection::Horizontal).unwrap(),
             "\"horizontal\""
         );
-        assert_eq!(
-            SplitDirection::Vertical.toggled(),
-            SplitDirection::Horizontal
-        );
-        assert_eq!(
-            SplitDirection::Horizontal.toggled(),
-            SplitDirection::Vertical
-        );
-        assert_eq!(SplitDirection::Vertical.label(), "上下分栏");
     }
 
     #[test]

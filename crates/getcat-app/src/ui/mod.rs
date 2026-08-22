@@ -10,7 +10,7 @@ pub mod url_bar;
 use std::time::Duration;
 
 use getcat_core::model::Method;
-use gpui::{App, Hsla};
+use gpui::{App, Hsla, rgb};
 use gpui_component::ActiveTheme;
 
 pub fn format_bytes(n: u64) -> String {
@@ -38,33 +38,127 @@ pub fn format_duration(d: Duration) -> String {
     }
 }
 
+/// 方法色不复用语义色：方法名在侧栏是 11px 粗体、URL 栏 12px 粗体，
+/// 直接取 success / warning / info / primary 在浅色底上只有 2.9–4.2:1。
+/// 下面两组是在 OKLCH 里保持色相与彩度、只调明度求出来的，在各自主题的
+/// 背景 / 面板 / 侧栏 / 选中行四种底色上都 ≥ 4.8:1。
 pub fn method_color(method: Method, cx: &App) -> Hsla {
-    let t = cx.theme();
-    match method {
-        Method::Get => t.success,
-        Method::Post => t.warning,
-        Method::Put => t.info,
-        Method::Patch => t.primary,
-        Method::Delete => t.danger,
-        Method::Head | Method::Options => t.muted_foreground,
-    }
+    let (light, dark) = match method {
+        Method::Get => (0x007762, 0x4bb39a),
+        Method::Post => (0x925d0c, 0xd7a042),
+        Method::Put => (0x226ea2, 0x6fa8d4),
+        Method::Patch => (0x6d5ea6, 0xa596d8),
+        Method::Delete => (0xb74131, 0xe77968),
+        Method::Head | Method::Options => (0x5e6a77, 0x8f9aa3),
+    };
+    rgb(if cx.theme().is_dark() { dark } else { light }).into()
 }
 
+/// 状态码色比方法色再深一档：它的文字压在同色 16% 的 chip 底上，
+/// 而不是压在页面背景上。范围外的状态码不给语义色。
 pub fn status_color(status: u16, cx: &App) -> Hsla {
-    let t = cx.theme();
-    match status {
-        200..=299 => t.success,
-        300..=399 => t.info,
-        400..=499 => t.warning,
-        500..=599 => t.danger,
-        _ => t.muted_foreground,
-    }
+    let (light, dark) = match status {
+        200..=299 => (0x007460, 0x6ccbb2),
+        300..=399 => (0x67599f, 0xb5a8e0),
+        400..=499 => (0x8a5600, 0xe0ad50),
+        500..=599 => (0xaf3829, 0xe58474),
+        _ => return cx.theme().muted_foreground,
+    };
+    rgb(if cx.theme().is_dark() { dark } else { light }).into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::TestAppContext;
+    use gpui_component::{Theme, ThemeMode};
     use std::time::Duration;
+
+    fn hex(color: Hsla) -> u32 {
+        let rgba = gpui::Rgba::from(color);
+        let to8 = |v: f32| (v * 255.0).round() as u32;
+        (to8(rgba.r) << 16) | (to8(rgba.g) << 8) | to8(rgba.b)
+    }
+
+    /// 方法名在侧栏是 11px 粗体，直接复用语义色只有 2.9–4.2:1；
+    /// 这组值在浅色的白 / 面板 / 侧栏 / 选中行四种底色上都 ≥ 4.8:1。
+    #[gpui::test]
+    fn method_colors_use_the_dedicated_light_palette(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            Theme::change(ThemeMode::Light, None, cx);
+
+            assert_eq!(hex(method_color(Method::Get, cx)), 0x007762);
+            assert_eq!(hex(method_color(Method::Post, cx)), 0x925d0c);
+            assert_eq!(hex(method_color(Method::Put, cx)), 0x226ea2);
+            assert_eq!(hex(method_color(Method::Patch, cx)), 0x6d5ea6);
+            assert_eq!(hex(method_color(Method::Delete, cx)), 0xb74131);
+            assert_eq!(hex(method_color(Method::Head, cx)), 0x5e6a77);
+            assert_eq!(hex(method_color(Method::Options, cx)), 0x5e6a77);
+        });
+    }
+
+    #[gpui::test]
+    fn method_colors_use_the_dedicated_dark_palette(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            Theme::change(ThemeMode::Dark, None, cx);
+
+            assert_eq!(hex(method_color(Method::Get, cx)), 0x4bb39a);
+            assert_eq!(hex(method_color(Method::Post, cx)), 0xd7a042);
+            assert_eq!(hex(method_color(Method::Put, cx)), 0x6fa8d4);
+            assert_eq!(hex(method_color(Method::Patch, cx)), 0xa596d8);
+            assert_eq!(hex(method_color(Method::Delete, cx)), 0xe77968);
+            assert_eq!(hex(method_color(Method::Head, cx)), 0x8f9aa3);
+        });
+    }
+
+    /// 状态码 chip 的文字压在同色 16% 底上，比方法色还需要再深一档。
+    #[gpui::test]
+    fn status_colors_are_readable_on_their_own_tint(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+
+            Theme::change(ThemeMode::Light, None, cx);
+            assert_eq!(hex(status_color(200, cx)), 0x007460);
+            assert_eq!(hex(status_color(204, cx)), 0x007460);
+            assert_eq!(hex(status_color(302, cx)), 0x67599f);
+            assert_eq!(hex(status_color(404, cx)), 0x8a5600);
+            assert_eq!(hex(status_color(500, cx)), 0xaf3829);
+
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert_eq!(hex(status_color(200, cx)), 0x6ccbb2);
+            assert_eq!(hex(status_color(302, cx)), 0xb5a8e0);
+            assert_eq!(hex(status_color(404, cx)), 0xe0ad50);
+            assert_eq!(hex(status_color(500, cx)), 0xe58474);
+        });
+    }
+
+    /// 范围外的状态码（如 HTTP/0.9 或异常值）不给语义色。
+    #[gpui::test]
+    fn status_color_outside_known_ranges_falls_back_to_muted(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            Theme::change(ThemeMode::Light, None, cx);
+            assert_eq!(status_color(100, cx), cx.theme().muted_foreground);
+            assert_eq!(status_color(600, cx), cx.theme().muted_foreground);
+        });
+    }
+
+    /// PUT 与 PATCH 过去分别取 info 与 primary，在同一支蓝上撞色。
+    #[gpui::test]
+    fn put_and_patch_no_longer_share_a_hue(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            for mode in [ThemeMode::Light, ThemeMode::Dark] {
+                Theme::change(mode, None, cx);
+                assert_ne!(
+                    method_color(Method::Put, cx),
+                    method_color(Method::Patch, cx)
+                );
+            }
+        });
+    }
 
     #[test]
     fn bytes_formatting() {
