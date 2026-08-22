@@ -11,9 +11,6 @@ common:
   delete:
     en: Delete
     zh-CN: 删除
-  open:
-    en: Open
-    zh-CN: 打开
   done:
     en: Done
     zh-CN: 完成
@@ -48,10 +45,10 @@ language:
   system:
     en: Follow system
     zh-CN: 跟随系统
-  en:
+  english:
     en: English
     zh-CN: English
-  zh:
+  chinese:
     en: 中文
     zh-CN: 中文
 
@@ -88,8 +85,8 @@ sidebar:
       en: "Saved request: %{name}"
       zh-CN: "已保存请求：%{name}"
     delete:
-      en: Delete
-      zh-CN: 删除
+      en: Delete…
+      zh-CN: 删除…
     menu_open:
       en: Open
       zh-CN: 打开
@@ -338,13 +335,13 @@ error:
     other:
       en: Network error
       zh-CN: 网络错误
+    background_failed:
+      en: Background processing failed
+      zh-CN: 后台处理异常
   detail:
     timeout:
       en: The connection timed out
       zh-CN: 连接超时
-    background_failed:
-      en: "Background processing failed: %{message}"
-      zh-CN: "后台处理异常：%{message}"
 
 dialog:
   delete_saved:

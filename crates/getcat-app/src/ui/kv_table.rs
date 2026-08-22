@@ -455,6 +455,17 @@ impl KvTable {
         self.rows.len()
     }
 
+    /// 第 `ix` 行 Key 输入框当前的占位符（测试切换语言后的刷新）。
+    #[cfg(test)]
+    pub fn key_placeholder(&self, ix: usize, cx: &App) -> SharedString {
+        self.rows[ix]
+            .key
+            .read(cx)
+            .presentation()
+            .placeholder()
+            .clone()
+    }
+
     /// 让行的 key 集合等于 `names`（保持顺序），保留同名行已有的 value 与 enabled。
     pub fn sync_keys(&mut self, names: &[String], window: &mut Window, cx: &mut Context<Self>) {
         let existing: Vec<(String, String, String, bool)> = self
@@ -654,6 +665,8 @@ impl KvTable {
                                         .right(px(-4.))
                                         .w(px(7.))
                                         .cursor(CursorStyle::ResizeLeftRight)
+                                        // 拖柄悬停色：主题没有「拖柄」角色，用 primary 减半透明度
+                                        // 表达"可拖"而不是"已选"——与 px(7.) 命中区一样是文档化例外
                                         .hover(|d| d.bg(primary.opacity(0.5)))
                                         .on_drag(ColumnDrag(col), |drag, _, _, cx| {
                                             cx.new(|_| *drag)
@@ -816,7 +829,8 @@ mod tests {
 
     #[test]
     fn row_aria_labels_carry_the_row_number() {
-        // 测试进程的 locale 是 rust-i18n 的默认值 en
+        // 测试进程的 locale 是 en（见 i18n::locale_test_lock）
+        let _locale = crate::i18n::locale_test_lock();
         assert_eq!(row_aria_label(0, "Name").as_ref(), "Name (row 1)");
         assert_eq!(row_aria_label(2, "Remove").as_ref(), "Remove (row 3)");
     }

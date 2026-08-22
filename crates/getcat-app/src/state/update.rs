@@ -365,7 +365,8 @@ mod tests {
 
     #[test]
     fn status_lines() {
-        // 测试进程的 locale 是 rust-i18n 的默认值 en
+        // 测试进程的 locale 是 en（见 i18n::locale_test_lock）
+        let _locale = crate::i18n::locale_test_lock();
         let v = Version::new(2, 0, 0);
         assert_eq!(
             status_line(&UpdateStatus::Idle, "0.1.0").as_ref(),

@@ -32,6 +32,8 @@ use crate::state::update::{self, InstallKind};
 use crate::state::workspace::Workspace;
 use crate::ui::text::{language_label, theme_label};
 
+// 对话框尺寸按像素定：Dialog 的 `w()` 只收 Pixels，内容高度要和它配套，
+// 这是设计指南允许的「与外部表面匹配的几何」例外。
 const DIALOG_WIDTH: f32 = 760.;
 const CONTENT_HEIGHT: f32 = 460.;
 

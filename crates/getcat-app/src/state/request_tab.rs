@@ -981,7 +981,9 @@ mod tests {
 
     #[test]
     fn title_from_url() {
-        assert_eq!(tab_title(""), tr!("tab.untitled"));
+        // 测试进程的 locale 是 en（见 i18n::locale_test_lock）
+        let _locale = crate::i18n::locale_test_lock();
+        assert_eq!(tab_title("").as_ref(), "New request");
         assert_eq!(
             tab_title("https://api.example.com/users/42?x=1").as_ref(),
             "/users/42"
@@ -992,8 +994,8 @@ mod tests {
         );
         assert_eq!(tab_title("api.example.com/").as_ref(), "api.example.com");
         assert_eq!(tab_title("not a url").as_ref(), "not a url");
-        assert_eq!(tab_title("https://"), tr!("tab.untitled"));
-        assert_eq!(tab_title("http://"), tr!("tab.untitled"));
+        assert_eq!(tab_title("https://").as_ref(), "New request");
+        assert_eq!(tab_title("http://").as_ref(), "New request");
         // query 里的 "://" 不是 scheme
         assert_eq!(tab_title("localhost:8080/cb?to=https://x").as_ref(), "/cb");
         assert_eq!(tab_title("x.com?a=1").as_ref(), "x.com");

@@ -5,7 +5,7 @@
 //! - `rust_i18n::set_locale` 是跨 crate 的全局：gpui-component 自带的「确定 / 取消 / 搜索设置…」
 //!   用的是同一个 rust-i18n，切换后一起生效，不需要我们补它的翻译。
 //! - 渲染期取文案（`tr!`）的地方切换后随 `refresh_windows` 自动更新；驻留在实体里的字符串
-//!   （输入框占位符等）通过 `cx.observe_global::<Locale>` 自己刷新。
+//!   （输入框占位符等）通过 `cx.observe_global_in::<Locale>` 自己刷新。
 
 use getcat_core::model::LanguagePref;
 use gpui::{App, Global};
@@ -67,16 +67,23 @@ pub fn system_locales() -> Vec<String> {
 /// 按偏好切换语言并通知所有窗口重绘；locale 没变时什么都不做。
 pub fn apply(pref: LanguagePref, cx: &mut App) {
     let code = resolve(pref, system_locales());
-    let changed = cx
-        .try_global::<Locale>()
-        .map(|l| l.0 != code)
-        .unwrap_or(true);
-    if !changed {
+    let unchanged = cx.try_global::<Locale>().is_some_and(|l| l.0 == code);
+    if unchanged {
         return;
     }
-    rust_i18n::set_locale(code);
+    if &*rust_i18n::locale() != code {
+        rust_i18n::set_locale(code);
+    }
     cx.set_global(Locale(code));
     cx.refresh_windows();
+}
+
+/// 测试用：rust-i18n 的 locale 是进程级全局，测试线程并行会互相影响。
+/// 凡是断言翻译文本、或会切换语言（`settings::install` / `update`）的测试都先拿这把锁。
+#[cfg(test)]
+pub(crate) fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// `t!` 的 [`gpui::SharedString`] 版本：绝大多数 gpui-component 的 API 都接受它。

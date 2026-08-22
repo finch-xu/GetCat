@@ -28,7 +28,7 @@ use gpui::{
 use gpui_component::{ActiveTheme, input::InputEvent};
 use tempfile::TempDir;
 
-use crate::i18n::tr;
+use crate::i18n::Locale;
 use crate::state::request_tab::{
     BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestTab, ResponseSection,
 };
@@ -40,6 +40,7 @@ use crate::state::workspace::{SidebarSection, Workspace};
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
+use getcat_core::model::LanguagePref;
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
     cx.update(|cx| {
@@ -1631,9 +1632,10 @@ fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         ws_element.into_any_element()
     });
-    // 新建的空 Tab 成为激活 Tab：副标题跟着变
+    // 新建的空 Tab 成为激活 Tab：副标题跟着变（测试进程的 locale 是 en）
+    let _locale = crate::i18n::locale_test_lock();
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
-    cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app), tr!("tab.untitled")));
+    cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app).as_ref(), "New request"));
 }
 
 fn temp_form_file(name: &str, bytes: &[u8]) -> PathBuf {
@@ -1808,6 +1810,8 @@ fn rail_click_expands_then_collapses_the_same_section(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn settings_update_persists_and_applies_font_size(cx: &mut TestAppContext) {
+    // settings::install / update 会触碰进程级的 locale
+    let _locale = crate::i18n::locale_test_lock();
     let (cx, store, _dir) = init_with_store(cx);
     cx.update(|_, cx| settings::install(cx, None));
     cx.read(|app| assert_eq!(settings::settings(app), AppSettings::default()));
@@ -1839,6 +1843,82 @@ fn settings_update_persists_and_applies_font_size(cx: &mut TestAppContext) {
 
     cx.update(|_, cx| settings::reset(cx));
     cx.read(|app| assert_eq!(settings::settings(app), AppSettings::default()));
+}
+
+/// 设置里切换语言：rust-i18n 的 locale、`Locale` 全局与驻留在 InputState 里的占位符都立即更新，
+/// 不需要重启。末尾切回英文：locale 是进程级全局，不能把别的测试留在中文里。
+#[gpui::test]
+fn switching_language_updates_placeholders_immediately(cx: &mut TestAppContext) {
+    let _locale = crate::i18n::locale_test_lock();
+    let cx = init(cx);
+    cx.update(|_, cx| settings::install(cx, None));
+    let tab = new_tab(cx);
+    cx.read(|app| {
+        assert_eq!(app.global::<Locale>().0, "en");
+        assert_eq!(
+            tab.read(app)
+                .url
+                .read(app)
+                .presentation()
+                .placeholder()
+                .as_ref(),
+            "Enter a request URL, e.g. https://api.example.com/users/{id}"
+        );
+        assert_eq!(
+            tab.read(app)
+                .params
+                .read(app)
+                .key_placeholder(0, app)
+                .as_ref(),
+            "Name"
+        );
+    });
+
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::Chinese));
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(app.global::<Locale>().0, "zh-CN");
+        assert_eq!(settings::settings(app).language, LanguagePref::Chinese);
+        assert_eq!(
+            tab.read(app)
+                .url
+                .read(app)
+                .presentation()
+                .placeholder()
+                .as_ref(),
+            "输入请求 URL，例如 https://api.example.com/users/{id}"
+        );
+        assert_eq!(
+            tab.read(app)
+                .params
+                .read(app)
+                .key_placeholder(0, app)
+                .as_ref(),
+            "参数名"
+        );
+        assert_eq!(
+            tab.read(app)
+                .headers
+                .read(app)
+                .key_placeholder(0, app)
+                .as_ref(),
+            "Header 名"
+        );
+    });
+
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::English));
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(app.global::<Locale>().0, "en");
+        assert_eq!(
+            tab.read(app)
+                .params
+                .read(app)
+                .key_placeholder(0, app)
+                .as_ref(),
+            "Name"
+        );
+    });
 }
 
 #[gpui::test]
@@ -1990,6 +2070,7 @@ async fn update_check_error_is_surfaced(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn launch_check_respects_setting(cx: &mut TestAppContext) {
+    let _locale = crate::i18n::locale_test_lock();
     let cx = init(cx);
     install_fake_updater(cx, InstallKind::Installed, || Ok(fake_release(v(99))));
     cx.update(|_, cx| {

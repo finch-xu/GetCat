@@ -11,6 +11,7 @@ use getcat_core::model::{LanguagePref, ThemePref};
 use gpui::SharedString;
 
 use crate::i18n::tr;
+use crate::state::response::PREPARE_PANIC_PREFIX;
 
 /// 错误种类的短标签（状态行、失败页标题）。
 pub fn error_kind(error: &RequestError) -> SharedString {
@@ -25,6 +26,10 @@ pub fn error_kind(error: &RequestError) -> SharedString {
         RequestError::Spill(_) => tr!("error.kind.spill"),
         RequestError::FileBody(_) => tr!("error.kind.file_body"),
         RequestError::Cancelled => tr!("error.kind.cancelled"),
+        // 后台准备阶段 panic 被包成 Other（见 response::prepare_guarded）：不是网络问题，单独给标签
+        RequestError::Other(s) if s.starts_with(PREPARE_PANIC_PREFIX) => {
+            tr!("error.kind.background_failed")
+        }
         RequestError::Other(_) => tr!("error.kind.other"),
     }
 }
@@ -39,8 +44,12 @@ pub fn error_detail(error: &RequestError) -> SharedString {
         | RequestError::ConnectionRefused(s)
         | RequestError::Tls(s)
         | RequestError::Spill(s)
-        | RequestError::FileBody(s)
-        | RequestError::Other(s) => s.clone().into(),
+        | RequestError::FileBody(s) => s.clone().into(),
+        RequestError::Other(s) => s
+            .strip_prefix(PREPARE_PANIC_PREFIX)
+            .map(|rest| rest.trim_start_matches([':', ' ']).to_string())
+            .unwrap_or_else(|| s.clone())
+            .into(),
         RequestError::Timeout => tr!("error.detail.timeout"),
         RequestError::Cancelled => tr!("error.kind.cancelled"),
     }
@@ -93,8 +102,8 @@ pub fn theme_label(pref: ThemePref) -> SharedString {
 pub fn language_label(pref: LanguagePref) -> SharedString {
     match pref {
         LanguagePref::System => tr!("language.system"),
-        LanguagePref::English => tr!("language.en"),
-        LanguagePref::Chinese => tr!("language.zh"),
+        LanguagePref::English => tr!("language.english"),
+        LanguagePref::Chinese => tr!("language.chinese"),
     }
 }
 
@@ -102,9 +111,10 @@ pub fn language_label(pref: LanguagePref) -> SharedString {
 mod tests {
     use super::*;
 
-    /// 测试进程的 locale 是 rust-i18n 的默认值 en（没有人调用 set_locale）。
+    /// 测试进程的 locale 是 en（见 i18n::locale_test_lock）。
     #[test]
     fn error_kind_and_detail_split_label_from_payload() {
+        let _locale = crate::i18n::locale_test_lock();
         let e = RequestError::Dns("lookup failed for example.invalid".into());
         assert_eq!(error_kind(&e).as_ref(), "DNS lookup failed");
         assert_eq!(
@@ -119,16 +129,25 @@ mod tests {
             prepare_error_line(&RequestError::InvalidUrl("x".into())).as_ref(),
             "Invalid URL: x"
         );
+        // 后台 panic：种类不是「网络错误」，细节去掉前缀
+        let panicked = RequestError::Other(format!("{PREPARE_PANIC_PREFIX}: index out of bounds"));
+        assert_eq!(
+            error_kind(&panicked).as_ref(),
+            "Background processing failed"
+        );
+        assert_eq!(error_detail(&panicked).as_ref(), "index out of bounds");
     }
 
     #[test]
     fn content_kind_keeps_proper_nouns() {
+        let _locale = crate::i18n::locale_test_lock();
         assert_eq!(content_kind_label(ContentKind::Json).as_ref(), "JSON");
         assert_eq!(content_kind_label(ContentKind::Text).as_ref(), "Text");
     }
 
     #[test]
     fn tier_notices_embed_the_thresholds() {
+        let _locale = crate::i18n::locale_test_lock();
         let virt = tier_notice(ViewTier::Virtual).unwrap();
         assert!(virt.contains("5 MB"), "{virt}");
         assert!(virt.contains("200000"), "{virt}");

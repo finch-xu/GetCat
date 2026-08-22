@@ -8,8 +8,9 @@ use crate::state::workspace::Workspace;
 
 pub struct StoreHandle {
     store: Option<Store>,
-    /// 打开数据目录失败的文案；None 表示可写。
-    error: Option<String>,
+    /// 打开数据目录失败的原因；None 表示可写。存错误本身，横幅文案在渲染时按当前语言翻译
+    /// （`store::install` 先于 `settings::install` 运行，此时 locale 还没定）。
+    error: Option<StoreError>,
 }
 
 impl Global for StoreHandle {}
@@ -25,7 +26,7 @@ pub fn install(cx: &mut App, opened: Result<Store, StoreError>) {
             tracing::warn!("persistence unavailable: {err}");
             StoreHandle {
                 store: None,
-                error: Some(tr!("store.unavailable", error = err).to_string()),
+                error: Some(err),
             }
         }
     };
@@ -41,7 +42,11 @@ pub fn store(cx: &App) -> Option<&Store> {
 /// 顶部横幅文案：打开数据目录失败，或写入线程最近一次失败（下一次成功后自动消失）。O(1)，可在渲染路径调用。
 pub fn banner(cx: &App) -> Option<String> {
     let handle = cx.try_global::<StoreHandle>()?;
-    handle.error.clone().or_else(|| {
+    let unavailable = handle
+        .error
+        .as_ref()
+        .map(|e| tr!("store.unavailable", error = e).to_string());
+    unavailable.or_else(|| {
         handle
             .store
             .as_ref()
