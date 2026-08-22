@@ -50,10 +50,31 @@ jobs:
           # 根 Cargo.toml 里第一个顶格的 version = "…" 就是 [workspace.package] 的版本
           have=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           if [ "$want" != "$have" ]; then
-            echo "::error::tag 是 v$want，但 Cargo.toml [workspace.package].version 是 $have。改 Cargo.toml、提交后重新打 tag。"
+            echo "::error::tag 是 v${want}，但 Cargo.toml [workspace.package].version 是 ${have}。改 Cargo.toml、提交后重新打 tag。"
             exit 1
           fi
           echo "版本一致：$want"
+
+      # Cargo.lock 里工作区成员的版本必须跟着 Cargo.toml 一起 bump，否则四个构建 job 的
+      # cargo build --locked 会在编译两分钟后才报 "cannot update the lock file"，
+      # 真正的原因埋在日志里很难看出来。在这里 4 秒内拦下，并直接给出修复命令。
+      - name: Compare Cargo.lock against Cargo.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+          want="${GITHUB_REF_NAME#v}"
+          bad=0
+          for crate in getcat-core getcat-app; do
+            # lock 的 [[package]] 块里 version 紧跟在 name 后一行；找不到就留空走下面的报错分支
+            have=$(grep -A1 -Fx "name = \"$crate\"" Cargo.lock \
+                   | sed -n 's/^version = "\(.*\)"/\1/p' || true)
+            if [ "$have" != "$want" ]; then
+              echo "::error::Cargo.lock 里 $crate 是 ${have:-<缺失>}，但应该是 ${want}。跑 cargo update --workspace 同步 Cargo.lock 后一起提交。"
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "Cargo.lock 与 Cargo.toml 版本一致：$want"
 
   # 单独建一次草稿：四个构建 job 并行往同一 tag 上传，让它们各自"没有就创建"会出现
   # 两个 job 同时发现"没有"然后各建一份草稿（GitHub 草稿不按 tag 去重）。
