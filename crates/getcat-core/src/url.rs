@@ -139,9 +139,8 @@ mod tests {
         d.path_params = vec![
             KeyValue::new("id", "42"),
             KeyValue {
-                key: "post".into(),
-                value: "9".into(),
                 enabled: false,
+                ..KeyValue::new("post", "9")
             },
         ];
         let u = build_url(&d).unwrap();
@@ -154,9 +153,8 @@ mod tests {
         d.params = vec![
             KeyValue::new("page", "2"),
             KeyValue {
-                key: "skip".into(),
-                value: "x".into(),
                 enabled: false,
+                ..KeyValue::new("skip", "x")
             },
             KeyValue::new("", "ignored-empty-key"),
             KeyValue::new("t", "a b"),

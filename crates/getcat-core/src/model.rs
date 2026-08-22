@@ -66,6 +66,9 @@ pub struct KeyValue {
     pub key: String,
     pub value: String,
     pub enabled: bool,
+    /// 备注，不参与发送；空串不落盘。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 impl KeyValue {
@@ -74,6 +77,7 @@ impl KeyValue {
             key: key.into(),
             value: value.into(),
             enabled: true,
+            description: String::new(),
         }
     }
 }
@@ -115,6 +119,65 @@ impl RawFormat {
     }
 }
 
+/// multipart/form-data 字段的值：文本或文件。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FormValue {
+    Text {
+        value: String,
+    },
+    /// 只存路径；`content_type` 为 None 表示发送时按扩展名猜（`http::guess_content_type`）。
+    File {
+        path: PathBuf,
+        #[serde(default)]
+        content_type: Option<String>,
+    },
+}
+
+impl Default for FormValue {
+    fn default() -> Self {
+        FormValue::Text {
+            value: String::new(),
+        }
+    }
+}
+
+/// multipart/form-data 的一个字段。文件只可能出现在这里，Header / Query / urlencoded 用 `KeyValue`。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct FormField {
+    pub key: String,
+    pub enabled: bool,
+    /// 备注，不参与发送；空串不落盘。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    pub value: FormValue,
+}
+
+impl FormField {
+    pub fn text(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            enabled: true,
+            description: String::new(),
+            value: FormValue::Text {
+                value: value.into(),
+            },
+        }
+    }
+
+    pub fn file(key: impl Into<String>, path: PathBuf) -> Self {
+        Self {
+            key: key.into(),
+            enabled: true,
+            description: String::new(),
+            value: FormValue::File {
+                path,
+                content_type: None,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BodyKind {
@@ -124,10 +187,16 @@ pub enum BodyKind {
         format: RawFormat,
         text: String,
     },
+    /// multipart/form-data：字段可为文本或文件。
+    FormData {
+        fields: Vec<FormField>,
+    },
     FormUrlEncoded {
         fields: Vec<KeyValue>,
     },
-    File {
+    /// 整个请求体就是一个文件（Postman 的 binary）。旧文件写的是 `"kind":"file"`，读入后再保存为 `binary`。
+    #[serde(alias = "file")]
+    Binary {
         path: PathBuf,
         content_type: Option<String>,
     },
@@ -328,9 +397,8 @@ mod tests {
             path_params: vec![KeyValue::new("id", "1")],
             params: vec![KeyValue::new("q", "v")],
             headers: vec![KeyValue {
-                key: "X".into(),
-                value: "1".into(),
                 enabled: false,
+                ..KeyValue::new("X", "1")
             }],
             body: BodyKind::Raw {
                 format: RawFormat::Json,
@@ -435,5 +503,81 @@ mod tests {
             SplitDirection::Vertical
         );
         assert_eq!(SplitDirection::Vertical.label(), "上下分栏");
+    }
+
+    #[test]
+    fn key_value_description_defaults_empty_and_is_skipped_when_empty() {
+        let kv: KeyValue =
+            serde_json::from_str(r#"{"key":"a","value":"b","enabled":true}"#).unwrap();
+        assert_eq!(kv.description, "");
+        let json = serde_json::to_string(&KeyValue::new("a", "b")).unwrap();
+        assert!(!json.contains("description"), "{json}");
+        let with = KeyValue {
+            description: "备注".into(),
+            ..KeyValue::new("a", "b")
+        };
+        let back: KeyValue = serde_json::from_str(&serde_json::to_string(&with).unwrap()).unwrap();
+        assert_eq!(back, with);
+    }
+
+    #[test]
+    fn form_data_body_serde_roundtrip() {
+        let d = RequestDraft {
+            body: BodyKind::FormData {
+                fields: vec![
+                    FormField::text("note", "hi"),
+                    FormField {
+                        description: "头像".into(),
+                        ..FormField::file("avatar", PathBuf::from("/tmp/a.png"))
+                    },
+                    FormField {
+                        enabled: false,
+                        ..FormField::text("off", "")
+                    },
+                ],
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""kind":"form_data""#), "{json}");
+        assert!(json.contains(r#""kind":"file""#), "{json}");
+        assert!(json.contains(r#""kind":"text""#), "{json}");
+        let back: RequestDraft = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, d);
+    }
+
+    #[test]
+    fn legacy_file_body_loads_as_binary_and_saves_as_binary() {
+        let legacy = r#"{"method":"POST","url":"","body":{"kind":"file","path":"/tmp/x.bin","content_type":null}}"#;
+        let d: RequestDraft = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            d.body,
+            BodyKind::Binary {
+                path: PathBuf::from("/tmp/x.bin"),
+                content_type: None
+            }
+        );
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""kind":"binary""#), "{json}");
+        assert!(!json.contains(r#""kind":"file""#), "{json}");
+    }
+
+    #[test]
+    fn form_value_defaults_to_empty_text() {
+        assert_eq!(
+            FormValue::default(),
+            FormValue::Text {
+                value: String::new()
+            }
+        );
+        let f = FormField::file("doc", PathBuf::from("/tmp/d.pdf"));
+        assert!(f.enabled);
+        assert_eq!(
+            f.value,
+            FormValue::File {
+                path: "/tmp/d.pdf".into(),
+                content_type: None
+            }
+        );
     }
 }

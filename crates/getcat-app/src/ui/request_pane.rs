@@ -104,7 +104,7 @@ impl RequestTab {
                             .child("none")
                             .child("raw")
                             .child("form-urlencoded")
-                            .child("file"),
+                            .child("binary"),
                     )
                     .when(mode == BodyMode::Raw, |h| {
                         h.child(
@@ -154,7 +154,7 @@ impl RequestTab {
                     .overflow_y_scroll()
                     .child(self.form.clone())
                     .into_any_element(),
-                BodyMode::File => self.render_file_body(cx),
+                BodyMode::Binary => self.render_file_body(cx),
             })
             .into_any_element()
     }

@@ -138,6 +138,7 @@ impl KvTable {
                     key,
                     value,
                     enabled: r.enabled,
+                    description: String::new(),
                 })
             })
             .collect()

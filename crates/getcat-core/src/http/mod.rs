@@ -251,7 +251,13 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
                 data: ser.finish().into_bytes(),
             }
         }
-        BodyKind::File { path, content_type } => {
+        // multipart/form-data 的实际发送逻辑由后续任务实现；此任务只加数据模型。
+        BodyKind::FormData { .. } => {
+            return Err(RequestError::Unsupported(
+                "multipart/form-data 暂不支持发送".to_string(),
+            ));
+        }
+        BodyKind::Binary { path, content_type } => {
             if path.as_os_str().is_empty() {
                 return Err(RequestError::FileBody("未选择文件".to_string()));
             }
@@ -551,9 +557,8 @@ mod tests {
                 KeyValue::new("a", "1"),
                 KeyValue::new("b", "x y"),
                 KeyValue {
-                    key: "c".into(),
-                    value: "off".into(),
                     enabled: false,
+                    ..KeyValue::new("c", "off")
                 },
             ],
         };
@@ -797,9 +802,8 @@ mod tests {
         d.headers = vec![
             KeyValue::new("X-A", "1"),
             KeyValue {
-                key: "X-B".into(),
-                value: "2".into(),
                 enabled: false,
+                ..KeyValue::new("X-B", "2")
             },
             KeyValue::new("  ", ""),
         ];
@@ -829,7 +833,7 @@ mod tests {
             .mount(&server)
             .await;
         let mut d = draft(Method::Put, server.uri());
-        d.body = BodyKind::File {
+        d.body = BodyKind::Binary {
             path: path.clone(),
             content_type: Some(guess_content_type(&path).to_string()),
         };
@@ -849,7 +853,7 @@ mod tests {
             .await;
         let mut d = draft(Method::Post, server.uri());
         d.headers = vec![KeyValue::new("Content-Type", "text/plain")];
-        d.body = BodyKind::File {
+        d.body = BodyKind::Binary {
             path: path.clone(),
             content_type: Some("application/octet-stream".into()),
         };
@@ -862,7 +866,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("getcat-filebody-dir-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut d = draft(Method::Post, "http://127.0.0.1:1/".into());
-        d.body = BodyKind::File {
+        d.body = BodyKind::Binary {
             path: dir.clone(),
             content_type: None,
         };
@@ -874,7 +878,7 @@ mod tests {
     #[tokio::test]
     async fn missing_file_is_reported_as_file_body_error() {
         let mut d = draft(Method::Post, "http://127.0.0.1:1/".into());
-        d.body = BodyKind::File {
+        d.body = BodyKind::Binary {
             path: "/nonexistent/getcat/upload.bin".into(),
             content_type: None,
         };
@@ -886,7 +890,7 @@ mod tests {
     #[test]
     fn prepare_rejects_empty_file_path() {
         let mut d = draft(Method::Post, "https://x.com".into());
-        d.body = BodyKind::File {
+        d.body = BodyKind::Binary {
             path: std::path::PathBuf::new(),
             content_type: None,
         };

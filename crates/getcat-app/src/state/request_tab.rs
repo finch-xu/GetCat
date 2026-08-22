@@ -64,7 +64,7 @@ pub enum BodyMode {
     None,
     Raw,
     Form,
-    File,
+    Binary,
 }
 
 impl BodyMode {
@@ -72,7 +72,7 @@ impl BodyMode {
         BodyMode::None,
         BodyMode::Raw,
         BodyMode::Form,
-        BodyMode::File,
+        BodyMode::Binary,
     ];
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|m| *m == self).unwrap_or(0)
@@ -143,7 +143,7 @@ pub struct RequestTab {
     pub form: Entity<KvTable>,
     pub body_mode: BodyMode,
     pub raw_format: RawFormat,
-    /// 文件 Body：所选文件路径与大小（大小只用于显示）。
+    /// binary Body：所选文件路径与大小（大小只用于显示）。
     pub file_path: Option<PathBuf>,
     pub file_size: Option<u64>,
     /// 文本 Body 过大时的非阻塞提示。
@@ -348,7 +348,7 @@ impl RequestTab {
             let _ = this.update(cx, |this, cx| {
                 this.file_path = Some(path);
                 this.file_size = size;
-                this.body_mode = BodyMode::File;
+                this.body_mode = BodyMode::Binary;
                 this.mark_dirty(cx);
             });
         })
@@ -356,7 +356,7 @@ impl RequestTab {
     }
 
     pub fn clear_file(&mut self, cx: &mut Context<Self>) {
-        // body_mode 保持 File 不变：清除只是"未选文件"，draft() 据此报告"未选择文件"，
+        // body_mode 保持 Binary 不变：清除只是"未选文件"，draft() 据此报告"未选择文件"，
         // 而不是悄悄退回 none/raw 让用户以为 Body 被清空了。
         self.file_path = None;
         self.file_size = None;
@@ -408,7 +408,7 @@ impl RequestTab {
             BodyMode::Form => BodyKind::FormUrlEncoded {
                 fields: self.form.read(cx).values(cx),
             },
-            BodyMode::File => BodyKind::File {
+            BodyMode::Binary => BodyKind::Binary {
                 path: self.file_path.clone().unwrap_or_default(),
                 content_type: self
                     .file_path
@@ -528,13 +528,15 @@ impl RequestTab {
                 self.form
                     .update(cx, |t, cx| t.set_values(fields, window, cx));
             }
-            BodyKind::File { path, .. } => {
-                self.body_mode = BodyMode::File;
+            BodyKind::Binary { path, .. } => {
+                self.body_mode = BodyMode::Binary;
                 if !path.as_os_str().is_empty() {
                     self.file_path = Some(path.clone());
                     self.refresh_file_size(cx);
                 }
             }
+            // multipart/form-data 的 UI 由后续任务接入；此任务只加数据模型，暂不改变 body_mode。
+            BodyKind::FormData { .. } => {}
         }
         self.prepare_error = None;
         self.refresh_body_hint(cx);

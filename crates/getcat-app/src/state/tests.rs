@@ -601,11 +601,11 @@ fn choose_file_sets_file_body_and_clear_resets_it(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.read(|app| {
         let t = tab.read(app);
-        assert_eq!(t.body_mode, BodyMode::File);
+        assert_eq!(t.body_mode, BodyMode::Binary);
         assert_eq!(t.file_size, Some(2));
         assert_eq!(
             t.draft(app).body,
-            BodyKind::File {
+            BodyKind::Binary {
                 path: path.clone(),
                 content_type: Some("application/json".into()),
             }
@@ -618,7 +618,7 @@ fn choose_file_sets_file_body_and_clear_resets_it(cx: &mut TestAppContext) {
         assert_eq!(t.file_size, None);
         assert_eq!(
             t.draft(app).body,
-            BodyKind::File {
+            BodyKind::Binary {
                 path: PathBuf::new(),
                 content_type: None,
             }
@@ -725,9 +725,8 @@ fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
     let values = vec![
         KeyValue::new("a", "1"),
         KeyValue {
-            key: "b".into(),
-            value: String::new(),
             enabled: false,
+            ..KeyValue::new("b", "")
         },
     ];
     cx.update(|window, cx| {
@@ -764,9 +763,8 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
             url: "https://x.test/{id}?a=1".into(),
             path_params: vec![KeyValue::new("id", "7")],
             params: vec![KeyValue {
-                key: "q".into(),
-                value: "v".into(),
                 enabled: false,
+                ..KeyValue::new("q", "v")
             }],
             headers: vec![KeyValue::new("X-Token", "t")],
             body: BodyKind::Raw {
@@ -785,7 +783,7 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
         RequestDraft {
             method: Method::Delete,
             url: "https://x.test/file".into(),
-            body: BodyKind::File {
+            body: BodyKind::Binary {
                 path: file.clone(),
                 content_type: Some("application/json".into()),
             },
