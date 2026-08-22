@@ -1,10 +1,25 @@
+<div align="center">
+
+<img src="crates/getcat-app/assets/logo/getcat.png" width="128" alt="GetCat">
+
 # GetCat
 
-用 Rust + [GPUI](https://gpui.rs) 构建的跨平台 HTTP 接口调试工具：原生渲染、启动即用、纯文件存储，不需要账号。
+**用 Rust + [GPUI](https://gpui.rs) 构建的跨平台 HTTP 接口调试工具**
+
+No postman, Just GetCat! 原生渲染UI、高性能、低资源占用、不需要账号。
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![GPUI](https://img.shields.io/badge/UI-GPUI-8B5CF6?style=flat-square)](https://gpui.rs)
+[![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
+[![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
+
+</div>
 
 ## 亮点
 
-- **原生且轻快**：GPU 渲染的原生窗口，不是 Electron / WebView；macOS、Linux、Windows 三平台同一套界面。
+- **原生且轻快**：GPU 渲染的原生窗口，不是 Electron / Tauri / WebView；macOS、Linux、Windows 三平台同一套界面。
 - **大响应不卡**：流式接收、实时进度、随时取消；≤ 5 MB 用高亮编辑器，≤ 64 MB 按行虚拟化，更大的落盘预览 + 一键保存，百 MB 响应也不会拖住界面。
 - **完整的请求构造**：GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS；Path 参数（URL 中 `{name}`）、Query、Headers；Body 支持 form-data（文本 / 文件字段，文件定长流式上传）、x-www-form-urlencoded、raw JSON / Text / XML、binary 整文件上传。
 - **数据属于你**：不存历史、不存响应、不上传任何东西。已保存请求、草稿、设置都是美化过的 JSON 文件，可手工编辑、可用 Git 管理。
@@ -75,6 +90,7 @@ crates/
 ### 构建与调试
 
 - Rust ≥ 1.97（edition 2024）。macOS 不需要额外工具链；Linux 需要 Vulkan 与 Wayland / X11 / fontconfig 头文件（清单见 `.github/workflows/ci.yml`）；Windows 需要 DirectX 12。
+- 应用 logo：`crates/getcat-app/assets/logo/cat.png` 是去背的原画，`scripts/gen-logo.py` 把它合成成 app 内嵌的 `getcat.png` 与 macOS 图标用的 `resources/macos/getcat-1024.png`；改 logo 后手动重跑脚本并提交产物（CI 不生成，需要 `pip install pillow numpy`）。
 
 ```bash
 cargo run -p getcat-app                         # 运行

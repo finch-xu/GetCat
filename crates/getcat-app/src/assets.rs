@@ -9,11 +9,13 @@ use std::borrow::Cow;
 use gpui::{AssetSource, Result, SharedString};
 use gpui_component_assets::Assets;
 
-/// Logo 的资源路径（`img(LOGO_PATH)`）。多色 SVG 走 `img()`：resvg 整张栅格化、保留颜色；
-/// `svg()` 是单色蒙版，只会被 `text_color` 染成一种颜色。
-pub const LOGO_PATH: &str = "logo/getcat.svg";
+/// Logo 的资源路径（`img(LOGO_PATH)`）。位图走 `img()`：整张栅格化、保留原色；
+/// `svg()` 是单色蒙版，只会被 `text_color` 染成一种颜色，多色 logo 用不了。
+///
+/// 这份 PNG 由 `scripts/gen-logo.py` 从 `assets/logo/cat.png` 合成，改 logo 要重跑脚本。
+pub const LOGO_PATH: &str = "logo/getcat.png";
 
-const LOGO: &[u8] = include_bytes!("../assets/logo/getcat.svg");
+const LOGO: &[u8] = include_bytes!("../assets/logo/getcat.png");
 
 pub struct AppAssets;
 
@@ -41,7 +43,7 @@ mod tests {
     #[test]
     fn logo_is_served_from_the_embedded_bytes() {
         let bytes = AppAssets.load(LOGO_PATH).unwrap().expect("logo present");
-        assert!(bytes.starts_with(b"<svg"));
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
     #[test]

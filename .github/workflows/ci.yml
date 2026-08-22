@@ -54,6 +54,7 @@ jobs:
         run: |
           bash -n scripts/*.sh scripts/ci/*.sh
           shellcheck -S warning scripts/*.sh scripts/ci/*.sh
+          python3 -m py_compile scripts/*.py
 
       - name: Clippy
         if: runner.os == 'macOS'

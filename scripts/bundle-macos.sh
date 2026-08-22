@@ -89,7 +89,7 @@ chmod 755 "$contents/MacOS/$bin_name"
 iconset="$stage/$app_name.iconset"
 mkdir -p "$iconset"
 png="$resources/getcat-1024.png"
-[ -f "$png" ] || die "缺少 ${png}（用 scripts/gen-macos-icon.sh 生成）"
+[ -f "$png" ] || die "缺少 ${png}（用 scripts/gen-logo.py 生成）"
 for size in 16 32 128 256 512; do
   double=$((size * 2))
   sips -z "$size" "$size" "$png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
