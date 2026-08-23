@@ -19,6 +19,8 @@ GPU-rendered · Light on resources · No account · Your data stays local
 
 **English** · [简体中文](README.md)
 
+<img src="assets/screenshot.png" width="900" alt="GetCat main window: request builder on the left, response viewer on the right">
+
 </div>
 
 ## Highlights

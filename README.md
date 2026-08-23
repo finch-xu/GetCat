@@ -19,6 +19,8 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地
 
 [English](README.en.md) · **简体中文**
 
+<img src="assets/screenshot.png" width="900" alt="GetCat 主界面：左侧请求构造，右侧响应查看">
+
 </div>
 
 ## 亮点
