@@ -37,3 +37,6 @@ dist/
 
 # python 脚本的字节码缓存（CI 的 py_compile 也会产生）
 __pycache__/
+
+CLAUDE.md
+
