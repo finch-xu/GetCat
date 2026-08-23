@@ -17,7 +17,7 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 
-**English** · [简体中文](README.md)
+**English** · [简体中文](README.md) · [DeepWiki Docs](https://deepwiki.com/finch-xu/GetCat) · [Official Site](https://getcat.io/)
 
 <img src="assets/screenshot.png" width="900" alt="GetCat main window: request builder on the left, response viewer on the right">
 

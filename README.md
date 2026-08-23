@@ -17,7 +17,7 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 
-[English](README.en.md) · **简体中文**
+[English](README.en.md) · **简体中文** · [DeepWiki 文档](https://deepwiki.com/finch-xu/GetCat) · [官方网站](https://getcat.io/)
 
 <img src="assets/screenshot.png" width="900" alt="GetCat 主界面：左侧请求构造，右侧响应查看">
 
