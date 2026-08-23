@@ -1708,19 +1708,19 @@ fn code_sheet_generates_from_the_active_tab(cx: &mut TestAppContext) {
 
     let first = cx.read(|app| ws.read(app).active_tab());
     change_url(&first, "https://api.test/v1/first", cx);
-    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
-    let code = cx.read(|app| ws.read(app).code_text.clone());
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_sheet.read(app).text().clone());
     assert!(
         code.contains("curl -X GET 'https://api.test/v1/first'"),
         "{code}"
     );
-    assert!(cx.read(|app| ws.read(app).code_error.is_none()));
+    assert!(cx.read(|app| ws.read(app).code_sheet.read(app).error().is_none()));
 
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
     let second = cx.read(|app| ws.read(app).active_tab());
     change_url(&second, "https://api.test/v2/second", cx);
-    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
-    let code = cx.read(|app| ws.read(app).code_text.clone());
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_sheet.read(app).text().clone());
     assert!(code.contains("https://api.test/v2/second"), "{code}");
     assert!(
         !code.contains("v1/first"),
@@ -1735,16 +1735,49 @@ fn switching_the_target_regenerates_the_code(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/ping", cx);
-    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
-    assert!(cx.read(|app| ws.read(app).code_text.starts_with("curl")));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    assert!(cx.read(|app| ws.read(app).code_sheet.read(app).text().starts_with("curl")));
 
     cx.update(|window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.set_code_target(CodeTarget::PythonRequests, window, cx)
+        ws.read(cx).code_sheet.clone().update(cx, |sheet, cx| {
+            sheet.set_target_for_test(CodeTarget::PythonRequests, window, cx)
         })
     });
-    let code = cx.read(|app| ws.read(app).code_text.clone());
+    let code = cx.read(|app| ws.read(app).code_sheet.read(app).text().clone());
     assert!(code.starts_with("import requests"), "{code}");
+    assert_eq!(
+        cx.read(|app| ws.read(app).code_sheet.read(app).target()),
+        CodeTarget::PythonRequests
+    );
+}
+
+/// 抽屉正文必须是**能独立渲染的实体**。
+///
+/// 它由 `Sheet` 的 builder 在 `Workspace::render` 内部渲染；一旦有人把它改回
+/// `Workspace` 上的 render 方法（builder 里 `workspace.update(...)`），运行时就会
+/// 二次借用 Workspace 而 panic「cannot update Workspace while it is already being
+/// updated」，表现为点一下右侧图标栏就闪退。
+///
+/// 真实的 `Root` 窗口在测试里建不起来（`Root::new` 要装 macOS hit-test 转发器，
+/// 需要真实 NSView），所以这里钉的是结构：CodeSheet 自己就是 `Render`，
+/// 单独画一帧不碰 Workspace。改回去会直接编译失败。
+#[gpui::test]
+fn code_sheet_renders_without_touching_the_workspace(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/ping", cx);
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+
+    let sheet = cx.read(|app| ws.read(app).code_sheet.clone());
+    cx.update(|window, _| window.blur());
+    // Workspace 同时被自己的 render 借着，抽屉照样画得出来——这正是修复的要点
+    cx.draw(point(px(0.), px(0.)), size(px(560.), px(700.)), |_, _| {
+        sheet.clone().into_any_element()
+    });
+    cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
+        ws.clone().into_any_element()
+    });
 }
 
 /// URL 还没填就打开抽屉：显示与发送时同一套错误，而不是一段跑不了的代码。
@@ -1752,11 +1785,11 @@ fn switching_the_target_regenerates_the_code(cx: &mut TestAppContext) {
 fn an_unfilled_url_surfaces_an_error_instead_of_code(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
-    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
     cx.read(|app| {
-        let ws = ws.read(app);
-        assert!(matches!(ws.code_error, Some(RequestError::InvalidUrl(_))));
-        assert!(ws.code_text.is_empty(), "报错时不该留着上一次的代码");
+        let sheet = ws.read(app).code_sheet.read(app);
+        assert!(matches!(sheet.error(), Some(RequestError::InvalidUrl(_))));
+        assert!(sheet.text().is_empty(), "报错时不该留着上一次的代码");
     });
 }
 
@@ -1768,16 +1801,22 @@ fn disabling_a_default_header_shows_up_in_the_generated_code(cx: &mut TestAppCon
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/ping", cx);
 
-    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
-    assert!(cx.read(|app| ws.read(app).code_text.contains("User-Agent")));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    assert!(cx.read(|app| {
+        ws.read(app)
+            .code_sheet
+            .read(app)
+            .text()
+            .contains("User-Agent")
+    }));
 
     cx.update(|_, cx| {
         settings::update(cx, |s| {
             s.request.disabled_default_headers = vec!["user-agent".into()]
         })
     });
-    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
-    let code = cx.read(|app| ws.read(app).code_text.clone());
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_sheet.read(app).text().clone());
     assert!(!code.contains("User-Agent"), "{code}");
     assert!(code.contains("Accept"), "其余默认头还在：{code}");
 }

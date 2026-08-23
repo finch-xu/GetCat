@@ -5,8 +5,6 @@
 // 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use std::rc::Rc;
 
-use getcat_core::codegen::CodeTarget;
-use getcat_core::http::RequestError;
 use getcat_core::model::{
     Method, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms,
 };
@@ -24,7 +22,7 @@ use gpui_component::{
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
     h_flex,
-    input::{EditorState, Input, InputState},
+    input::{Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
     status_bar::StatusBar,
     tab::{Tab, TabBar},
@@ -36,9 +34,11 @@ use gpui_updater::UpdateStatus;
 use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
+use crate::state::settings;
 use crate::state::store::{banner, store};
 use crate::state::update;
 use crate::templates;
+use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
 use crate::ui::method_color;
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
 use crate::{
@@ -79,9 +79,6 @@ impl ToolSection {
     pub const ALL: [ToolSection; 1] = [ToolSection::CodeGen];
 }
 
-/// 生成代码用到的语法高亮语言，每种一个常驻编辑器实体。
-const CODE_LANGUAGES: [&str; 2] = ["bash", "python"];
-
 pub struct Workspace {
     tabs: Vec<Entity<RequestTab>>,
     active: usize,
@@ -103,16 +100,10 @@ pub struct Workspace {
     focus_handle: FocusHandle,
     /// 全局更新器状态的副本（观察到变化时同步），状态栏提示与「关于」页据此渲染。
     update_status: UpdateStatus,
-    /// 代码抽屉当前选中的生成目标。刻意不进 workspace.json：它是「这一次想复制成什么」，
-    /// 不属于窗口布局。
-    pub(crate) code_target: CodeTarget,
-    /// bash / python 两套只读编辑器。抽屉是窗口级单例，全局各一份就够，
-    /// 不必像响应编辑器那样每个 Tab 一套。
-    pub(crate) code_editors: Vec<(&'static str, Entity<EditorState>)>,
-    /// 当前抽屉里的代码原文，复制按钮直接取它（省得再从编辑器读一遍）。
-    pub(crate) code_text: SharedString,
-    /// 生成失败的原因（URL 为空 / header 非法 / form-data 未选文件），抽屉里替代代码显示。
-    pub(crate) code_error: Option<RequestError>,
+    /// 「生成代码」抽屉的正文。**必须是独立实体**：它由 `Sheet` 的 builder 在
+    /// `Workspace::render` 内部渲染，做成 Workspace 上的 render 方法会二次借用本实体而 panic
+    /// （详见 [`crate::ui::code_sheet`] 的模块注释）。抽屉是窗口级单例，全局一份。
+    pub(crate) code_sheet: Entity<CodeSheet>,
     _subs: Vec<Subscription>,
 }
 
@@ -153,23 +144,7 @@ impl Workspace {
             tab_scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             update_status: update::status(cx),
-            code_target: CodeTarget::default(),
-            code_editors: CODE_LANGUAGES
-                .iter()
-                .map(|lang| {
-                    (
-                        *lang,
-                        cx.new(|cx| {
-                            EditorState::new(window, cx)
-                                .language(*lang)
-                                .line_number(true)
-                                .soft_wrap(false)
-                        }),
-                    )
-                })
-                .collect(),
-            code_text: SharedString::default(),
-            code_error: None,
+            code_sheet: cx.new(|cx| CodeSheet::new(window, cx)),
             _subs: Vec::new(),
         };
 
@@ -988,6 +963,53 @@ pub(crate) fn apply_theme(pref: ThemePref, window: Option<&mut Window>, cx: &mut
         ThemePref::System => Theme::sync_system_appearance(window, cx),
         ThemePref::Light => Theme::change(ThemeMode::Light, window, cx),
         ThemePref::Dark => Theme::change(ThemeMode::Dark, window, cx),
+    }
+}
+
+/// 右侧图标栏的功能入口与「生成代码」抽屉的开合。
+impl Workspace {
+    /// 右侧图标栏的点击入口。
+    pub fn open_tool_section(
+        &mut self,
+        section: ToolSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match section {
+            ToolSection::CodeGen => self.open_code_sheet(window, cx),
+        }
+    }
+
+    /// 打开（或收起）代码抽屉。再点一次同一个图标就收起，与左侧栏「点当前功能收起」同款手感。
+    ///
+    /// builder 里**只把 `Entity<CodeSheet>` 传进去**，不碰 `self`：这个闭包是 `Fn`，
+    /// 每帧在本实体的 `render` 内部执行，动一下 `self` 就会二次借用而 panic。
+    pub fn open_code_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if window.has_active_sheet(cx) {
+            window.close_sheet(cx);
+            return;
+        }
+        self.refresh_code_sheet(window, cx);
+
+        let code_sheet = self.code_sheet.clone();
+        window.open_sheet(cx, move |sheet, _, _| {
+            sheet
+                .size(px(CODE_SHEET_WIDTH))
+                .title(div().child(tr!("tools.code.title")))
+                .child(code_sheet.clone())
+        });
+    }
+
+    /// 把当前 Tab 的草稿与默认头开关交给抽屉，重新生成代码。
+    ///
+    /// 默认请求头的开关是全局设置，所以每次都现取——用户刚在设置里关掉 User-Agent，
+    /// 下一次打开抽屉就该看到它消失。
+    pub(crate) fn refresh_code_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let draft = self.active_tab().read(cx).draft(cx);
+        let disabled = settings::settings(cx).request.disabled_default_headers;
+        self.code_sheet.update(cx, |sheet, cx| {
+            sheet.load(draft, disabled, window, cx);
+        });
     }
 }
 
