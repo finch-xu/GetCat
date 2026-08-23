@@ -88,6 +88,20 @@ cargo fmt --all -- --check
 log "cargo clippy --workspace --all-targets --locked -- -D warnings"
 cargo clippy --workspace --all-targets --locked -- -D warnings
 
+# gpui 的每个 #[gpui::test] 都要起一个完整 App（CoreText 字体、Metal 设备、tokio
+# runtime），90 多个测试按核数并行跑，fd 峰值落在 256 与 512 之间。而 macOS 的 launchd
+# 默认软限制恰好是 256（launchctl limit maxfiles），从 GUI 应用启动的终端继承的就是它——
+# 于是 cargo test 挂在 "Failed to initialize Tokio: Too many open files"，且每次被判死刑
+# 的测试都不一样。硬限制是 unlimited，脚本可以自己抬高软限制，只影响本进程与其子进程。
+#
+# 实测：ulimit -n 256 → 3 个测试失败；512 → 152 个全过。
+#
+# TODO：在这里把 fd 上限处理掉。要定的三件事——
+#   · 无条件抬高，还是先读 ulimit -n、只在低于阈值时才动（并说一声）？
+#   · 抬到多少：512 是实测下限，别贴着下限走；也别贴 kern.maxfilesperproc 的 92160。
+#   · 抬不上去时是 die 还是警告后继续？倒在这里发不了版，但静默放过去会让下一个人
+#     对着同一个 EMFILE 再懵一次。
+
 log "cargo test --workspace --locked"
 cargo test --workspace --locked
 
