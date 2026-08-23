@@ -10,7 +10,7 @@ Linux、Windows 三个平台的依赖并集，已排除仅测试期使用的 dev
 > 依赖变化后请重新生成本文件：`python3 scripts/gen-third-party.py`
 
 
-共 **905** 个第三方依赖，分属 **36** 种许可证声明。
+共 **915** 个第三方依赖，分属 **36** 种许可证声明。
 
 
 ## 已知许可证问题
@@ -41,7 +41,7 @@ getcat-app -> gpui -> sum_tree (Apache-2.0) -> ztracing
 
 ### Apache-2.0 OR MIT
 
-_544 个依赖_
+_551 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
@@ -69,6 +69,9 @@ _544 个依赖_
 | `as-raw-xcb-connection` | 1.0.1 | [github.com/psychon/as-raw-xcb-connection](https://github.com/psychon/as-raw-xcb-connection) |  |
 | `as-slice` | 0.2.1 | [github.com/japaric/as-slice](https://github.com/japaric/as-slice) |  |
 | `ash` | 0.38.0+1.3.281 | [github.com/ash-rs/ash](https://github.com/ash-rs/ash) |  |
+| `asn1-rs` | 0.7.2 | [github.com/rusticata/asn1-rs.git](https://github.com/rusticata/asn1-rs.git) |  |
+| `asn1-rs-derive` | 0.6.0 | [github.com/rusticata/asn1-rs.git](https://github.com/rusticata/asn1-rs.git) |  |
+| `asn1-rs-impl` | 0.2.0 | [github.com/rusticata/asn1-rs.git](https://github.com/rusticata/asn1-rs.git) |  |
 | `async-broadcast` | 0.7.2 | [github.com/smol-rs/async-broadcast](https://github.com/smol-rs/async-broadcast) |  |
 | `async-channel` | 2.5.0 | [github.com/smol-rs/async-channel](https://github.com/smol-rs/async-channel) |  |
 | `async-compression` | 0.4.43 | [github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |  |
@@ -153,6 +156,7 @@ _544 个依赖_
 | `crypto-common` | 0.2.2 | [github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |  |
 | `ctor` | 1.0.13 | [github.com/mmastrac/linktime](https://github.com/mmastrac/linktime) |  |
 | `data-url` | 0.3.2 | [github.com/servo/rust-url](https://github.com/servo/rust-url) |  |
+| `der-parser` | 10.0.0 | [github.com/rusticata/der-parser.git](https://github.com/rusticata/der-parser.git) |  |
 | `deranged` | 0.5.8 | [github.com/jhpratt/deranged](https://github.com/jhpratt/deranged) |  |
 | `digest` | 0.10.7 | [github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |  |
 | `digest` | 0.11.3 | [github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |  |
@@ -304,6 +308,7 @@ _544 个依赖_
 | `num_cpus` | 1.17.0 | [github.com/seanmonstar/num_cpus](https://github.com/seanmonstar/num_cpus) |  |
 | `object` | 0.37.3 | [github.com/gimli-rs/object](https://github.com/gimli-rs/object) |  |
 | `object` | 0.39.1 | [github.com/gimli-rs/object](https://github.com/gimli-rs/object) |  |
+| `oid-registry` | 0.8.1 | [github.com/rusticata/oid-registry.git](https://github.com/rusticata/oid-registry.git) |  |
 | `once_cell` | 1.21.4 | [github.com/matklad/once_cell](https://github.com/matklad/once_cell) |  |
 | `openssl-probe` | 0.2.1 | [github.com/rustls/openssl-probe](https://github.com/rustls/openssl-probe) |  |
 | `ordered-stream` | 0.2.0 | [github.com/danieldg/ordered-stream](https://github.com/danieldg/ordered-stream) |  |
@@ -380,6 +385,7 @@ _544 个依赖_
 | `rustc-hash` | 1.1.0 | [github.com/rust-lang-nursery/rustc-hash](https://github.com/rust-lang-nursery/rustc-hash) |  |
 | `rustc-hash` | 2.1.3 | [github.com/rust-lang/rustc-hash](https://github.com/rust-lang/rustc-hash) |  |
 | `rustc_version` | 0.4.1 | [github.com/djc/rustc-version-rs](https://github.com/djc/rustc-version-rs) |  |
+| `rusticata-macros` | 4.1.0 | [github.com/rusticata/rusticata-macros.git](https://github.com/rusticata/rusticata-macros.git) |  |
 | `rustls-pki-types` | 1.15.1 | [github.com/rustls/pki-types](https://github.com/rustls/pki-types) |  |
 | `rustls-platform-verifier` | 0.7.0 | [github.com/rustls/rustls-platform-verifier](https://github.com/rustls/rustls-platform-verifier) |  |
 | `rustls-platform-verifier-android` | 0.1.1 | [github.com/rustls/rustls-platform-verifier](https://github.com/rustls/rustls-platform-verifier) |  |
@@ -580,6 +586,7 @@ _544 个依赖_
 | `wio` | 0.2.2 | [github.com/retep998/wio-rs](https://github.com/retep998/wio-rs) |  |
 | `x11rb` | 0.13.2 | [github.com/psychon/x11rb](https://github.com/psychon/x11rb) |  |
 | `x11rb-protocol` | 0.13.2 | [github.com/psychon/x11rb](https://github.com/psychon/x11rb) |  |
+| `x509-parser` | 0.18.1 | [github.com/rusticata/x509-parser.git](https://github.com/rusticata/x509-parser.git) |  |
 | `xml5ever` | 0.18.1 | [github.com/servo/html5ever](https://github.com/servo/html5ever) |  |
 | `yazi` | 0.2.1 | [github.com/dfrg/yazi](https://github.com/dfrg/yazi) |  |
 | `zed-font-kit` | 0.14.1-zed | [github.com/servo/font-kit](https://github.com/servo/font-kit) |  |
@@ -592,7 +599,7 @@ _544 个依赖_
 
 ### MIT
 
-_197 个依赖_
+_200 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
@@ -616,6 +623,7 @@ _197 个依赖_
 | `convert_case` | 0.11.0 | [github.com/rutrum/convert-case](https://github.com/rutrum/convert-case) |  |
 | `core_maths` | 0.1.1 | [github.com/robertbastian/core_maths](https://github.com/robertbastian/core_maths) |  |
 | `crunchy` | 0.2.4 | [github.com/eira-fransham/crunchy](https://github.com/eira-fransham/crunchy) |  |
+| `data-encoding` | 2.11.1 | [github.com/ia0/data-encoding](https://github.com/ia0/data-encoding) |  |
 | `derive_more` | 2.1.1 | [github.com/JelteF/derive_more](https://github.com/JelteF/derive_more) |  |
 | `derive_more-impl` | 2.1.1 | [github.com/JelteF/derive_more](https://github.com/JelteF/derive_more) |  |
 | `dispatch` | 0.2.0 | [http://github.com/SSheldon/rust-dispatch](http://github.com/SSheldon/rust-dispatch) |  |
@@ -744,9 +752,11 @@ _197 个依赖_
 | `tracing-log` | 0.2.0 | [github.com/tokio-rs/tracing](https://github.com/tokio-rs/tracing) |  |
 | `tracing-subscriber` | 0.3.23 | [github.com/tokio-rs/tracing](https://github.com/tokio-rs/tracing) |  |
 | `tree-sitter` | 0.26.12 | [github.com/tree-sitter/tree-sitter](https://github.com/tree-sitter/tree-sitter) |  |
+| `tree-sitter-bash` | 0.23.3 | [github.com/tree-sitter/tree-sitter-bash](https://github.com/tree-sitter/tree-sitter-bash) |  |
 | `tree-sitter-html` | 0.23.2 | [github.com/tree-sitter/tree-sitter-html](https://github.com/tree-sitter/tree-sitter-html) |  |
 | `tree-sitter-json` | 0.24.8 | [github.com/tree-sitter/tree-sitter-json](https://github.com/tree-sitter/tree-sitter-json) |  |
 | `tree-sitter-language` | 0.1.7 | [github.com/tree-sitter/tree-sitter](https://github.com/tree-sitter/tree-sitter) |  |
+| `tree-sitter-python` | 0.23.6 | [github.com/tree-sitter/tree-sitter-python](https://github.com/tree-sitter/tree-sitter-python) |  |
 | `try-lock` | 0.2.5 | [github.com/seanmonstar/try-lock](https://github.com/seanmonstar/try-lock) |  |
 | `uds_windows` | 1.2.1 | [github.com/haraldh/rust_uds_windows](https://github.com/haraldh/rust_uds_windows) |  |
 | `ulid` | 3.0.0 | [github.com/dylanhart/ulid-rs](https://github.com/dylanhart/ulid-rs) |  |

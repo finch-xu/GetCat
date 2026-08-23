@@ -52,6 +52,22 @@ language:
     en: 中文
     zh-CN: 中文
 
+# 右侧图标栏与它弹出的抽屉
+tools:
+  rail_aria:
+    en: Tools rail
+    zh-CN: 工具栏
+  code:
+    title:
+      en: Generate code
+      zh-CN: 生成代码
+    copy:
+      en: Copy code
+      zh-CN: 复制代码
+    editor_aria:
+      en: Generated code
+      zh-CN: 生成的代码
+
 sidebar:
   rail_aria:
     en: Navigation rail

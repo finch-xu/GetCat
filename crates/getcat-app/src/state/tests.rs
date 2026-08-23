@@ -16,6 +16,7 @@ use std::{
 
 use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
+use getcat_core::codegen::CodeTarget;
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
     AppSettings, BodyKind, FormField, FormValue, HttpVersionPref, KeyValue, Method, RawFormat,
@@ -38,7 +39,7 @@ use crate::state::response::{ResponseState, ResponseView};
 use crate::state::settings;
 use crate::state::store;
 use crate::state::update::{self, InstallKind};
-use crate::state::workspace::{SidebarSection, Workspace};
+use crate::state::workspace::{SidebarSection, ToolSection, Workspace};
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
@@ -1689,6 +1690,96 @@ fn sidebar_sections_are_indexed_by_discriminant() {
     for (ix, section) in SidebarSection::ALL.iter().enumerate() {
         assert_eq!(*section as usize, ix, "ALL[{ix}] 与判别值对不上");
     }
+}
+
+/// 右侧图标栏同理：Button id 用 `section as usize`，顺序错开就会点错功能。
+#[test]
+fn tool_sections_are_indexed_by_discriminant() {
+    for (ix, section) in ToolSection::ALL.iter().enumerate() {
+        assert_eq!(*section as usize, ix, "ALL[{ix}] 与判别值对不上");
+    }
+}
+
+/// 抽屉里的代码来自**当前** Tab：切了 Tab 再打开，看到的必须是新那条请求。
+#[gpui::test]
+fn code_sheet_generates_from_the_active_tab(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+
+    let first = cx.read(|app| ws.read(app).active_tab());
+    change_url(&first, "https://api.test/v1/first", cx);
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_text.clone());
+    assert!(
+        code.contains("curl -X GET 'https://api.test/v1/first'"),
+        "{code}"
+    );
+    assert!(cx.read(|app| ws.read(app).code_error.is_none()));
+
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    let second = cx.read(|app| ws.read(app).active_tab());
+    change_url(&second, "https://api.test/v2/second", cx);
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_text.clone());
+    assert!(code.contains("https://api.test/v2/second"), "{code}");
+    assert!(
+        !code.contains("v1/first"),
+        "还留着上一个 Tab 的内容：{code}"
+    );
+}
+
+/// 切换生成目标要重新生成，而不是把旧代码留在编辑器里。
+#[gpui::test]
+fn switching_the_target_regenerates_the_code(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/ping", cx);
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
+    assert!(cx.read(|app| ws.read(app).code_text.starts_with("curl")));
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_code_target(CodeTarget::PythonRequests, window, cx)
+        })
+    });
+    let code = cx.read(|app| ws.read(app).code_text.clone());
+    assert!(code.starts_with("import requests"), "{code}");
+}
+
+/// URL 还没填就打开抽屉：显示与发送时同一套错误，而不是一段跑不了的代码。
+#[gpui::test]
+fn an_unfilled_url_surfaces_an_error_instead_of_code(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert!(matches!(ws.code_error, Some(RequestError::InvalidUrl(_))));
+        assert!(ws.code_text.is_empty(), "报错时不该留着上一次的代码");
+    });
+}
+
+/// 默认请求头的开关是全局设置，抽屉每次生成都现取。
+#[gpui::test]
+fn disabling_a_default_header_shows_up_in_the_generated_code(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/ping", cx);
+
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
+    assert!(cx.read(|app| ws.read(app).code_text.contains("User-Agent")));
+
+    cx.update(|_, cx| {
+        settings::update(cx, |s| {
+            s.request.disabled_default_headers = vec!["user-agent".into()]
+        })
+    });
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.regenerate_code(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_text.clone());
+    assert!(!code.contains("User-Agent"), "{code}");
+    assert!(code.contains("Accept"), "其余默认头还在：{code}");
 }
 
 #[gpui::test]

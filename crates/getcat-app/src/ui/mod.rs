@@ -1,12 +1,14 @@
 //! UI 公共小工具：颜色映射与数字格式化。
 
 pub mod body_view;
+pub mod code_sheet;
 pub mod kv_table;
 pub mod request_pane;
 pub mod response_pane;
 pub mod settings_dialog;
 pub mod sidebar;
 pub mod text;
+pub mod tool_rail;
 pub mod url_bar;
 
 use std::time::Duration;

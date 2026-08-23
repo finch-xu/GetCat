@@ -15,7 +15,7 @@ getcat-core = { path = "crates/getcat-core" }
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "runtime_shaders"] }
 gpui_tokio = { git = "https://github.com/zed-industries/zed" }
-gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f", features = ["tree-sitter", "tree-sitter-html"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f", features = ["tree-sitter", "tree-sitter-html", "tree-sitter-bash", "tree-sitter-python"] }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f" }
 # 应用内更新（GitHub Releases + SHA-256 + minisign）。它的 gpui 依赖同样不写 rev，会统一到上面锁定的 commit。
 # 不在 crates.io 发布（带 git 依赖的 crate 发不上去），只能走 git tag。

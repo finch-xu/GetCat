@@ -5,6 +5,8 @@
 // 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use std::rc::Rc;
 
+use getcat_core::codegen::CodeTarget;
+use getcat_core::http::RequestError;
 use getcat_core::model::{
     Method, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms,
 };
@@ -22,7 +24,7 @@ use gpui_component::{
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
     h_flex,
-    input::{Input, InputState},
+    input::{EditorState, Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
     status_bar::StatusBar,
     tab::{Tab, TabBar},
@@ -64,6 +66,22 @@ impl SidebarSection {
     pub const ALL: [SidebarSection; 2] = [SidebarSection::Saved, SidebarSection::Templates];
 }
 
+/// 右侧图标栏上的功能；点一下从右侧滑出对应的抽屉。
+/// 与 [`SidebarSection`] 同款约定：判别值即图标栏上的下标（按钮 id 用的是 `section as usize`），
+/// 所以 `ALL` 的顺序必须与变体声明顺序一致，有测试钉住。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolSection {
+    #[default]
+    CodeGen,
+}
+
+impl ToolSection {
+    pub const ALL: [ToolSection; 1] = [ToolSection::CodeGen];
+}
+
+/// 生成代码用到的语法高亮语言，每种一个常驻编辑器实体。
+const CODE_LANGUAGES: [&str; 2] = ["bash", "python"];
+
 pub struct Workspace {
     tabs: Vec<Entity<RequestTab>>,
     active: usize,
@@ -85,6 +103,16 @@ pub struct Workspace {
     focus_handle: FocusHandle,
     /// 全局更新器状态的副本（观察到变化时同步），状态栏提示与「关于」页据此渲染。
     update_status: UpdateStatus,
+    /// 代码抽屉当前选中的生成目标。刻意不进 workspace.json：它是「这一次想复制成什么」，
+    /// 不属于窗口布局。
+    pub(crate) code_target: CodeTarget,
+    /// bash / python 两套只读编辑器。抽屉是窗口级单例，全局各一份就够，
+    /// 不必像响应编辑器那样每个 Tab 一套。
+    pub(crate) code_editors: Vec<(&'static str, Entity<EditorState>)>,
+    /// 当前抽屉里的代码原文，复制按钮直接取它（省得再从编辑器读一遍）。
+    pub(crate) code_text: SharedString,
+    /// 生成失败的原因（URL 为空 / header 非法 / form-data 未选文件），抽屉里替代代码显示。
+    pub(crate) code_error: Option<RequestError>,
     _subs: Vec<Subscription>,
 }
 
@@ -125,6 +153,23 @@ impl Workspace {
             tab_scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             update_status: update::status(cx),
+            code_target: CodeTarget::default(),
+            code_editors: CODE_LANGUAGES
+                .iter()
+                .map(|lang| {
+                    (
+                        *lang,
+                        cx.new(|cx| {
+                            EditorState::new(window, cx)
+                                .language(*lang)
+                                .line_number(true)
+                                .soft_wrap(false)
+                        }),
+                    )
+                })
+                .collect(),
+            code_text: SharedString::default(),
+            code_error: None,
             _subs: Vec::new(),
         };
 
@@ -1020,6 +1065,9 @@ impl Render for Workspace {
         // 需要消费方自己在某处渲染（story crate 的 StoryRoot::render 就是这么接的）；
         // 否则 window.open_dialog 只会更新状态，画面上什么都不会出现。
         let dialog_layer = Root::render_dialog_layer(window, cx);
+        // 同理，Sheet 层也得自己画出来：不挂这一句，window.open_sheet 只会更新状态，
+        // 画面上什么都不会出现。
+        let sheet_layer = Root::render_sheet_layer(window, cx);
         // 根元素持有焦点（track_focus）：给它 id + role，否则 gpui 会在日志里提示聚焦元素缺少 role
         div()
             .id("workspace")
@@ -1091,9 +1139,12 @@ impl Render for Workspace {
                                     ),
                                 ),
                         ),
-                    ),
+                    )
+                    // 与最左的图标栏对称，固定在最右、从不移动
+                    .child(self.render_tool_rail(cx)),
             )
             .child(self.render_status_bar(cx))
+            .children(sheet_layer)
             .children(dialog_layer)
     }
 }
