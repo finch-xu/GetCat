@@ -7,7 +7,7 @@ use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, LanguagePref, ThemePref};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
-    WeakEntity, Window, div, px, rems,
+    WeakEntity, Window, div, img, px, rems,
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, WindowExt,
@@ -25,6 +25,8 @@ use gpui_component::{
 };
 use gpui_updater::UpdateStatus;
 
+use crate::assets::LOGO_PATH;
+use crate::brand;
 use crate::i18n::tr;
 use crate::state::settings;
 use crate::state::store::store;
@@ -36,24 +38,39 @@ use crate::ui::text::{language_label, theme_label};
 // 这是设计指南允许的「与外部表面匹配的几何」例外。
 const DIALOG_WIDTH: f32 = 760.;
 const CONTENT_HEIGHT: f32 = 460.;
+/// 「关于」页的 logo 边长：位图资产是 512 px 见方，这里按对话框排版取值（同上，几何例外）。
+const LOGO_SIZE: f32 = 56.;
 
-/// 设置对话框的页；判别值就是 `render_settings` 里 `.page(..)` 的顺序。
-/// 目前只有「通用」（默认）与「关于」（状态栏更新提示）会被指定打开，其余变体留着对齐页序。
+/// 设置对话框的页。判别值必须等于它在 [`PAGE_ORDER`] 里的下标——`default_selected_index`
+/// 用 `page as usize` 索引侧栏，错位就会跳到别的页，而编译器看不出来。
+/// 目前只有「通用」（默认）与「检查更新」（状态栏更新提示）会被指定打开，其余变体留着对齐页序。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum SettingsPage {
     General = 0,
     Request = 1,
     Data = 2,
-    About = 3,
+    Updates = 3,
+    About = 4,
 }
+
+/// 侧栏里页的排列顺序，也是 [`render_settings`] 构建页的唯一依据。
+/// 加一页 = 加一个枚举变体（判别值接在末尾）+ 在这里排好位置 + 在 `render_settings`
+/// 的 match 里给出构造函数；漏了哪一步都有编译错误或测试失败兜住。
+const PAGE_ORDER: [SettingsPage; 5] = [
+    SettingsPage::General,
+    SettingsPage::Request,
+    SettingsPage::Data,
+    SettingsPage::Updates,
+    SettingsPage::About,
+];
 
 /// 打开设置对话框（⌘, / 侧栏齿轮），停在「通用」页。
 pub fn open_settings(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) {
     open_settings_page(workspace, SettingsPage::General, window, cx);
 }
 
-/// 打开设置对话框并停在指定页（状态栏的更新提示直接跳到「关于」）。已有对话框时不叠加第二个。
+/// 打开设置对话框并停在指定页（状态栏的更新提示直接跳到「检查更新」）。已有对话框时不叠加第二个。
 pub fn open_settings_page(
     workspace: Entity<Workspace>,
     page: SettingsPage,
@@ -99,7 +116,7 @@ pub fn open_settings_page(
 
 fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, cx: &App) -> Settings {
     // id 按初始页区分：选中页记在按 id 索引的窗口状态里，同一个 id 会复用上一次的选择
-    Settings::new(SharedString::from(format!(
+    let mut settings = Settings::new(SharedString::from(format!(
         "app-settings-{}",
         page as usize
     )))
@@ -107,11 +124,20 @@ fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, cx: &Ap
         page_ix: page as usize,
         group_ix: None,
     })
-    .sidebar_width(px(180.))
-    .page(general_page(workspace))
-    .page(request_page())
-    .page(data_page(cx))
-    .page(about_page())
+    .sidebar_width(px(180.));
+
+    // 按 PAGE_ORDER 迭代而不是手写一串 .page(..)：页序只有一个来源，
+    // 判别值与下标的对应由 page_discriminants_match_sidebar_order 测试保证
+    for entry in PAGE_ORDER {
+        settings = settings.page(match entry {
+            SettingsPage::General => general_page(workspace.clone()),
+            SettingsPage::Request => request_page(),
+            SettingsPage::Data => data_page(cx),
+            SettingsPage::Updates => updates_page(),
+            SettingsPage::About => about_page(),
+        });
+    }
+    settings
 }
 
 fn general_page(workspace: WeakEntity<Workspace>) -> SettingPage {
@@ -326,37 +352,14 @@ fn data_page(cx: &App) -> SettingPage {
         )
 }
 
-fn about_page() -> SettingPage {
-    SettingPage::new(tr!("settings.about"))
-        .icon(IconName::Info)
+/// 「检查更新」页：启动时自动检查的开关 + 当前状态与动作。
+///
+/// group 不给标题：页名已经是「检查更新」，再套一层「更新」只是重复。
+fn updates_page() -> SettingPage {
+    SettingPage::new(tr!("settings.updates_page"))
+        .icon(IconName::ArrowDown)
         .group(
             SettingGroup::new()
-                .title("GetCat")
-                .item(SettingItem::render(|_, _, cx| {
-                    let muted = cx.theme().muted_foreground;
-                    v_flex()
-                        .gap_2()
-                        .text_sm()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .child(tr!("settings.about_blurb")),
-                        )
-                        .child(
-                            DescriptionList::new()
-                                .columns(1)
-                                .bordered(false)
-                                .small()
-                                .label_width(rems(4.))
-                                .item(tr!("settings.version"), env!("CARGO_PKG_VERSION"), 1)
-                                .item(tr!("settings.license"), "Apache-2.0", 1),
-                        )
-                })),
-        )
-        .group(
-            SettingGroup::new()
-                .title(tr!("settings.updates"))
                 .item(
                     SettingItem::new(
                         tr!("settings.check_on_launch"),
@@ -369,6 +372,70 @@ fn about_page() -> SettingPage {
                     .description(tr!("settings.check_on_launch_desc")),
                 )
                 .item(SettingItem::render(|_, _, cx| render_update_row(cx))),
+        )
+}
+
+fn about_page() -> SettingPage {
+    SettingPage::new(tr!("settings.about"))
+        .icon(IconName::Info)
+        .group(
+            SettingGroup::new()
+                .title(brand::APP_NAME)
+                .item(SettingItem::render(|_, _, cx| {
+                    let muted = cx.theme().muted_foreground;
+                    v_flex()
+                        .gap_4()
+                        .text_sm()
+                        .child(
+                            h_flex()
+                                .gap_3()
+                                .items_center()
+                                // 位图 logo 走 img()：svg() 是单色蒙版，多色 logo 用不了
+                                .child(img(LOGO_PATH).size(px(LOGO_SIZE)).flex_none())
+                                .child(
+                                    v_flex()
+                                        .min_w_0()
+                                        .gap_0p5()
+                                        .child(
+                                            div()
+                                                .text_base()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .child(brand::APP_NAME),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(tr!("settings.about_blurb")),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            DescriptionList::new()
+                                .columns(1)
+                                .bordered(false)
+                                .small()
+                                .label_width(rems(4.))
+                                .item(tr!("settings.version"), env!("CARGO_PKG_VERSION"), 1)
+                                .item(tr!("settings.author"), brand::AUTHOR, 1)
+                                .item(tr!("settings.license"), brand::LICENSE, 1),
+                        )
+                        .child(repo_link())
+                })),
+        )
+}
+
+/// 项目主页链接：和发布页链接同一个形状（`Link` + 外链图标），只是换了图标与地址。
+fn repo_link() -> Link {
+    Link::new("repo-link")
+        .href(brand::REPO_URL)
+        .text_sm()
+        .child(
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(Icon::new(IconName::Github).size_3p5())
+                .child(tr!("settings.repository")),
         )
 }
 
@@ -521,5 +588,29 @@ fn theme_key(pref: ThemePref) -> SharedString {
         ThemePref::System => "system".into(),
         ThemePref::Light => "light".into(),
         ThemePref::Dark => "dark".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `default_selected_index` 拿 `page as usize` 当侧栏下标，而侧栏顺序来自 `PAGE_ORDER`。
+    /// 两者一旦错位，「跳到检查更新」会打开别的页，且没有任何编译期提示——所以在这里钉住。
+    #[test]
+    fn page_discriminants_match_sidebar_order() {
+        for (ix, page) in PAGE_ORDER.iter().enumerate() {
+            assert_eq!(
+                *page as usize, ix,
+                "{page:?} 的判别值与它在 PAGE_ORDER 里的位置对不上"
+            );
+        }
+    }
+
+    /// 状态栏的更新提示跳的是「检查更新」页；这一条同时确认该页确实还在 PAGE_ORDER 里。
+    #[test]
+    fn updates_page_is_reachable_from_the_status_bar_hint() {
+        assert!(PAGE_ORDER.contains(&SettingsPage::Updates));
+        assert!(PAGE_ORDER.contains(&SettingsPage::About));
     }
 }

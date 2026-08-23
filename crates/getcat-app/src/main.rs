@@ -2,6 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod assets;
+mod brand;
 mod bridge;
 mod i18n;
 mod state;
@@ -109,7 +110,7 @@ fn main() {
                     update::install(cx);
                     cx.open_window(options, |window, cx| {
                         // TitlebarOptions.title 为 None（标题由 TitleBar 自绘）；OS 层的窗口标题给 Dock / 任务栏 / 屏幕阅读器
-                        window.set_window_title("GetCat");
+                        window.set_window_title(crate::brand::APP_NAME);
                         let workspace = cx.new(|cx| Workspace::restore(loaded, window, cx));
                         // 关窗与退出都先把每个 Tab 的草稿快照投递出去，再等待写入线程清空队列（≤ 2 s）
                         window.on_window_should_close(cx, {

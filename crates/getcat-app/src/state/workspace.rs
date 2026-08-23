@@ -31,6 +31,7 @@ use gpui_component::{
 
 use gpui_updater::UpdateStatus;
 
+use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
@@ -627,25 +628,42 @@ impl Workspace {
         self.active_tab().read(cx).title(cx)
     }
 
-    /// 自绘标题栏（spec §7.2）：只居中显示当前 Tab 标题（应用名与 logo 在侧栏左上角）；
+    /// 自绘标题栏（spec §7.2）：居中显示 `GetCat · 当前 Tab 标题`；
     /// 拖动 / 双击 / 平台控制按钮由 TitleBar 处理。
+    ///
+    /// 品牌名用更重的字重与主前景色，Tab 标题降到 muted——窗口变窄时只有 Tab 标题被截断，
+    /// `GetCat ·` 始终完整（品牌段 `flex_none`，标题段才 `min_w_0` + `truncate`）。
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         TitleBar::new().child(
             h_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
+                .gap_1p5()
                 // macOS 的 TitleBar 左侧给红绿灯留了 80 px，右侧补同样的量才是窗口正中
                 .when(cfg!(target_os = "macos"), |h| h.pr(px(80.)))
                 .text_sm()
                 .min_w_0()
+                .child(
+                    div()
+                        .flex_none()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(APP_NAME),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("·"),
+                )
                 .child(
                     // flex 子项默认 min-width:auto，不会收缩到内容宽度以下，truncate 因此失效：
                     // 必须显式 min_w_0()
                     div()
                         .min_w_0()
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(cx.theme().foreground)
+                        .text_color(cx.theme().muted_foreground)
                         .truncate()
                         .child(self.title_bar_subtitle(cx)),
                 ),
@@ -763,7 +781,7 @@ pub(crate) fn apply_theme(pref: ThemePref, window: Option<&mut Window>, cx: &mut
 /// 底部状态栏：右侧是请求 / 响应的分栏方向（两段式），左侧留给以后的功能按钮。
 impl Workspace {
     fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // 只在"有新版本"与"已装好待重启"时提示；下载 / 安装进度只在「关于」页显示，
+        // 只在"有新版本"与"已装好待重启"时提示；下载 / 安装进度只在「检查更新」页显示，
         // 离线启动得到的错误也不在这里冒出来
         let update_hint = update::hint_version(&self.update_status)
             .map(|(version, staged)| (version.clone(), staged));
@@ -788,7 +806,7 @@ impl Workspace {
                             .label(tr!("status.update_available", version = version))
                             .tooltip(tr!("status.update_available_tooltip"))
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_settings_page(SettingsPage::About, window, cx)
+                                this.open_settings_page(SettingsPage::Updates, window, cx)
                             }))
                     })
                 })

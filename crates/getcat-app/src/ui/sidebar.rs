@@ -23,6 +23,7 @@ use gpui_component::{
 use getcat_core::model::ThemePref;
 
 use crate::assets::LOGO_PATH;
+use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::tab_title;
 use crate::state::workspace::{SidebarSection, Workspace};
@@ -86,7 +87,7 @@ impl Workspace {
                     .items_center()
                     .justify_center()
                     .tooltip(|window, cx| {
-                        gpui_component::tooltip::Tooltip::new("GetCat").build(window, cx)
+                        gpui_component::tooltip::Tooltip::new(APP_NAME).build(window, cx)
                     })
                     // 26 px 是位图本身的尺寸：设计指南允许的像素例外
                     .child(img(LOGO_PATH).size(px(26.)).flex_none()),

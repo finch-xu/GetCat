@@ -510,12 +510,18 @@ settings:
   version:
     en: Version
     zh-CN: 版本
+  author:
+    en: Author
+    zh-CN: 作者
   license:
     en: License
     zh-CN: 许可证
-  updates:
+  repository:
+    en: Repository
+    zh-CN: 项目主页
+  updates_page:
     en: Updates
-    zh-CN: 更新
+    zh-CN: 检查更新
   check_on_launch:
     en: Check for updates on launch
     zh-CN: 启动时检查更新
