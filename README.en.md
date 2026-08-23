@@ -8,7 +8,7 @@
 
 No Postman, Just GetCat!
 
-GPU-rendered · Light on resources · No account · Your data stays local
+GPU-rendered · Light on resources · No account · Your data stays local · No Electron, No Tauri, No WebView
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -32,7 +32,6 @@ GPU-rendered · Light on resources · No account · Your data stays local
 - **Saves as you go**: every tab's draft is written to disk and restored on restart; ⌘S saves to the sidebar; tab order, split direction, and theme preference are all remembered.
 - **Theme follows the system**, or pin it to light / dark. The title bar is custom-drawn, so all three platforms look the same.
 - **Accessible**: every control has an accessible name and works with screen readers.
-- **In-app updates**: new versions show up in the status bar and install in one click; packages are verified by both SHA-256 and a signature.
 
 ## Install
 

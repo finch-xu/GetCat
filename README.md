@@ -8,7 +8,7 @@
 
 No Postman, Just GetCat!
 
-GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地
+GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electron, No Tauri, No WebView
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -32,7 +32,6 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地
 - **随手即存**：每个 Tab 的草稿自动落盘、重启恢复；⌘S 保存到侧栏；Tab 顺序、分栏方向、主题偏好都记住。
 - **主题与语言跟随系统**，也可固定浅色 / 深色、English / 中文；自绘标题栏，三平台外观一致。
 - **无障碍**：所有控件都有可访问名称，屏幕阅读器可用。
-- **应用内更新**：有新版本时状态栏提示，一键下载安装；安装包经 SHA-256 + 签名双重校验。
 
 ## 安装
 
