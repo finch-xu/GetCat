@@ -704,6 +704,118 @@ fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
     });
 }
 
+/// 格式化必须保住字段顺序：这正是用 core 的单遍美化器、而不是 serde 的
+/// `to_string_pretty`（默认 BTreeMap，会按字母序重排 key）的理由，值得钉死。
+#[gpui::test]
+fn format_body_reindents_without_reordering_keys(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.body_mode = BodyMode::Raw;
+            t.raw_format = RawFormat::Json;
+            let editor = t.editor_for(RawFormat::Json).clone();
+            // 字母序会把 model 排到 messages 后面；这里刻意反着写
+            editor.update(cx, |e, cx| {
+                e.set_value(
+                    r#"{"model":"gpt-5.6","messages":[{"role":"user"}],"a":1}"#,
+                    window,
+                    cx,
+                )
+            });
+            t.dirty = false;
+
+            t.format_body(window, cx);
+
+            let out = editor.read(cx).text().to_string();
+            assert!(out.contains('\n'), "格式化后应该有换行：{out}");
+            assert!(out.contains("  \"model\""), "应该是 2 空格缩进：{out}");
+            let model_at = out.find("\"model\"").expect("model 还在");
+            let messages_at = out.find("\"messages\"").expect("messages 还在");
+            let a_at = out.find("\"a\"").expect("a 还在");
+            assert!(
+                model_at < messages_at && messages_at < a_at,
+                "字段顺序被重排了：{out}"
+            );
+        })
+    });
+    // 置脏走的是 replace_all 发出的 Change 事件 → on_body_editor_event 订阅，
+    // 而 gpui 的事件要等 effect 派发，所以断言必须在 update 闭包之外
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.dirty, "格式化算一次用户改动");
+        assert!(t.body_hint.is_none());
+    });
+}
+
+#[gpui::test]
+fn format_body_rejects_invalid_json(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.body_mode = BodyMode::Raw;
+            t.raw_format = RawFormat::Json;
+            let editor = t.editor_for(RawFormat::Json).clone();
+            let broken = r#"{"a": 1,}"#;
+            editor.update(cx, |e, cx| e.set_value(broken, window, cx));
+            t.dirty = false;
+
+            t.format_body(window, cx);
+
+            assert_eq!(editor.read(cx).text().to_string(), broken, "内容一字未改");
+            assert_eq!(t.body_hint, Some(BodyHint::InvalidJson));
+            assert!(!t.dirty, "失败不该置脏");
+
+            // 用户一动手改，提示就该消失
+            editor.update(cx, |e, cx| e.set_value(r#"{"a": 1}"#, window, cx));
+            t.on_body_editor_event(&editor, &InputEvent::Change, window, cx);
+            assert!(t.body_hint.is_none());
+        })
+    });
+}
+
+#[gpui::test]
+fn format_body_is_idempotent_and_scoped_to_json(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.body_mode = BodyMode::Raw;
+            t.raw_format = RawFormat::Json;
+            let editor = t.editor_for(RawFormat::Json).clone();
+            editor.update(cx, |e, cx| e.set_value(r#"{"a":1}"#, window, cx));
+            t.format_body(window, cx);
+            let once = editor.read(cx).text().to_string();
+
+            // 再格式化一次：内容不变，也不再置脏
+            t.dirty = false;
+            t.format_body(window, cx);
+            assert_eq!(editor.read(cx).text().to_string(), once);
+            assert!(!t.dirty, "已经格式化好的不该再产生一次改动");
+
+            // 空请求体：no-op，也不报「非法 JSON」
+            editor.update(cx, |e, cx| e.set_value("   ", window, cx));
+            t.body_hint = None;
+            t.format_body(window, cx);
+            assert!(t.body_hint.is_none(), "空请求体不该报错");
+
+            // 非 JSON 格式 / 非 raw 模式：no-op
+            let text_editor = t.editor_for(RawFormat::Text).clone();
+            text_editor.update(cx, |e, cx| e.set_value(r#"{"a":1}"#, window, cx));
+            t.raw_format = RawFormat::Text;
+            t.format_body(window, cx);
+            assert_eq!(text_editor.read(cx).text().to_string(), r#"{"a":1}"#);
+
+            t.raw_format = RawFormat::Json;
+            t.body_mode = BodyMode::None;
+            editor.update(cx, |e, cx| e.set_value(r#"{"a":1}"#, window, cx));
+            t.format_body(window, cx);
+            assert_eq!(editor.read(cx).text().to_string(), r#"{"a":1}"#);
+        })
+    });
+}
+
 /// F1：draft() 的 Raw 分支直接从编辑器的 Rope 拷贝一次文本，不经过 `value()`（SharedString）
 /// 这道额外的中间拷贝；这里只断言最终结果，实现细节由 request_tab.rs 里的调用决定。
 #[gpui::test]
@@ -1360,6 +1472,140 @@ fn open_saved_opens_tab_then_focuses_existing(cx: &mut TestAppContext) {
     // 不存在的 id：no-op
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.open_saved(Ulid::generate(), window, cx)));
     cx.read(|app| assert_eq!(ws.read(app).tab_count(), 2));
+}
+
+#[gpui::test]
+fn open_template_prefills_a_new_tab(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let template = crate::templates::find("openai-chat-vision").unwrap();
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_template("openai-chat-vision", window, cx)
+        })
+    });
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 2, "模板开在新 Tab 里，不覆盖原有的");
+        let t = ws.active_tab();
+        let t = t.read(app);
+        let draft = t.draft(app);
+        assert_eq!(draft.method, Method::Post);
+        assert_eq!(draft.url, template.url);
+        assert_eq!(draft.headers.len(), template.headers.len());
+        assert!(
+            draft
+                .headers
+                .iter()
+                .any(|h| h.key == "Authorization" && h.value == "Bearer YOUR_API_KEY")
+        );
+        match draft.body {
+            BodyKind::Raw { format, ref text } => {
+                assert_eq!(format, RawFormat::Json);
+                assert_eq!(text, template.body, "请求体应原样进编辑器");
+            }
+            ref other => panic!("期望 Raw JSON，实际 {other:?}"),
+        }
+        // 模板产出的是全新未保存请求；标题走 URL 末段，saved_name 只属于真保存过的
+        assert!(t.saved_id.is_none());
+        assert!(t.saved_name.is_none());
+        assert!(t.dirty);
+        assert_eq!(t.title(app).as_ref(), "/v1/chat/completions");
+    });
+
+    // 同一个模板允许再开一份（不像 open_saved 那样聚焦已有 Tab）
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_template("openai-chat-vision", window, cx)
+        })
+    });
+    cx.read(|app| assert_eq!(ws.read(app).tab_count(), 3));
+
+    // 不存在的 id：no-op
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.open_template("nope", window, cx)));
+    cx.read(|app| assert_eq!(ws.read(app).tab_count(), 3));
+}
+
+#[gpui::test]
+fn template_panel_switches_and_draws(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+
+    // 图标栏点「模板」：展开面板并切过去
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_sidebar_section(SidebarSection::Templates, cx)
+        })
+    });
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.sidebar_section(), SidebarSection::Templates);
+        assert!(!ws.sidebar_collapsed());
+    });
+
+    // 真正绘制一帧：模板行是手工平铺的，element id 冲突或借用错误只有在布局时才暴露。
+    // blur 的原因同 sidebar_lists_newest_first_and_draws_rows。
+    cx.update(|window, _| window.blur());
+    let ws_element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        ws_element.into_any_element()
+    });
+
+    // 再点同一个图标：收起
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_sidebar_section(SidebarSection::Templates, cx)
+        })
+    });
+    cx.read(|app| assert!(ws.read(app).sidebar_collapsed()));
+}
+
+/// 标签多到溢出时，标签栏要多渲染箭头、溢出菜单和末尾占位。这些都只在真实布局
+/// 阶段才组装，`cargo check` 抓不到 element id 冲突之类的问题，所以画一帧。
+#[gpui::test]
+fn tab_bar_draws_with_many_tabs(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    for _ in 0..12 {
+        cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    }
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 13);
+        assert_eq!(ws.active_index(), 12, "新建后激活最后一个");
+    });
+
+    // blur 的原因同 sidebar_lists_newest_first_and_draws_rows
+    cx.update(|window, _| window.blur());
+    let ws_element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
+        ws_element.into_any_element()
+    });
+
+    // 画过一帧后布局才算出溢出量，这时箭头才有意义
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.scroll_tabs(1., cx);
+            ws.scroll_tabs(-1., cx);
+            // 反复滚到头也不该把偏移推出边界
+            for _ in 0..20 {
+                ws.scroll_tabs(-1., cx);
+            }
+        })
+    });
+    cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
+        ws.clone().into_any_element()
+    });
+}
+
+/// 图标栏的 Button id 用 `section as usize`，面板切换也按数组下标走：
+/// `ALL` 的顺序一旦与变体声明顺序错开，点第二个图标会展开第一个面板。
+#[test]
+fn sidebar_sections_are_indexed_by_discriminant() {
+    for (ix, section) in SidebarSection::ALL.iter().enumerate() {
+        assert_eq!(*section as usize, ix, "ALL[{ix}] 与判别值对不上");
+    }
 }
 
 #[gpui::test]

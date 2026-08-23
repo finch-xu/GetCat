@@ -9,6 +9,14 @@ pub const CHECK_INTERVAL: usize = 1 << 20;
 /// （每层一行、每行 2·深度 个空格），远超 1.5× 的预分配与 3× 的内存预算。
 pub const MAX_INDENT_DEPTH: usize = 64;
 
+/// 输入是否是合法 JSON。走 serde 的解析器，但用 `IgnoredAny` 丢弃所有值：不建 DOM、不分配。
+///
+/// [`pretty_json`] 对非法输入只做尽力缩进、从不报错，所以「格式化请求体」这类由用户触发、
+/// 需要给出失败反馈的场景，得先过这道把关。
+pub fn is_valid_json(input: &[u8]) -> bool {
+    serde_json::from_slice::<serde::de::IgnoredAny>(input).is_ok()
+}
+
 pub fn pretty_json(input: &[u8]) -> Vec<u8> {
     pretty_json_cancellable(input, || false).expect("never cancelled")
 }
@@ -109,6 +117,24 @@ mod tests {
         let input = r#"{"a":1,"b":[1,2,{"c":"x}y"}],"d":{},"e":[ ]}"#;
         let expected = "{\n  \"a\": 1,\n  \"b\": [\n    1,\n    2,\n    {\n      \"c\": \"x}y\"\n    }\n  ],\n  \"d\": {},\n  \"e\": []\n}";
         assert_eq!(pretty(input), expected);
+    }
+
+    #[test]
+    fn validity_check_accepts_only_real_json() {
+        assert!(is_valid_json(br#"{"a":1,"b":[1,2,null]}"#));
+        assert!(is_valid_json(b"[]"));
+        assert!(is_valid_json(b"  {\"a\": 1}  "));
+        // 裸标量也是合法 JSON 文档
+        assert!(is_valid_json(b"42"));
+
+        assert!(!is_valid_json(b""), "空输入不是合法 JSON");
+        assert!(!is_valid_json(b"   "));
+        assert!(!is_valid_json(br#"{"a":1,}"#), "尾随逗号");
+        assert!(!is_valid_json(br#"{"a":"#), "截断");
+        assert!(!is_valid_json(b"{'a':1}"), "单引号");
+        assert!(!is_valid_json(&[0xFF, 0xFE, b'{']), "非 UTF-8 字节");
+        // pretty_json 对这些只会尽力缩进，不会报错——正是需要这道把关的原因
+        assert!(!pretty_json(br#"{"a":1,}"#).is_empty());
     }
 
     #[test]

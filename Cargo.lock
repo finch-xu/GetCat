@@ -2297,6 +2297,7 @@ dependencies = [
  "gpui_platform",
  "gpui_tokio",
  "rust-i18n",
+ "serde_json",
  "sys-locale",
  "tempfile",
  "tokio",

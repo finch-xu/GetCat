@@ -93,6 +93,15 @@ pub enum RawFormat {
 impl RawFormat {
     pub const ALL: [RawFormat; 3] = [RawFormat::Json, RawFormat::Text, RawFormat::Xml];
 
+    /// `ALL` 里的下标，就是格式分段控件上的位置（与 `BodyMode::index` 对称）。
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|f| *f == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(RawFormat::Json)
+    }
+
     pub fn content_type(self) -> &'static str {
         match self {
             RawFormat::Json => "application/json",
@@ -461,6 +470,18 @@ mod tests {
         }
         assert_eq!(Method::parse("get"), Some(Method::Get));
         assert_eq!(Method::parse("BREW"), None);
+    }
+
+    /// `ALL` 的顺序就是格式分段控件上的位置，UI 靠下标做选中与切换。
+    #[test]
+    fn raw_format_roundtrips_through_index() {
+        for (ix, format) in RawFormat::ALL.iter().enumerate() {
+            assert_eq!(format.index(), ix);
+            assert_eq!(RawFormat::from_index(ix), *format);
+        }
+        assert_eq!(RawFormat::ALL[0], RawFormat::Json, "JSON 排在第一位");
+        // 越界回落到 JSON，不 panic
+        assert_eq!(RawFormat::from_index(99), RawFormat::Json);
     }
 
     #[test]

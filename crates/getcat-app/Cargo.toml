@@ -35,6 +35,8 @@ sys-locale.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 # 每个持久化测试一个独立临时数据目录
 tempfile.workspace = true
+# 校验内置模板的请求体确实是合法 JSON
+serde_json.workspace = true
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 # build.rs 把生成的 .rc（图标 + VERSIONINFO）编进 exe 资源段；Zed 用的也是它

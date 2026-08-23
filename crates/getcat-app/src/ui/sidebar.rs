@@ -27,6 +27,7 @@ use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::tab_title;
 use crate::state::workspace::{SidebarSection, Workspace};
+use crate::templates::{self, TemplateGroup};
 use crate::ui::method_color;
 use crate::ui::text::theme_label;
 use crate::{OpenSettings, SaveRequest, ToggleSidebar};
@@ -48,12 +49,14 @@ impl SidebarSection {
     pub fn title(self) -> SharedString {
         match self {
             SidebarSection::Saved => tr!("sidebar.saved.title"),
+            SidebarSection::Templates => tr!("sidebar.templates.title"),
         }
     }
 
     fn icon(self) -> IconName {
         match self {
             SidebarSection::Saved => IconName::Inbox,
+            SidebarSection::Templates => IconName::LayoutDashboard,
         }
     }
 }
@@ -170,7 +173,112 @@ impl Workspace {
             )
             .child(match section {
                 SidebarSection::Saved => self.render_saved_list(window, cx),
+                SidebarSection::Templates => self.render_template_list(cx),
             })
+    }
+
+    /// 模板面板：内置模板是编译期常量、只有几条，用不上 uniform_list 虚拟化，
+    /// 直接把「组标题 + 行」平铺成一列。
+    fn render_template_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        let hover_bg = cx.theme().list_hover;
+        let muted = cx.theme().muted_foreground;
+        let radius = cx.theme().radius;
+        let weak = cx.entity().downgrade();
+
+        let mut items: Vec<AnyElement> = Vec::new();
+        for group in TemplateGroup::ALL {
+            items.push(
+                div()
+                    .px_2()
+                    .pt_2()
+                    .pb_0p5()
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(muted)
+                    .child(group.label())
+                    .into_any_element(),
+            );
+            for (ix, template) in templates::all()
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.group == group)
+            {
+                let id = template.id;
+                let name = template.display_name();
+                let variant = template.variant.label();
+                let method = template.method;
+                let open = weak.clone();
+                items.push(
+                    // 与已保存列表同款行高与 2 px 上下间隙，两个面板看起来是一套
+                    div()
+                        .h_11()
+                        .w_full()
+                        .py_0p5()
+                        .child(
+                            h_flex()
+                                .id(("template-row", ix))
+                                .size_full()
+                                .px_2()
+                                .gap_2()
+                                .items_center()
+                                .rounded(radius)
+                                .hover(|style| style.bg(hover_bg))
+                                .aria_label(tr!(
+                                    "sidebar.templates.row_aria",
+                                    name = name.clone(),
+                                    variant = variant.clone()
+                                ))
+                                .on_click(move |_, window, cx| {
+                                    if let Some(ws) = open.upgrade() {
+                                        ws.update(cx, |ws, cx| ws.open_template(id, window, cx));
+                                    }
+                                })
+                                .child(
+                                    div()
+                                        .w_12()
+                                        .flex_none()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(method_color(method, cx))
+                                        .child(method.as_str()),
+                                )
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(div().text_sm().truncate().child(name))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .truncate()
+                                                .child(variant),
+                                        ),
+                                ),
+                        )
+                        .into_any_element(),
+                );
+            }
+        }
+
+        v_flex()
+            .id("templates")
+            .flex_1()
+            .min_h_0()
+            .px_2()
+            .pb_2()
+            .overflow_y_scroll()
+            .child(
+                // 认证头填的是占位符，先提醒一句，省掉一次 401
+                div()
+                    .px_2()
+                    .pt_1()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr!("sidebar.templates.hint")),
+            )
+            .children(items)
+            .into_any_element()
     }
 
     fn render_saved_list(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

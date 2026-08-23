@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+use getcat_core::body::pretty::{is_valid_json, pretty_json};
 use getcat_core::body::tier::{ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
@@ -106,6 +107,8 @@ pub enum BodyHint {
     TooLarge,
     /// form-data 模式下用户自设了 Content-Type（发送时该头会被剔除，见 core::http）。
     FormDataContentType,
+    /// 点了格式化，但 raw 请求体不是合法 JSON。下一次编辑就会被 `refresh_body_hint` 清掉。
+    InvalidJson,
 }
 
 impl BodyHint {
@@ -116,6 +119,7 @@ impl BodyHint {
                 size = mib_label(BODY_HINT_BYTES as u64)
             ),
             BodyHint::FormDataContentType => tr!("request.hint_form_data_content_type"),
+            BodyHint::InvalidJson => tr!("request.hint_invalid_json"),
         }
     }
 }
@@ -518,6 +522,35 @@ impl RequestTab {
         }
         self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
+    }
+
+    /// 把 raw JSON 请求体重新缩进。非法 JSON 不动内容，只在编辑器下方给一行提示。
+    ///
+    /// 用 core 自己的 `pretty_json` 而不是 serde：它是单遍字节流实现，不解析成 `Value`，
+    /// 所以**不会把对象的 key 按字母序重排**——请求体的字段顺序是用户写的，不能动。
+    pub fn format_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.body_mode != BodyMode::Raw || self.raw_format != RawFormat::Json {
+            return;
+        }
+        let editor = self.editor_for(RawFormat::Json).clone();
+        let text = editor.read(cx).text().to_string();
+        // 空请求体：什么也不做，别拿「不是合法 JSON」去烦用户
+        if text.trim().is_empty() {
+            return;
+        }
+        if !is_valid_json(text.as_bytes()) {
+            self.body_hint = Some(BodyHint::InvalidJson);
+            cx.notify();
+            return;
+        }
+        let formatted = String::from_utf8_lossy(&pretty_json(text.as_bytes())).into_owned();
+        // 已经是格式化好的：不产生一次无意义的脏标记
+        if formatted == text {
+            return;
+        }
+        // replace_all 保留 undo 历史（一次 ⌘Z 撤销整个格式化），并且会发 Change 事件，
+        // 于是 on_body_editor_event 会接着做 refresh_body_hint + mark_dirty
+        editor.update(cx, |e, cx| e.replace_all(formatted, window, cx));
     }
 
     /// 用户改动的唯一入口：置脏、重绘、去抖写草稿。

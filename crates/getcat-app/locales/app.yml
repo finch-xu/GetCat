@@ -93,6 +93,22 @@ sidebar:
     menu_delete:
       en: Delete…
       zh-CN: 删除…
+  templates:
+    title:
+      en: Templates
+      zh-CN: 模板
+    hint:
+      en: Replace YOUR_API_KEY before sending
+      zh-CN: 发送前先替换 YOUR_API_KEY
+    row_aria:
+      en: "Template: %{name} (%{variant})"
+      zh-CN: "模板：%{name}（%{variant}）"
+    variant_text:
+      en: Plain text
+      zh-CN: 纯文本
+    variant_vision:
+      en: With image
+      zh-CN: 含图片
 
 tab:
   untitled:
@@ -110,6 +126,12 @@ tab:
   aria_dirty:
     en: "Request tab: %{title} (unsaved)"
     zh-CN: "请求 Tab：%{title}（未保存）"
+  scroll_left:
+    en: Show tabs on the left
+    zh-CN: 向左查看标签
+  scroll_right:
+    en: Show tabs on the right
+    zh-CN: 向右查看标签
 
 url_bar:
   placeholder:
@@ -141,9 +163,15 @@ request:
   query_params:
     en: Query parameters
     zh-CN: Query 参数
-  raw_format_tooltip:
-    en: Format of the raw body (sets highlighting and Content-Type)
-    zh-CN: raw 内容的格式（决定高亮与 Content-Type）
+  format_json:
+    en: Format
+    zh-CN: 格式化
+  format_json_tooltip:
+    en: Re-indent the JSON body
+    zh-CN: 重新缩进 JSON 请求体
+  hint_invalid_json:
+    en: Not valid JSON — nothing to format
+    zh-CN: 不是合法的 JSON，无法格式化
   no_body:
     en: This request has no body
     zh-CN: 此请求没有 Body

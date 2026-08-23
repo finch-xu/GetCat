@@ -8,7 +8,6 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::Editor,
-    menu::{DropdownMenu as _, PopupMenuItem},
     tab::{Tab, TabBar},
     v_flex,
 };
@@ -84,18 +83,14 @@ impl RequestTab {
 
     pub fn render_body_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let mode = self.body_mode;
-        let weak = cx.entity().downgrade();
         let current_format = self.raw_format;
         v_flex()
             .size_full()
             .gap_3()
-            // 一行工具条：左边是 Body 类型分段控件，右边（raw 时）是格式下拉。
-            // flex_wrap 让格式下拉在请求区很窄时自动换到下一行，而不是把分段控件裁掉。
+            // 两行工具条：Body 类型一行，raw 的格式与格式化按钮另起一行。
+            // 挤在一行时窄面板下会把分段控件裁掉，拆开后各自都有完整宽度。
             .child(
-                h_flex()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
+                v_flex()
                     .gap_2()
                     .child(
                         TabBar::new("body-mode")
@@ -114,32 +109,36 @@ impl RequestTab {
                             .child("raw")
                             .child("binary"),
                     )
-                    .when(mode == BodyMode::Raw, |h| {
-                        h.child(
-                            Button::new("raw-format")
-                                .outline()
-                                .small()
-                                .label(current_format.label())
-                                .tooltip(tr!("request.raw_format_tooltip"))
-                                .dropdown_caret(true)
-                                .dropdown_menu(move |mut menu, _, _| {
-                                    for format in RawFormat::ALL {
-                                        let weak = weak.clone();
-                                        menu = menu.item(
-                                            PopupMenuItem::new(format.label())
-                                                .checked(format == current_format)
-                                                .on_click(move |_, _, cx| {
-                                                    if let Some(tab) = weak.upgrade() {
-                                                        tab.update(cx, |this, cx| {
-                                                            this.raw_format = format;
-                                                            this.refresh_body_hint(cx);
-                                                            this.mark_dirty(cx);
-                                                        });
-                                                    }
-                                                }),
-                                        );
-                                    }
-                                    menu
+                    .when(mode == BodyMode::Raw, |v| {
+                        v.child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    TabBar::new("raw-format")
+                                        .segmented()
+                                        .small()
+                                        .selected_index(current_format.index())
+                                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                                            this.raw_format = RawFormat::from_index(*ix);
+                                            this.refresh_body_hint(cx);
+                                            this.mark_dirty(cx);
+                                        }))
+                                        .children(RawFormat::ALL.map(|f| f.label())),
+                                )
+                                // 只有 JSON 能格式化：core 里只有 JSON 美化器，
+                                // 与其给个点不动的灰按钮，不如在别的格式下不显示
+                                .when(current_format == RawFormat::Json, |h| {
+                                    h.child(
+                                        Button::new("format-json")
+                                            .ghost()
+                                            .small()
+                                            .label(tr!("request.format_json"))
+                                            .tooltip(tr!("request.format_json_tooltip"))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.format_body(window, cx)
+                                            })),
+                                    )
                                 }),
                         )
                     }),

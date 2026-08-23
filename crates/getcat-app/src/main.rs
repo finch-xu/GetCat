@@ -6,6 +6,7 @@ mod brand;
 mod bridge;
 mod i18n;
 mod state;
+mod templates;
 mod theme;
 mod ui;
 

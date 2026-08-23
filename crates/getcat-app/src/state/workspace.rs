@@ -12,12 +12,12 @@ use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    UniformListScrollHandle, Window, div, px,
+    ParentElement, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, UniformListScrollHandle, Window, div, point, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, ThemeStyled, TitleBar,
-    WindowExt,
+    ActiveTheme, Disableable, IconName, Root, Selectable, Sizable, Theme, ThemeMode, ThemeStyled,
+    TitleBar, WindowExt,
     alert::Alert,
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
@@ -36,6 +36,7 @@ use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
 use crate::state::update;
+use crate::templates;
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
 use crate::{
     CloseTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest, ToggleSidebar,
@@ -44,16 +45,21 @@ use crate::{
 /// 侧栏默认宽度（spec §7.1）。
 pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.;
 
-/// 图标栏上的功能；展开的面板显示其中一个的内容。目前只有已保存请求，
-/// 枚举留着是为了之后加历史 / 环境等面板时图标栏与面板的切换逻辑不用重写。
+/// 标签栏箭头一次滚动的距离，约一个标签宽（标题上限 180 px）。
+const TAB_SCROLL_STEP: f32 = 160.;
+
+/// 图标栏上的功能；展开的面板显示其中一个的内容。
+/// 判别值即图标栏上的下标（rail 的 Button id 用的是 `section as usize`），
+/// 所以 `ALL` 的顺序必须与变体声明顺序一致，有测试钉住。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SidebarSection {
     #[default]
     Saved,
+    Templates,
 }
 
 impl SidebarSection {
-    pub const ALL: [SidebarSection; 1] = [SidebarSection::Saved];
+    pub const ALL: [SidebarSection; 2] = [SidebarSection::Saved, SidebarSection::Templates];
 }
 
 pub struct Workspace {
@@ -72,6 +78,8 @@ pub struct Workspace {
     saved: Rc<Vec<SavedRequest>>,
     /// 侧栏列表的滚动句柄。
     saved_scroll: UniformListScrollHandle,
+    /// 标签栏的横向滚动句柄：左右箭头与「激活项滚入视口」都靠它。
+    tab_scroll: ScrollHandle,
     focus_handle: FocusHandle,
     /// 全局更新器状态的副本（观察到变化时同步），状态栏提示与「关于」页据此渲染。
     update_status: UpdateStatus,
@@ -112,6 +120,7 @@ impl Workspace {
             split: state.split,
             saved: Rc::new(saved),
             saved_scroll: UniformListScrollHandle::new(),
+            tab_scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             update_status: update::status(cx),
             _subs: Vec::new(),
@@ -251,6 +260,7 @@ impl Workspace {
         });
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
+        self.reveal_active_tab();
         self.persist_workspace(cx);
         cx.notify();
     }
@@ -272,6 +282,7 @@ impl Workspace {
         let len = self.tabs.len();
         self.tabs.remove(ix);
         self.active = active_after_close(self.active, ix, len);
+        self.reveal_active_tab();
         self.persist_workspace(cx);
         cx.notify();
     }
@@ -279,9 +290,27 @@ impl Workspace {
     pub fn activate(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix < self.tabs.len() && ix != self.active {
             self.active = ix;
+            self.reveal_active_tab();
             self.persist_workspace(cx);
             cx.notify();
         }
+    }
+
+    /// 让激活的标签滚进视口。标签多到溢出时，不这么做就会出现「新建了标签却看不见」。
+    ///
+    /// `scroll_to_item` 的下标是滚动容器的直接子元素下标；当前用的 `TabVariant::Tab`
+    /// 没有滑动指示器，子元素就是「全部标签 + 末尾的空白占位」，所以与标签下标一一对应。
+    fn reveal_active_tab(&self) {
+        self.tab_scroll.scroll_to_item(self.active);
+    }
+
+    /// 标签栏横向滚一步；`dir` 为 -1 看左边、+1 看右边。
+    /// gpui 的约定是向右滚时 `offset.x` 变负。
+    pub fn scroll_tabs(&mut self, dir: f32, cx: &mut Context<Self>) {
+        let max = self.tab_scroll.max_offset().x;
+        let x = (self.tab_scroll.offset().x - px(TAB_SCROLL_STEP) * dir).clamp(-max, px(0.));
+        self.tab_scroll.set_offset(point(x, px(0.)));
+        cx.notify();
     }
 
     /// 退出 / 关窗前：每个 Tab 立即投递草稿快照（跳过去抖）。
@@ -413,6 +442,28 @@ impl Workspace {
             t.saved_id = Some(id);
             t.saved_name = Some(request.name.clone().into());
             t.dirty = false;
+            t.save_draft_now(cx);
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// 模板列表点击：总是开一个新 Tab（不像 open_saved 那样去重——同一个模板
+    /// 允许并排开好几份改着用）。产出的是全新未保存请求，所以不设 `saved_id`：
+    /// `saved_name` 在 restore 时只从 `saved_id` 反查，设了会在重启后丢，
+    /// 标题因此统一走 URL 末段推导。
+    pub fn open_template(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(template) = templates::find(id) else {
+            return;
+        };
+        let draft = template.draft();
+        self.new_tab(window, cx);
+        let tab = self.active_tab();
+        tab.update(cx, |t, cx| {
+            t.load_draft(&draft, window, cx);
+            t.saved_id = None;
+            // load_draft 走的是不发事件的程序化写入，不会置脏，这里手动标记
+            t.mark_dirty(cx);
             t.save_draft_now(cx);
             cx.notify();
         });
@@ -679,13 +730,54 @@ impl Workspace {
                 (t.title(cx), t.dirty)
             })
             .collect();
+        // max_offset / bounds 只在 prepaint 阶段写入：首帧、以及标签装得下时都是 0。
+        let max_x = self.tab_scroll.max_offset().x;
+        let overflowing = max_x > px(0.);
+        // 必须自己再夹一次：set_offset 不夹值，div 只在 prepaint 夹，
+        // 直接读回的瞬时越界值会被误判成「还能接着滚」
+        let offset_x = self.tab_scroll.offset().x.clamp(-max_x, px(0.));
         TabBar::new("request-tabs")
             .w_full()
             .pl_1()
+            // 标题是 URL 路径，长起来能顶到 /v1/chat/completions；封顶后 label 自己
+            // 省略号截断，prefix 的圆点与 suffix 的关闭按钮保持原尺寸
+            .max_width(px(180.))
+            .track_scroll(&self.tab_scroll)
+            // 官方内置的溢出菜单：∨ 展开全部标签、当前项打勾，点一下直接跳。
+            // 它只切换选中不负责滚动，滚动由 activate 里的 reveal_active_tab 兜住。
+            .menu(true)
+            // 箭头只在真装不下时出现。max_offset 要等布局算完才有值，
+            // 所以刚好溢出的那一帧还看不到，下一次重绘就正常了。
+            .when(overflowing, |bar| {
+                bar.suffix(
+                    h_flex()
+                        .items_center()
+                        .gap_0p5()
+                        .pr_1()
+                        .child(
+                            Button::new("tabs-scroll-left")
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::ChevronLeft)
+                                .disabled(offset_x >= px(-0.5))
+                                .tooltip(tr!("tab.scroll_left"))
+                                .on_click(cx.listener(|this, _, _, cx| this.scroll_tabs(-1., cx))),
+                        )
+                        .child(
+                            Button::new("tabs-scroll-right")
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::ChevronRight)
+                                .disabled(offset_x <= -max_x + px(0.5))
+                                .tooltip(tr!("tab.scroll_right"))
+                                .on_click(cx.listener(|this, _, _, cx| this.scroll_tabs(1., cx))),
+                        ),
+                )
+            })
             .prefix(
-                div().pr_1().child(
+                div().pr_2().child(
                     Button::new("new-tab")
-                        .ghost()
+                        .outline()
                         .small()
                         .icon(IconName::Plus)
                         .tooltip_with_action(tr!("tab.new"), &NewTab, None)
@@ -702,8 +794,10 @@ impl Workspace {
                 };
                 let mut tab = Tab::new().label(title).aria_label(aria);
                 if dirty {
-                    // 未保存改动：标题前的圆点（spec §7.1）
-                    tab = tab.prefix(
+                    // 未保存改动：标题前的圆点（spec §7.1）。
+                    // Tab 根节点没有水平 padding，圆点会贴死左边缘；只给带圆点的标签补，
+                    // 没圆点的标签靠 label 自己的 inner_paddings 就够了。
+                    tab = tab.pl_2().prefix(
                         div()
                             .size_1p5()
                             .rounded_full_style(cx)
