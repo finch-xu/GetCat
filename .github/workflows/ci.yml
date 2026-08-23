@@ -80,13 +80,19 @@ jobs:
             Set-Content -LiteralPath (Join-Path $payload $name) -Value 'placeholder' -NoNewline
           }
 
+          # 每个参数都先落到变量里再传：PowerShell 在 argument mode 下，裸词中间的 `(`
+          # 会截断 token，`-d IconFile=(Resolve-Path ..)` 会被拆成 `IconFile=` 和一个
+          # 裸路径两个 argv，wix 于是把 .ico 当成第二个源文件（WIX0104）。
+          $icon = (Resolve-Path 'crates/getcat-app/resources/windows/getcat.ico').Path
+          $msi = Join-Path $env:RUNNER_TEMP 'ci-check.msi'
+
           wix build `
             -arch x64 `
             -ext WixToolset.Util.wixext `
             -d Version=0.0.0 `
             -d PayloadDir=$payload `
-            -d IconFile=(Resolve-Path 'crates/getcat-app/resources/windows/getcat.ico') `
-            -o (Join-Path $env:RUNNER_TEMP 'ci-check.msi') `
+            -d IconFile=$icon `
+            -o $msi `
             crates/getcat-app/resources/windows/GetCat.wxs
           if ($LASTEXITCODE -ne 0) { throw "wix build 失败（exit $LASTEXITCODE）" }
 

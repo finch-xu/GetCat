@@ -2,6 +2,11 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod assets;
+/// 品牌标识：应用名、作者、仓库地址、协议。
+///
+/// 这些字符串会出现在标题栏、侧栏 tooltip、「关于」页与 Windows 的 exe 版本资源里，
+/// 集中在一处才不会改一个漏三个。GitHub API 的参数（owner / repo）留在
+/// [`crate::state::update`]，那是更新器的配置而不是展示文案。
 mod brand;
 mod bridge;
 mod i18n;
