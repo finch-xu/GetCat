@@ -16,7 +16,7 @@ use std::{
 
 use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
-use getcat_core::codegen::CodeTarget;
+use getcat_core::codegen::{CodeTarget, PLACEHOLDER_URL};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
     AppSettings, BodyKind, FormField, FormValue, HttpVersionPref, KeyValue, Method, RawFormat,
@@ -1780,11 +1780,27 @@ fn code_sheet_renders_without_touching_the_workspace(cx: &mut TestAppContext) {
     });
 }
 
-/// URL 还没填就打开抽屉：显示与发送时同一套错误，而不是一段跑不了的代码。
+/// URL 还没填就打开抽屉：给一段占位骨架，而不是一条红字。
+/// 新建 Tab 本来就是空 URL，报错会让人以为是自己弄坏了什么。
 #[gpui::test]
-fn an_unfilled_url_surfaces_an_error_instead_of_code(cx: &mut TestAppContext) {
+fn an_unfilled_url_shows_a_placeholder_skeleton(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    cx.read(|app| {
+        let sheet = ws.read(app).code_sheet.read(app);
+        assert!(sheet.error().is_none(), "空 URL 不该报错");
+        assert!(sheet.text().contains(PLACEHOLDER_URL), "{}", sheet.text());
+    });
+}
+
+/// 但真填错了还是要报出来——那不是「还没填」，是需要用户去改。
+#[gpui::test]
+fn a_malformed_url_still_shows_the_error(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "ftp://files.example.com", cx);
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
     cx.read(|app| {
         let sheet = ws.read(app).code_sheet.read(app);

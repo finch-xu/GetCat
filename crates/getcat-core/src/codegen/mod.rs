@@ -18,6 +18,10 @@ use crate::http::{
 };
 use crate::model::RequestDraft;
 
+/// URL 还没填时代入的占位。用 RFC 2606 保留给文档示例的域名，
+/// 一眼能看出是占位、又不会指向任何真实主机。
+pub const PLACEHOLDER_URL: &str = "https://api.example.com/path";
+
 /// 生成目标。判别值即界面上分段控件的位置，`ALL` 的顺序必须与变体声明顺序一致（有测试钉住）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodeTarget {
@@ -72,6 +76,20 @@ pub fn generate(
     disabled_default_headers: &[String],
     target: CodeTarget,
 ) -> Result<String, RequestError> {
+    // URL 还没填是新建 Tab 的正常状态，不该当错误报——代入占位先给出骨架，
+    // 用户至少能看到目标语言长什么样。填错了的（非法 scheme、非法 header、
+    // form-data 没选文件）仍旧照常报错，那是真的需要他去改。
+    let placeholder;
+    let draft = if draft.url.trim().is_empty() {
+        placeholder = RequestDraft {
+            url: PLACEHOLDER_URL.to_string(),
+            ..draft.clone()
+        };
+        &placeholder
+    } else {
+        draft
+    };
+
     let req = prepare(draft)?;
     let headers = merge_headers(&req, disabled_default_headers);
     Ok(match target {
@@ -388,10 +406,45 @@ mod tests {
         assert_eq!(CodeTarget::PythonRequests.editor_language(), "python");
     }
 
+    /// URL 还没填是新建 Tab 的正常状态，不是错误：给一段能看懂结构的骨架，
+    /// 让用户先知道目标语言长什么样。
     #[test]
-    fn an_empty_url_reports_the_same_error_as_sending() {
-        let err = generate(&RequestDraft::default(), &[], CodeTarget::Curl).unwrap_err();
+    fn an_empty_url_falls_back_to_a_placeholder_skeleton() {
+        let code = generate(&RequestDraft::default(), &[], CodeTarget::Curl).unwrap();
+        assert!(
+            code.starts_with(&format!("curl -X GET '{PLACEHOLDER_URL}'")),
+            "{code}"
+        );
+        assert!(code.contains("-H 'Accept: */*'"), "默认头照常带上：{code}");
+
+        let python = generate(&RequestDraft::default(), &[], CodeTarget::PythonRequests).unwrap();
+        assert!(
+            python.contains(&format!("url = \"{PLACEHOLDER_URL}\"")),
+            "{python}"
+        );
+    }
+
+    /// 只有「空 URL」享受骨架待遇；真填错了的还是要报出来。
+    #[test]
+    fn a_malformed_url_still_reports_an_error() {
+        let draft = RequestDraft {
+            url: "ftp://files.example.com".into(),
+            ..Default::default()
+        };
+        let err = generate(&draft, &[], CodeTarget::Curl).unwrap_err();
         assert!(matches!(err, RequestError::InvalidUrl(_)), "{err:?}");
+    }
+
+    /// header 填错了不是「还没填」，照常报错。
+    #[test]
+    fn an_invalid_header_still_reports_an_error() {
+        let draft = RequestDraft {
+            url: "https://x.com/p".into(),
+            headers: vec![KeyValue::new("Bad Header", "v")],
+            ..Default::default()
+        };
+        let err = generate(&draft, &[], CodeTarget::Curl).unwrap_err();
+        assert!(matches!(err, RequestError::InvalidHeader(_)), "{err:?}");
     }
 
     #[test]

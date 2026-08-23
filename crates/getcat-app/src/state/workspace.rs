@@ -47,7 +47,7 @@ use crate::{
 };
 
 /// 侧栏默认宽度（spec §7.1）。
-pub const SIDEBAR_DEFAULT_WIDTH: f32 = 280.;
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 300.;
 
 /// 标签栏箭头一次滚动的距离，约一个标签宽（标签上限 200 px）。
 const TAB_SCROLL_STEP: f32 = 180.;

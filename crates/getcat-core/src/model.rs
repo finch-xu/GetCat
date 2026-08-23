@@ -472,7 +472,7 @@ pub struct WorkspaceState {
     pub tab_order: Vec<TabId>,
     #[serde(default)]
     pub active: Option<TabId>,
-    /// 侧栏宽度（逻辑像素）；None 表示默认 240。
+    /// 侧栏宽度（逻辑像素）；None 表示用 app 层的默认值（`SIDEBAR_DEFAULT_WIDTH`）。
     #[serde(default)]
     pub sidebar_width: Option<f32>,
     /// 侧栏是否收成图标栏。首次启动默认收起：主工作区是请求 / 响应，
