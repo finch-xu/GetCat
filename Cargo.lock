@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "getcat-app"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "getcat-core",
@@ -2305,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "getcat-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bytes",
  "directories",
