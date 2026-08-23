@@ -13,6 +13,12 @@
   UpgradeCode 是这个产品的永久身份，一旦发布就不能再改 —— 改了之后新版本会被当成
   另一个产品，与旧版并存而不是升级。ProductCode（Package/@Id）留空由 WiX 每次生成。
 
+  属性值一律写 ASCII。MSI 的字符串表按 Package/@Codepage（默认 1252，西欧）转码，把中文
+  写进属性会以 WIX0311 打断 wix build —— 中文只能出现在这种 XML 注释里，注释不进数据库。
+  也不要改 Codepage 绕开：那是把整个数据库锁死在一种 ANSI 编码上，下次换别的字符再撞一次。
+  安装器本来就是英文包（Name / Manufacturer 都是英文），且 MSI 层的文案没法跟着应用内的
+  rust-i18n 切语言，一个产物只能有一种语言。
+
   构建：见 scripts/package-windows.ps1（传入 Version / PayloadDir / IconFile 三个变量）。
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
@@ -27,7 +33,7 @@
            InstallerVersion="500">
 
     <!-- 覆盖安装即升级：先装新版再卸旧版，失败时回滚 -->
-    <MajorUpgrade DowngradeErrorMessage="已经安装了更新版本的 GetCat。" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 
     <MediaTemplate EmbedCab="yes" />
 
@@ -96,7 +102,7 @@
       <Component Directory="AppShortcutFolder" Id="StartMenuShortcut" Guid="D6EF4B2C-8B0E-4B0B-9E1D-2A7F3C5A9D41">
         <Shortcut Id="GetCatShortcut"
                   Name="GetCat"
-                  Description="HTTP 调试工具"
+                  Description="Native HTTP API client"
                   Target="[INSTALLFOLDER]getcat.exe"
                   WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="RemoveAppShortcutFolder" Directory="AppShortcutFolder" On="uninstall" />
