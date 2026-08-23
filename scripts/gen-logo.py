@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 assets/logo/cat.png（去背的猫）合成成应用 logo，输出两份 PNG。
+"""把 assets/logo/cat.png（去背的猫）合成成应用 logo，输出两份 PNG 与一份 ICO。
 
   scripts/gen-logo.py
 
@@ -7,6 +7,8 @@
   crates/getcat-app/assets/logo/getcat.png       512×512，圆角块铺满画布 —— app 侧栏与 README 用
   crates/getcat-app/resources/macos/getcat-1024.png
                                                  1024×1024，圆角块缩到 824 居中 —— macOS .icns 用
+  crates/getcat-app/resources/windows/getcat.ico 多尺寸（16…256），圆角块铺满画布
+                                                 —— build.rs 嵌进 exe 资源（资源管理器 / 任务栏 / 窗口图标）
 
 只在 logo 改动时由开发者手动跑一次并提交产物；CI 不调用本脚本（runner 上不装
 Pillow，且位图合成结果固定下来才可复现）。依赖：pip install pillow numpy
@@ -17,6 +19,10 @@ squircle，圆弧角在角落有肉眼可见的曲率突变，一眼就不像系
 
 为什么 macOS 那份要缩到 824/1024（≈80.5%）：Apple 的图标网格要求圆角方块只占画布
 的这个比例、四周留透明边距，否则在 Dock 里会比其他应用的图标大一圈。
+
+为什么 Windows 的 .ico 用铺满版而不是 macOS 那份：Windows 图标没有 Apple 那套留边
+规范，带边距的图在任务栏里会明显偏小。ICO 每档尺寸都是独立位图（不是让系统缩一张
+大图），所以逐档 LANCZOS 重采样，16 px 那档才不会糊。
 """
 
 from pathlib import Path
@@ -28,6 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CAT_SRC = REPO_ROOT / "crates/getcat-app/assets/logo/cat.png"
 APP_LOGO = REPO_ROOT / "crates/getcat-app/assets/logo/getcat.png"
 MACOS_ICON = REPO_ROOT / "crates/getcat-app/resources/macos/getcat-1024.png"
+WINDOWS_ICON = REPO_ROOT / "crates/getcat-app/resources/windows/getcat.ico"
 
 SUPERSAMPLE = 4          # 圆角边缘的抗锯齿倍率
 SQUIRCLE_EXPONENT = 5.0  # 超椭圆指数，越大越方；5 最接近 macOS 图标
@@ -43,6 +50,8 @@ SHADOW_OPACITY = 0.16
 MACOS_CANVAS = 1024
 MACOS_TILE = 824
 APP_LOGO_SIZE = 512
+# Windows 图标习惯提供的档位；256 那档 Pillow 会自动用 PNG 压缩存放
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
 def squircle_mask(side: int) -> Image.Image:
@@ -113,6 +122,12 @@ def main() -> None:
     MACOS_ICON.parent.mkdir(parents=True, exist_ok=True)
     icon.save(MACOS_ICON, optimize=True)
     print(f"已写入 {MACOS_ICON.relative_to(REPO_ROOT)}（{icon.width}×{icon.height}）")
+
+    # ICO 从最大那档往下逐级重采样：Pillow 的 sizes= 会为每个尺寸单独存一张位图
+    WINDOWS_ICON.parent.mkdir(parents=True, exist_ok=True)
+    ico_source = render_tile(max(ICO_SIZES))
+    ico_source.save(WINDOWS_ICON, format="ICO", sizes=[(s, s) for s in ICO_SIZES])
+    print(f"已写入 {WINDOWS_ICON.relative_to(REPO_ROOT)}（{', '.join(map(str, ICO_SIZES))}）")
 
 
 if __name__ == "__main__":

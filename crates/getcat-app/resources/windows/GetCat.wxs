@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GetCat 的 Windows 安装包（WiX v6，per-user MSI）。
+
+  为什么是 MSI 而不是 Inno Setup / NSIS：应用内更新器（gpui-updater）按产物扩展名
+  分派安装策略，只认 .exe（原地重命名替换）与 .msi（写一个 apply.cmd，等应用退出后
+  msiexec /passive 再拉起）。Inno / NSIS 产出的 setup.exe 会被当成裸 exe，直接覆盖掉
+  正在运行的 GetCat.exe —— 那是坏掉的更新而不是安装。
+
+  为什么是 per-user：装到 %LOCALAPPDATA%\Programs\GetCat，不需要管理员权限，
+  也让更新器能以普通用户身份跑 msiexec。
+
+  UpgradeCode 是这个产品的永久身份，一旦发布就不能再改 —— 改了之后新版本会被当成
+  另一个产品，与旧版并存而不是升级。ProductCode（Package/@Id）留空由 WiX 每次生成。
+
+  构建：见 scripts/package-windows.ps1（传入 Version / PayloadDir / IconFile 三个变量）。
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="GetCat"
+           Manufacturer="finch-xu"
+           Version="$(var.Version)"
+           UpgradeCode="26F860EC-5F02-4840-B181-8AAB10D49A6E"
+           Scope="perUser"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <!-- 覆盖安装即升级：先装新版再卸旧版，失败时回滚 -->
+    <MajorUpgrade DowngradeErrorMessage="已经安装了更新版本的 GetCat。" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      手动覆盖安装时先请正在运行的实例退出，避免 Windows 弹「文件正被占用」。
+      更新器走的是另一条路（应用退出后才启动 msiexec），不依赖这里。
+    -->
+    <util:CloseApplication Id="CloseGetCat"
+                           Target="getcat.exe"
+                           CloseMessage="yes"
+                           RebootPrompt="no" />
+
+    <!-- 「应用和功能」列表里的图标与链接 -->
+    <Icon Id="GetCatIcon" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="GetCatIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/finch-xu/GetCat" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="GetCat" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppShortcutFolder" Name="GetCat" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="GetCat" Level="1">
+      <ComponentGroupRef Id="AppComponents" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AppComponents">
+      <Component Directory="INSTALLFOLDER" Id="MainExecutable">
+        <File Id="GetCatExe"
+              Name="getcat.exe"
+              Source="$(var.PayloadDir)\getcat.exe"
+              KeyPath="yes" />
+      </Component>
+
+      <Component Directory="INSTALLFOLDER" Id="LicenseFile">
+        <File Id="LicenseTxt"
+              Name="LICENSE"
+              Source="$(var.PayloadDir)\LICENSE"
+              KeyPath="yes" />
+      </Component>
+
+      <!--
+        安装来源标记：免安装版的同目录下没有这个文件。应用启动时读它来决定
+        自动更新该下载 .msi 还是裸 .exe（见 crates/getcat-app/src/state/update.rs）。
+        没有它的话，MSI 装的用户会被裸 exe 原地替换，「应用和功能」里的版本号
+        从此和实际二进制对不上。
+      -->
+      <Component Directory="INSTALLFOLDER" Id="InstallSourceMarker">
+        <File Id="InstallSourceTxt"
+              Name="install-source.txt"
+              Source="$(var.PayloadDir)\install-source.txt"
+              KeyPath="yes" />
+      </Component>
+
+      <!--
+        快捷方式组件的 KeyPath 用 HKCU 注册表值而不是文件：per-user 安装里
+        注册表项才是 Windows Installer 认可的「这个组件装没装」的凭据。
+      -->
+      <Component Directory="AppShortcutFolder" Id="StartMenuShortcut" Guid="D6EF4B2C-8B0E-4B0B-9E1D-2A7F3C5A9D41">
+        <Shortcut Id="GetCatShortcut"
+                  Name="GetCat"
+                  Description="HTTP 调试工具"
+                  Target="[INSTALLFOLDER]getcat.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveAppShortcutFolder" Directory="AppShortcutFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\GetCat"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

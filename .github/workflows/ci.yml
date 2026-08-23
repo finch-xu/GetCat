@@ -56,6 +56,40 @@ jobs:
           shellcheck -S warning scripts/*.sh scripts/ci/*.sh
           python3 -m py_compile scripts/*.py
 
+      # 同上，但 PowerShell 与 WiX 只有 Windows runner 上齐全。
+      # MSI 用占位 payload 编译：要验的是 .wxs 语法、util 扩展可用、.ico 是合法图标，
+      # 这些都与 payload 内容无关，没必要为此等一次 release 构建。
+      - name: Windows packaging
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/package-windows.ps1'), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Host $_ }; throw 'package-windows.ps1 有语法错误' }
+
+          dotnet tool install --global wix --version 6.*
+          if ($LASTEXITCODE -ne 0) { throw "wix 安装失败（exit $LASTEXITCODE）" }
+          wix extension add -g WixToolset.Util.wixext/6.0.0
+          if ($LASTEXITCODE -ne 0) { throw "wix 扩展安装失败（exit $LASTEXITCODE）" }
+
+          $payload = Join-Path $env:RUNNER_TEMP 'msi-payload'
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          foreach ($name in 'getcat.exe', 'LICENSE', 'install-source.txt') {
+            Set-Content -LiteralPath (Join-Path $payload $name) -Value 'placeholder' -NoNewline
+          }
+
+          wix build `
+            -arch x64 `
+            -ext WixToolset.Util.wixext `
+            -d Version=0.0.0 `
+            -d PayloadDir=$payload `
+            -d IconFile=(Resolve-Path 'crates/getcat-app/resources/windows/getcat.ico') `
+            -o (Join-Path $env:RUNNER_TEMP 'ci-check.msi') `
+            crates/getcat-app/resources/windows/GetCat.wxs
+          if ($LASTEXITCODE -ne 0) { throw "wix build 失败（exit $LASTEXITCODE）" }
+
       - name: Clippy
         if: runner.os == 'macOS'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

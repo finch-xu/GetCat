@@ -40,7 +40,8 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地
 |---|---|---|
 | macOS（Apple Silicon / Intel） | `GetCat-macos-arm64.dmg` / `GetCat-macos-x64.dmg` | 已签名公证，拖进「应用程序」即可 |
 | Linux x64 | `GetCat-linux-x64.tar.gz` | 解压得到 `getcat`，系统要求见下 |
-| Windows x64 | `GetCat-windows-x64.exe` | 免安装单文件，系统要求见下 |
+| Windows x64（安装版） | `GetCat-windows-x64.msi` | 装到当前用户目录，不需要管理员；开始菜单可启动 |
+| Windows x64（免安装） | `GetCat-windows-x64.exe` | 单文件，放哪都能跑，系统要求见下 |
 
 <details>
 <summary>兼容的 Linux 系统版本</summary>
@@ -94,7 +95,14 @@ vulkaninfo --summary
 
 需要 **Windows 10 1803（2018 年 4 月更新）及以上**，或 Windows 11。界面走 Direct3D 11 渲染，2010 年前后的显卡就够（feature level 10.1 起），不要求 DirectX 12。
 
-`GetCat-windows-x64.exe` 是免安装的单文件，放哪都能跑。它还没做代码签名，首次运行 SmartScreen 会拦一下：点「更多信息」→「仍要运行」。
+两个版本都能用，装哪个看习惯：
+
+- **`GetCat-windows-x64.msi`（安装版）**：装到 `%LOCALAPPDATA%\Programs\GetCat`，不需要管理员权限，开始菜单里会出现 GetCat，也能从「应用和功能」里卸载。
+- **`GetCat-windows-x64.exe`（免安装）**：单文件，放 U 盘或任意目录直接双击，不写注册表。
+
+应用内的自动更新两者都支持：装了 MSI 的会拉新的 MSI 静默升级，免安装版直接替换 exe。
+
+两个都还没做代码签名，首次运行 SmartScreen 会拦一下：免安装 exe 点「更多信息」→「仍要运行」；MSI 是安装包，拦得更明显一些，同样从「更多信息」进去放行。
 
 </details>
 
@@ -150,7 +158,8 @@ crates/
 ### 构建与调试
 
 - Rust ≥ 1.97（edition 2024）。macOS 不需要额外工具链；Linux 需要 Vulkan 与 Wayland / X11 / fontconfig 头文件（清单见 `.github/workflows/ci.yml`）；Windows 需要 MSVC 工具链，Direct3D 11 已含在 Windows SDK 里。
-- 应用 logo：`crates/getcat-app/assets/logo/cat.png` 是去背的原画，`scripts/gen-logo.py` 把它合成成 app 内嵌的 `getcat.png` 与 macOS 图标用的 `resources/macos/getcat-1024.png`；改 logo 后手动重跑脚本并提交产物（CI 不生成，需要 `pip install pillow numpy`）。
+- 应用 logo：`crates/getcat-app/assets/logo/cat.png` 是去背的原画，`scripts/gen-logo.py` 把它合成成三份产物 —— app 内嵌的 `getcat.png`、macOS 图标源 `resources/macos/getcat-1024.png`、Windows exe 图标 `resources/windows/getcat.ico`；改 logo 后手动重跑脚本并提交产物（CI 不生成，需要 `pip install pillow numpy`）。
+- Windows 的 exe 图标与版本信息由 `crates/getcat-app/build.rs` 嵌入，只在 Windows 上原生编译时生效（从 macOS 交叉编译出的 exe 没有图标）。安装包定义在 `crates/getcat-app/resources/windows/GetCat.wxs`，需要 WiX v6：`dotnet tool install --global wix --version 6.*`。
 
 ```bash
 cargo run -p getcat-app                         # 运行

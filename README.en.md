@@ -40,7 +40,8 @@ Download the package for your platform from [Releases](https://github.com/finch-
 |---|---|---|
 | macOS (Apple Silicon / Intel) | `GetCat-macos-arm64.dmg` / `GetCat-macos-x64.dmg` | Signed and notarized — drag it into Applications |
 | Linux x64 | `GetCat-linux-x64.tar.gz` | Unpacks to `getcat` — see the system requirements below |
-| Windows x64 | `GetCat-windows-x64.exe` | Portable single file — see the system requirements below |
+| Windows x64 (installer) | `GetCat-windows-x64.msi` | Installs per-user, no administrator needed; launches from the Start menu |
+| Windows x64 (portable) | `GetCat-windows-x64.exe` | Single file, runs from anywhere — see the system requirements below |
 
 <details>
 <summary>Supported Linux distributions</summary>
@@ -94,7 +95,14 @@ If that prints nothing or reports no devices, install the driver for your GPU:
 
 Requires **Windows 10 1803 (April 2018 Update) or later**, or Windows 11. The interface renders through Direct3D 11, so graphics hardware from around 2010 is enough (feature level 10.1 and up) — DirectX 12 is not required.
 
-`GetCat-windows-x64.exe` is a portable single file; put it anywhere and run it. It is not code-signed yet, so SmartScreen will stop it the first time: click **More info** → **Run anyway**.
+Either build works — pick whichever suits you:
+
+- **`GetCat-windows-x64.msi` (installer)**: installs into `%LOCALAPPDATA%\Programs\GetCat`, needs no administrator rights, adds a Start menu entry, and uninstalls from Apps & features.
+- **`GetCat-windows-x64.exe` (portable)**: a single file — keep it on a USB stick or anywhere else and double-click it; nothing is written to the registry.
+
+In-app updates work for both: an MSI install pulls the new MSI and upgrades silently, while the portable build replaces its own exe.
+
+Neither is code-signed yet, so SmartScreen will stop it the first time. For the portable exe, click **More info** → **Run anyway**; the MSI is an installer so the warning is more prominent, but it clears the same way.
 
 </details>
 
@@ -150,7 +158,8 @@ crates/
 ### Building and debugging
 
 - Rust ≥ 1.97 (edition 2024). macOS needs no extra toolchain; Linux needs Vulkan plus the Wayland / X11 / fontconfig headers (the full list is in `.github/workflows/ci.yml`); Windows needs the MSVC toolchain, and Direct3D 11 ships with the Windows SDK.
-- App logo: `crates/getcat-app/assets/logo/cat.png` is the background-free original, and `scripts/gen-logo.py` composes it into the embedded `getcat.png` and the macOS icon source `resources/macos/getcat-1024.png`. After changing the logo, rerun the script by hand and commit the output (CI does not generate it; requires `pip install pillow numpy`).
+- App logo: `crates/getcat-app/assets/logo/cat.png` is the background-free original, and `scripts/gen-logo.py` composes it into three outputs — the embedded `getcat.png`, the macOS icon source `resources/macos/getcat-1024.png`, and the Windows exe icon `resources/windows/getcat.ico`. After changing the logo, rerun the script by hand and commit the output (CI does not generate it; requires `pip install pillow numpy`).
+- The Windows exe icon and version info are embedded by `crates/getcat-app/build.rs`, and only when compiling natively on Windows (an exe cross-compiled from macOS has no icon). The installer is defined in `crates/getcat-app/resources/windows/GetCat.wxs` and needs WiX v6: `dotnet tool install --global wix --version 6.*`.
 
 ```bash
 cargo run -p getcat-app                         # run

@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+# Windows 的图标与版本资源（其它平台上是空操作）
+build = "build.rs"
 
 [[bin]]
 name = "getcat"
@@ -33,6 +35,10 @@ sys-locale.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 # 每个持久化测试一个独立临时数据目录
 tempfile.workspace = true
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+# build.rs 把生成的 .rc（图标 + VERSIONINFO）编进 exe 资源段；Zed 用的也是它
+embed-resource = "3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["x11", "wayland"] }

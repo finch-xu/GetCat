@@ -236,17 +236,29 @@ jobs:
         with:
           key: windows-x64
 
+      # WiX v4+ 是跨平台的 .NET 全局工具，不依赖 runner 预装的 WiX v3
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 6.*
+          if ($LASTEXITCODE -ne 0) { throw "wix 安装失败（exit $LASTEXITCODE）" }
+          wix extension add -g WixToolset.Util.wixext/6.0.0
+          if ($LASTEXITCODE -ne 0) { throw "wix 扩展安装失败（exit $LASTEXITCODE）" }
+
       - name: Build & package
         shell: pwsh
         run: scripts/package-windows.ps1
 
+      # 免安装 exe 与 per-user MSI 一起发：装了 MSI 的用户靠安装目录里的 install-source.txt
+      # 被识别出来，自动更新会挑 .msi 而不是裸 exe（crates/getcat-app/src/state/update.rs）
       - name: Upload to draft release
         shell: pwsh
-        run: gh release upload "$env:RELEASE_TAG" dist/GetCat-windows-x64.exe --clobber
+        run: gh release upload "$env:RELEASE_TAG" dist/GetCat-windows-x64.exe dist/GetCat-windows-x64.msi --clobber
 
   # 校验和与 minisign 签名集中在这里做：签名私钥只出现在这一个 job 里。
   # 应用内更新器用 Verification::Strict，任一平台缺 .minisig 或 SHA256SUMS 里缺它那一行，
-  # 那个平台的用户就会看到"更新失败"——所以四个资产缺一都不放行。
+  # 那个平台的用户就会看到"更新失败"——所以五个资产缺一都不放行。
+  # Windows 有两份（免安装 exe + per-user MSI），装 MSI 的用户更新时拿的是 .msi。
   sign:
     name: Checksums & signatures
     needs: [build-macos, build-linux-x64, build-windows-x64]
@@ -270,7 +282,7 @@ jobs:
           set -euo pipefail
           gh release download "$RELEASE_TAG" --dir assets --pattern 'GetCat-*'
           ls -la assets
-          for f in GetCat-macos-arm64.dmg GetCat-macos-x64.dmg GetCat-linux-x64.tar.gz GetCat-windows-x64.exe; do
+          for f in GetCat-macos-arm64.dmg GetCat-macos-x64.dmg GetCat-linux-x64.tar.gz GetCat-windows-x64.exe GetCat-windows-x64.msi; do
             [ -f "assets/$f" ] || { echo "::error::缺少资产 $f"; exit 1; }
           done
 
@@ -289,7 +301,7 @@ jobs:
           printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
 
           cd assets
-          assets=(GetCat-macos-arm64.dmg GetCat-macos-x64.dmg GetCat-linux-x64.tar.gz GetCat-windows-x64.exe)
+          assets=(GetCat-macos-arm64.dmg GetCat-macos-x64.dmg GetCat-linux-x64.tar.gz GetCat-windows-x64.exe GetCat-windows-x64.msi)
           # 两个空格分隔的 "<hex>  <name>"，与更新器的解析（按空白切分、取 basename）兼容
           sha256sum "${assets[@]}" > SHA256SUMS
           for f in "${assets[@]}" SHA256SUMS; do

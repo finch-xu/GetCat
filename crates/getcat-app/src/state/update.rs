@@ -5,10 +5,14 @@
 //!
 //! 发布产物的命名约定在 `.github/workflows/release.yml`：`GetCat-<os>-<arch>.<ext>` + `SHA256SUMS` +
 //! 每个文件的 `.minisig`。[`asset_pattern`] 按运行平台挑出对应子串，改命名时两边同步。
+//!
+//! Windows 有两份产物：免安装的 `.exe` 与 per-user 安装包 `.msi`。装了 MSI 的用户必须更新到
+//! MSI，否则裸 exe 被原地替换，而「应用和功能」里记的版本停在初装那一版，之后 MSI 的修复或
+//! 重装会把旧二进制还原回去。区分靠安装目录里的 `install-source.txt`，见 [`windows_package`]。
 
 // 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 的 `test` 属性宏
 // 与标准库 `#[test]` 冲突（见 workspace.rs 顶部说明）。
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use getcat_core::model::AppSettings;
@@ -53,17 +57,58 @@ impl Global for UpdaterHandle {}
 // 平台与安装态
 // ---------------------------------------------------------------------------
 
-/// 当前平台对应的发布资产子串（叠加在 gpui-updater 按 OS 猜的扩展名之上）；`None` = 没有为该平台发布产物。
-pub fn asset_pattern() -> Option<&'static str> {
-    asset_pattern_for(std::env::consts::OS, std::env::consts::ARCH)
+/// Windows 上这份程序是怎么装进来的；决定自动更新去拿哪一种产物。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsPackage {
+    /// 免安装单文件：更新器原地重命名替换。非 Windows 平台也报这个（它们只有一种产物）。
+    Portable,
+    /// per-user MSI：更新器下载 `.msi`，等应用退出后交给 msiexec。
+    Msi,
 }
 
-pub fn asset_pattern_for(os: &str, arch: &str) -> Option<&'static str> {
+/// MSI 装进安装目录的标记文件（内容是 `msi`）；免安装版的同目录下没有它。
+/// 写入方在 `scripts/package-windows.ps1`，打包进 MSI 的声明在 `resources/windows/GetCat.wxs`。
+const INSTALL_SOURCE_FILE: &str = "install-source.txt";
+
+/// 读当前可执行文件同目录的标记文件。拿不到 exe 路径、读不到文件、内容对不上——一律当免安装。
+/// 这个方向的猜错代价小：MSI 用户被裸 exe 替换只是版本记录滞后；反过来免安装用户会下到一个
+/// 装不进去的安装包。
+pub fn windows_package() -> WindowsPackage {
+    let Ok(exe) = std::env::current_exe() else {
+        return WindowsPackage::Portable;
+    };
+    let Some(dir) = exe.parent() else {
+        return WindowsPackage::Portable;
+    };
+    windows_package_in(dir)
+}
+
+/// [`windows_package`] 去掉「找到自己在哪」那一步后的纯函数部分，方便测试。
+fn windows_package_in(dir: &Path) -> WindowsPackage {
+    match std::fs::read_to_string(dir.join(INSTALL_SOURCE_FILE)) {
+        Ok(marker) if marker.trim().eq_ignore_ascii_case("msi") => WindowsPackage::Msi,
+        _ => WindowsPackage::Portable,
+    }
+}
+
+/// 当前平台对应的发布资产子串；`None` = 没有为该平台发布产物。
+pub fn asset_pattern() -> Option<&'static str> {
+    asset_pattern_for(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        windows_package(),
+    )
+}
+
+pub fn asset_pattern_for(os: &str, arch: &str, win: WindowsPackage) -> Option<&'static str> {
     match (os, arch) {
         ("macos", "aarch64") => Some("macos-arm64.dmg"),
         ("macos", "x86_64") => Some("macos-x64.dmg"),
         ("linux", "x86_64") => Some("linux-x64.tar.gz"),
-        ("windows", "x86_64") => Some("windows-x64.exe"),
+        ("windows", "x86_64") => Some(match win {
+            WindowsPackage::Portable => "windows-x64.exe",
+            WindowsPackage::Msi => "windows-x64.msi",
+        }),
         _ => None,
     }
 }
@@ -127,7 +172,11 @@ pub fn install(cx: &mut App) {
         return;
     };
     let source = GitHubSource::new(REPO_OWNER, REPO_NAME)
-        .asset_contains(pattern)
+        // 必须是 asset_patterns（整体替换）而不是 asset_contains（追加）：GitHubSource::new
+        // 预置了一个按 OS 猜的扩展名，Windows 上是 ".exe"。追加的话 MSI 用户的匹配条件会变成
+        // 「同时含 .exe 和 windows-x64.msi」，永远匹配不上，客户端只会显示「已是最新版」。
+        // 我们的 pattern 本来就自带扩展名，不需要那个预置项。
+        .asset_patterns(vec![pattern.to_string()])
         .with_checksums("SHA256SUMS")
         .with_minisig()
         // 演练用：含 "-" 的 tag 发成 prerelease，正式用户看不到；开发者设这个变量才会收到
@@ -297,21 +346,27 @@ mod tests {
 
     #[test]
     fn asset_pattern_matches_release_naming() {
+        use WindowsPackage::Portable;
+
         assert_eq!(
-            asset_pattern_for("macos", "aarch64"),
+            asset_pattern_for("macos", "aarch64", Portable),
             Some("macos-arm64.dmg")
         );
-        assert_eq!(asset_pattern_for("macos", "x86_64"), Some("macos-x64.dmg"));
         assert_eq!(
-            asset_pattern_for("linux", "x86_64"),
+            asset_pattern_for("macos", "x86_64", Portable),
+            Some("macos-x64.dmg")
+        );
+        assert_eq!(
+            asset_pattern_for("linux", "x86_64", Portable),
             Some("linux-x64.tar.gz")
         );
+        assert_eq!(asset_pattern_for("linux", "aarch64", Portable), None);
+        assert_eq!(asset_pattern_for("freebsd", "x86_64", Portable), None);
+        // 非 Windows 平台只有一种产物，安装方式不影响选择
         assert_eq!(
-            asset_pattern_for("windows", "x86_64"),
-            Some("windows-x64.exe")
+            asset_pattern_for("macos", "aarch64", WindowsPackage::Msi),
+            Some("macos-arm64.dmg")
         );
-        assert_eq!(asset_pattern_for("linux", "aarch64"), None);
-        assert_eq!(asset_pattern_for("freebsd", "x86_64"), None);
         // 当前构建平台必须有产物（CI 三平台都是 x86_64 / aarch64）
         if cfg!(any(
             all(
@@ -322,6 +377,51 @@ mod tests {
             all(target_os = "windows", target_arch = "x86_64"),
         )) {
             assert!(asset_pattern().is_some());
+        }
+    }
+
+    /// Windows 的两份产物各走各的：免安装拿 .exe，MSI 拿 .msi。
+    /// 名字必须和 release.yml 的上传步骤、sign job 的资产白名单一致。
+    #[test]
+    fn windows_picks_the_asset_matching_how_it_was_installed() {
+        assert_eq!(
+            asset_pattern_for("windows", "x86_64", WindowsPackage::Portable),
+            Some("windows-x64.exe")
+        );
+        assert_eq!(
+            asset_pattern_for("windows", "x86_64", WindowsPackage::Msi),
+            Some("windows-x64.msi")
+        );
+    }
+
+    /// 标记文件的判定：只有内容确实是 `msi` 才算 MSI 安装，其余一律退回免安装。
+    /// 猜成 Portable 的代价只是版本记录滞后；反过来会让免安装用户下到装不进去的包。
+    #[test]
+    fn install_source_marker_decides_the_windows_package() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let marker = dir.path().join(INSTALL_SOURCE_FILE);
+
+        // 没有标记文件 = 免安装
+        assert_eq!(windows_package_in(dir.path()), WindowsPackage::Portable);
+
+        // 打包脚本写的是带换行的 "msi\n"；大小写也不该影响判定
+        for content in ["msi", "msi\n", "msi\r\n", "  MSI  "] {
+            std::fs::write(&marker, content).expect("写标记文件");
+            assert_eq!(
+                windows_package_in(dir.path()),
+                WindowsPackage::Msi,
+                "内容 {content:?} 应判定为 MSI"
+            );
+        }
+
+        // 内容对不上就不认——宁可退回免安装，也不要拿一个装不进去的包
+        for content in ["", "exe", "portable", "msix"] {
+            std::fs::write(&marker, content).expect("写标记文件");
+            assert_eq!(
+                windows_package_in(dir.path()),
+                WindowsPackage::Portable,
+                "内容 {content:?} 不该判定为 MSI"
+            );
         }
     }
 
