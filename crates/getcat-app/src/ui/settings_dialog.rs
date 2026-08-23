@@ -286,7 +286,7 @@ fn request_page() -> SettingPage {
                         |cx| settings::settings(cx).request.verify_tls,
                         |value, cx| settings::update(cx, |s| s.request.verify_tls = value),
                     )
-                    .default_value(true),
+                    .default_value(false),
                 )
                 .description(tr!("settings.verify_tls_desc")),
             ),

@@ -8,10 +8,22 @@ use getcat_core::body::tier::{EDITOR_MAX_BYTES, EDITOR_MAX_LINES, ViewTier, mib_
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{MAX_BODY_BYTES, RequestError};
 use getcat_core::model::{LanguagePref, ThemePref};
+use getcat_core::tls::CertWarning;
 use gpui::SharedString;
 
 use crate::i18n::tr;
 use crate::state::response::PREPARE_PANIC_PREFIX;
+
+/// 证书问题的短标签。这些是「哪里不对」的分类，按规则要翻译；
+/// 证书里的主体、颁发者等原文字段则原样展示。
+pub fn cert_warning_label(warning: CertWarning) -> SharedString {
+    match warning {
+        CertWarning::Expired => tr!("cert.warning.expired"),
+        CertWarning::NotYetValid => tr!("cert.warning.not_yet_valid"),
+        CertWarning::HostnameMismatch => tr!("cert.warning.hostname_mismatch"),
+        CertWarning::SelfSigned => tr!("cert.warning.self_signed"),
+    }
+}
 
 /// 错误种类的短标签（状态行、失败页标题）。
 pub fn error_kind(error: &RequestError) -> SharedString {

@@ -18,10 +18,12 @@ use getcat_core::body::spill::SpillFile;
 use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    AppSettings, BodyKind, FormField, FormValue, KeyValue, Method, RawFormat, RequestDraft,
-    ResponseMeta, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState,
+    AppSettings, BodyKind, FormField, FormValue, HttpVersionPref, KeyValue, Method, RawFormat,
+    RequestDraft, ResponseMeta, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid,
+    WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
+use getcat_core::tls::{CertWarning, CertificateInfo};
 use gpui::{
     AppContext, Entity, Focusable, IntoElement, TestAppContext, VisualTestContext, point, px, size,
 };
@@ -347,6 +349,8 @@ fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
         duration: Duration::from_millis(1),
         body_len: text.len() as u64,
         content_type: Some("text/plain".into()),
+        http_version: None,
+        certificate: None,
     };
     let view = ResponseView::prepare(meta, &body);
     cx.update(|window, cx| {
@@ -434,6 +438,23 @@ pub(crate) fn meta(content_type: &str, body_len: u64) -> ResponseMeta {
         duration: Duration::from_millis(3),
         body_len,
         content_type: Some(content_type.into()),
+        http_version: None,
+        certificate: None,
+    }
+}
+
+/// 一张自签名测试证书的解析结果；`warnings` 由调用方决定要试哪条分支。
+pub(crate) fn cert_info(warnings: Vec<CertWarning>) -> CertificateInfo {
+    CertificateInfo {
+        subject: "CN=localhost, O=GetCat Local Debug".into(),
+        issuer: "CN=localhost, O=GetCat Local Debug".into(),
+        not_before: "Jan  1 00:00:00 2020 +00:00".into(),
+        not_after: "Jan  1 00:00:00 2100 +00:00".into(),
+        san: vec!["localhost".into(), "*.example.com".into()],
+        serial: "4A:2B:1C".into(),
+        signature_algorithm: "ecdsa-with-SHA256".into(),
+        sha256_fingerprint: "69:0A:78:ED".into(),
+        warnings,
     }
 }
 
@@ -1528,6 +1549,68 @@ fn open_template_prefills_a_new_tab(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn duplicate_active_copies_content_next_to_the_source(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+
+    // 攒出 [空, 模板, 空] 三个 Tab：复制中间那个，插入位置才看得出来
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_template("openai-chat-vision", window, cx);
+            ws.new_tab(window, cx);
+            ws.activate(1, cx);
+        })
+    });
+
+    // 给源挂上 saved_id，才测得出副本没有继承它
+    let source = cx.read(|app| ws.read(app).tab_at(1));
+    let saved_id = Ulid::generate();
+    cx.update(|_, cx| {
+        source.update(cx, |t, _| {
+            t.saved_id = Some(saved_id);
+            t.dirty = false;
+        })
+    });
+    let (source_draft, source_id) = cx.read(|app| {
+        let t = source.read(app);
+        (t.draft(app), t.id)
+    });
+
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.duplicate_active(window, cx)));
+
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 4);
+        // 副本紧跟在源右边，而不是被追加到末尾
+        assert_eq!(ws.active_index(), 2);
+        let copy = ws.tab_at(2);
+        let copy = copy.read(app);
+        assert_eq!(copy.draft(app), source_draft, "填过的内容要原样带过来");
+        // 副本是全新的未保存请求：继承 saved_id 的话两个 Tab 会互相覆盖对方的保存
+        assert!(copy.saved_id.is_none());
+        assert!(copy.dirty);
+        assert_ne!(copy.id, source_id, "草稿文件名必须是新的，不能共用");
+        // 源本身不受影响
+        let src = ws.tab_at(1);
+        let src = src.read(app);
+        assert_eq!(src.saved_id, Some(saved_id));
+        assert!(!src.dirty);
+    });
+}
+
+#[gpui::test]
+fn duplicate_active_on_the_last_tab_appends(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    // 只有一个 Tab 时「插到源右边」就是末尾，不该把下标算错
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.duplicate_active(window, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!((ws.tab_count(), ws.active_index()), (2, 1));
+    });
+}
+
+#[gpui::test]
 fn template_panel_switches_and_draws(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1687,6 +1770,56 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
             .last_item_size
             .expect("saved list was laid out");
         assert_eq!(laid_out.contents.height, px(SAVED_ROW_HEIGHT * 2.));
+    });
+}
+
+#[gpui::test]
+fn clear_response_resets_everything_including_the_editor(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    install_done(&tab, BodyStore::in_memory(&br#"{"a":1}"#[..]), cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Headers;
+            t.notice = Some(Notice::NoResponse);
+            let before = t.generation;
+            assert!(
+                !t.response_editor_for("json")
+                    .read(cx)
+                    .text()
+                    .to_string()
+                    .is_empty()
+            );
+
+            t.clear_response(window, cx);
+
+            assert!(matches!(t.response, ResponseState::Idle));
+            // 编辑器是常驻实体、不随 response 一起 drop，留着旧文本会在 ⌘F 里冒出来
+            assert_eq!(
+                t.response_editor_for("json").read(cx).text().to_string(),
+                ""
+            );
+            assert_eq!(t.response_section, ResponseSection::Body);
+            assert!(t.notice.is_none());
+            // generation 必须往前走，否则在途请求的回调还能把旧响应写回来
+            assert_eq!(t.generation, before + 1);
+        })
+    });
+    cx.run_until_parked();
+}
+
+/// 已经是空态时再点一次不该白白递增 generation——那会让一个正常在途的请求
+/// 悄悄失效（此路径下 response 是 Idle，但重发刚起步时也短暂如此）。
+#[gpui::test]
+fn clear_response_on_idle_is_a_no_op(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let before = t.generation;
+            t.clear_response(window, cx);
+            assert_eq!(t.generation, before);
+        })
     });
 }
 
@@ -1882,6 +2015,117 @@ fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
     let _locale = crate::i18n::locale_test_lock();
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
     cx.read(|app| assert_eq!(ws.read(app).title_bar_subtitle(app).as_ref(), "New request"));
+}
+
+/// 标签栏上每个标签都带 method 角标；多开几个把它画出来，确认 prefix 与
+/// dirty 圆点合并后仍能布局（prefix 只能设一次，合并写错会丢圆点或 panic）。
+#[gpui::test]
+fn tab_bar_with_method_badges_draws(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            // 六个标签：够触发溢出滚动与箭头按钮
+            for _ in 0..5 {
+                ws.new_tab(window, cx);
+            }
+            assert_eq!(ws.tab_count(), 6);
+        })
+    });
+    // 其中一个标记为有改动：圆点要和角标并排，而不是互相覆盖
+    let dirty_tab = cx.read(|app| ws.read(app).tab_at(2));
+    cx.update(|_, cx| dirty_tab.update(cx, |t, cx| t.mark_dirty(cx)));
+
+    cx.update(|window, _| window.blur());
+    let element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+}
+
+/// URL 栏：发送按钮在前、保存拆成「保存 + ∨」两半，输入框里还嵌了版本选择器。
+/// 这些都是新加的元素，先确认整行能画出来。
+#[gpui::test]
+fn url_bar_with_split_save_and_version_picker_draws(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    change_url(&tab, "https://api.test/users/1", cx);
+    // 非默认版本：标签从「自动」换成协议名，宽度也跟着变
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.http_version = HttpVersionPref::Http2;
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, _| window.blur());
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+}
+
+/// 证书页签只在拿到证书时出现，且体检有结论时上方挂横幅。
+#[gpui::test]
+fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
+    // 纯函数部分：http 请求不该多出一页
+    assert_eq!(
+        ResponseSection::visible(false),
+        vec![ResponseSection::Body, ResponseSection::Headers]
+    );
+    assert_eq!(
+        ResponseSection::visible(true),
+        vec![
+            ResponseSection::Body,
+            ResponseSection::Headers,
+            ResponseSection::Certificate
+        ]
+    );
+
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let body = BodyStore::in_memory(&b"{}"[..]);
+    let mut m = meta("application/json", body.len());
+    m.http_version = Some("HTTP/2".into());
+    m.certificate = Some(Box::new(cert_info(vec![CertWarning::SelfSigned])));
+    let view = ResponseView::prepare(m, &body);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.generation += 1;
+            let g = t.generation;
+            t.apply_outcome(g, Ok((body, view)), window, cx);
+            // 切到证书页：横幅 + 字段表都要能画
+            t.response_section = ResponseSection::Certificate;
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, _| window.blur());
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+}
+
+/// 上一条响应有证书、下一条没有：页签消失后停在 Certificate 上不能画白板。
+#[gpui::test]
+fn certificate_section_falls_back_to_body_without_a_certificate(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let body = BodyStore::in_memory(&b"{\"a\":1}"[..]);
+    install_done(&tab, body, cx); // meta() 里 certificate 为 None
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Certificate;
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, _| window.blur());
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
 }
 
 fn temp_form_file(name: &str, bytes: &[u8]) -> PathBuf {

@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use getcat_core::model::{
-    SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms,
+    Method, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms,
 };
 use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
@@ -37,16 +37,18 @@ use crate::state::request_tab::RequestTab;
 use crate::state::store::{banner, store};
 use crate::state::update;
 use crate::templates;
+use crate::ui::method_color;
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
 use crate::{
-    CloseTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest, ToggleSidebar,
+    CloseTab, DuplicateTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest,
+    ToggleSidebar,
 };
 
 /// 侧栏默认宽度（spec §7.1）。
-pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.;
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 280.;
 
-/// 标签栏箭头一次滚动的距离，约一个标签宽（标题上限 180 px）。
-const TAB_SCROLL_STEP: f32 = 160.;
+/// 标签栏箭头一次滚动的距离，约一个标签宽（标签上限 200 px）。
+const TAB_SCROLL_STEP: f32 = 180.;
 
 /// 图标栏上的功能；展开的面板显示其中一个的内容。
 /// 判别值即图标栏上的下标（rail 的 Button id 用的是 `section as usize`），
@@ -262,6 +264,51 @@ impl Workspace {
         self.active = self.tabs.len() - 1;
         self.reveal_active_tab();
         self.persist_workspace(cx);
+        cx.notify();
+    }
+
+    /// 复制当前 Tab：把已填内容原样开一份新的，插在源 Tab 右侧。
+    ///
+    /// 走 `draft()` 快照而不是 clone —— `RequestTab` 持有 `InputState` / `KvTable`
+    /// 等实体，clone 只会让两个 Tab 共享同一份状态、跟着一起改。
+    ///
+    /// 副本永远是「未保存 + 有改动」：不继承 `saved_id`，否则两个 Tab 指向同一条
+    /// 已保存请求，谁先按保存谁覆盖对方。
+    ///
+    /// 快照口径与「保存」一致：`draft()` 只取当前 Body 模式对应的内容，
+    /// 停在 none 时 raw 编辑器里的草稿文字不会被带过去。
+    pub fn duplicate_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let source_ix = self.active;
+        let (draft, raw_format) = {
+            let t = self.active_tab().read(cx);
+            (t.draft(cx), t.raw_format)
+        };
+
+        // 复用 new_tab 的整套流程（建实体、带上 split、立即落草稿），它固定追加到末尾
+        self.new_tab(window, cx);
+        let tab = self.active_tab().clone();
+        tab.update(cx, |t, cx| {
+            t.load_draft(&draft, window, cx);
+            // load_draft 只在 body 是 raw 时才设格式；停在别的模式时同步一下，
+            // 用户切回 raw 才会看到和源 Tab 一样的格式
+            t.raw_format = raw_format;
+            t.saved_id = None;
+            // load_draft 走的是不发事件的程序化写入，不会置脏，这里手动标记
+            t.mark_dirty(cx);
+            t.save_draft_now(cx);
+            cx.notify();
+        });
+
+        // new_tab 把副本追加在了末尾，挪到源 Tab 右边才符合「复制」的直觉
+        let from = self.tabs.len() - 1;
+        let to = source_ix + 1;
+        if to < from {
+            let tab = self.tabs.remove(from);
+            self.tabs.insert(to, tab);
+            self.active = to;
+            self.reveal_active_tab();
+            self.persist_workspace(cx);
+        }
         cx.notify();
     }
 
@@ -722,12 +769,12 @@ impl Workspace {
     }
 
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let titles: Vec<(SharedString, bool)> = self
+        let titles: Vec<(Method, SharedString, bool)> = self
             .tabs
             .iter()
             .map(|t| {
                 let t = t.read(cx);
-                (t.title(cx), t.dirty)
+                (t.current_method(cx), t.title(cx), t.dirty)
             })
             .collect();
         // max_offset / bounds 只在 prepaint 阶段写入：首帧、以及标签装得下时都是 0。
@@ -740,8 +787,10 @@ impl Workspace {
             .w_full()
             .pl_1()
             // 标题是 URL 路径，长起来能顶到 /v1/chat/completions；封顶后 label 自己
-            // 省略号截断，prefix 的圆点与 suffix 的关闭按钮保持原尺寸
-            .max_width(px(180.))
+            // 省略号截断，prefix 的角标与 suffix 的关闭按钮保持原尺寸。
+            // 上限比 spec 的 180 宽 20 px：prefix 多了 40 px 的 method 角标，
+            // 不放宽的话 label 只剩不到半个词的位置。
+            .max_width(px(200.))
             .track_scroll(&self.tab_scroll)
             // 官方内置的溢出菜单：∨ 展开全部标签、当前项打勾，点一下直接跳。
             // 它只切换选中不负责滚动，滚动由 activate 里的 reveal_active_tab 兜住。
@@ -786,37 +835,62 @@ impl Workspace {
             )
             .selected_index(self.active)
             .on_click(cx.listener(|this, ix: &usize, _, cx| this.activate(*ix, cx)))
-            .children(titles.into_iter().enumerate().map(|(ix, (title, dirty))| {
-                let aria = if dirty {
-                    tr!("tab.aria_dirty", title = title)
-                } else {
-                    tr!("tab.aria", title = title)
-                };
-                let mut tab = Tab::new().label(title).aria_label(aria);
-                if dirty {
-                    // 未保存改动：标题前的圆点（spec §7.1）。
-                    // Tab 根节点没有水平 padding，圆点会贴死左边缘；只给带圆点的标签补，
-                    // 没圆点的标签靠 label 自己的 inner_paddings 就够了。
-                    tab = tab.pl_2().prefix(
-                        div()
-                            .size_1p5()
-                            .rounded_full_style(cx)
-                            .bg(cx.theme().primary),
-                    );
-                }
-                tab.suffix(
-                    Button::new(("close-tab", ix))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Close)
-                        .tooltip(tr!("tab.close"))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            // 阻止冒泡到 Tab 的 on_click，否则关闭后会再触发 activate(ix)
-                            cx.stop_propagation();
-                            this.close_tab(ix, window, cx)
-                        })),
-                )
-            }))
+            .children(
+                titles
+                    .into_iter()
+                    .enumerate()
+                    .map(|(ix, (method, title, dirty))| {
+                        let aria = if dirty {
+                            tr!("tab.aria_dirty", title = title)
+                        } else {
+                            tr!("tab.aria", title = title)
+                        };
+                        // 角标走 prefix 而不是拼进 label：max_width 下 prefix 被包了
+                        // flex_shrink_0，只有 label 会被省略号截断；而且溢出菜单与 aria
+                        // 用的都是 label 文本，method 不该混进去。
+                        // prefix 只能设一次，未保存的圆点必须并进同一个元素。
+                        // Tab 根节点没有水平 padding，不补 pl 角标会贴死左边缘。
+                        Tab::new()
+                            .label(title)
+                            .aria_label(aria)
+                            .pl_2()
+                            .prefix(
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .w_10()
+                                            .flex_none()
+                                            .text_xs()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(method_color(method, cx))
+                                            .child(method.short()),
+                                    )
+                                    .when(dirty, |h| {
+                                        // 未保存改动：标题前的圆点（spec §7.1）
+                                        h.child(
+                                            div()
+                                                .size_1p5()
+                                                .rounded_full_style(cx)
+                                                .bg(cx.theme().primary),
+                                        )
+                                    }),
+                            )
+                            .suffix(
+                                Button::new(("close-tab", ix))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Close)
+                                    .tooltip(tr!("tab.close"))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        // 阻止冒泡到 Tab 的 on_click，否则关闭后会再触发 activate(ix)
+                                        cx.stop_propagation();
+                                        this.close_tab(ix, window, cx)
+                                    })),
+                            )
+                    }),
+            )
     }
 }
 
@@ -969,6 +1043,9 @@ impl Render for Workspace {
             }))
             .on_action(
                 cx.listener(|this, _: &SaveRequest, window, cx| this.save_active(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &DuplicateTab, window, cx| this.duplicate_active(window, cx)),
             )
             .on_action(cx.listener(|this, _: &FindInResponse, window, cx| {
                 this.active_tab()

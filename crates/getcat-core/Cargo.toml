@@ -20,6 +20,8 @@ tracing.workspace = true
 directories.workspace = true
 tempfile.workspace = true
 ulid.workspace = true
+x509-parser.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true

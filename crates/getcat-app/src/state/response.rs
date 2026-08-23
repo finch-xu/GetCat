@@ -276,6 +276,8 @@ mod tests {
             duration: Duration::from_millis(1),
             body_len: len,
             content_type: ct.map(str::to_string),
+            http_version: None,
+            certificate: None,
         }
     }
 

@@ -9,7 +9,8 @@ use getcat_core::body::tier::{ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
 use getcat_core::model::{
-    BodyKind, Method, RawFormat, RequestDraft, SplitDirection, TabDraft, TabId, Ulid,
+    BodyKind, HttpVersionPref, Method, RawFormat, RequestDraft, SplitDirection, TabDraft, TabId,
+    Ulid,
 };
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
@@ -59,6 +60,19 @@ impl RequestSection {
 pub enum ResponseSection {
     Body,
     Headers,
+    Certificate,
+}
+
+impl ResponseSection {
+    /// 当前能看到的页签。证书页签只在真拿到了对端证书时出现——http 请求、
+    /// 以及打开校验后握手失败的 https 请求都没有证书可看。
+    pub fn visible(has_certificate: bool) -> Vec<ResponseSection> {
+        let mut sections = vec![ResponseSection::Body, ResponseSection::Headers];
+        if has_certificate {
+            sections.push(ResponseSection::Certificate);
+        }
+        sections
+    }
 }
 
 /// Body 模式；`ALL` 的顺序就是模式条顺序（Postman 顺序）。
@@ -188,6 +202,9 @@ pub struct RequestTab {
     pub form_data: Entity<KvTable>,
     pub body_mode: BodyMode,
     pub raw_format: RawFormat,
+    /// 这次请求走哪个 HTTP 版本。刻意不进 `draft()`：它是调试时临时切换的开关，
+    /// 不属于「这条请求是什么」，跟着已保存请求落盘只会让人困惑。
+    pub http_version: HttpVersionPref,
     /// binary Body：所选文件路径与大小（大小只用于显示）。
     pub file_path: Option<PathBuf>,
     pub file_size: Option<u64>,
@@ -308,6 +325,7 @@ impl RequestTab {
             form_data,
             body_mode: BodyMode::None,
             raw_format: RawFormat::Json,
+            http_version: HttpVersionPref::default(),
             file_path: None,
             file_size: None,
             body_hint: None,
@@ -686,7 +704,7 @@ impl RequestTab {
         let generation = self.generation;
 
         let (tx, mut rx) = mpsc::channel::<http::Progress>(64);
-        let request_task = bridge::send(cx, req, tx);
+        let request_task = bridge::send(cx, req, self.http_version, tx);
 
         // 进度任务：把 tokio 侧的进度事件写回 Entity（已节流到 ≤ 30 Hz）。
         let progress_task = cx.spawn_in(window, async move |this, cx| {
@@ -815,6 +833,32 @@ impl RequestTab {
         self.response = ResponseState::Failed {
             error: RequestError::Cancelled,
         };
+        cx.notify();
+    }
+
+    /// 清空响应：整块回到「未发送」，不只是抹掉正文。
+    ///
+    /// 目的是**释放**——大响应的 `BodyStore` 可能是 `Spilled`，换掉 `response` 才会 drop
+    /// 掉 `SpillFile`、把临时文件删干净。也正因如此这一步不可逆，但响应重发即可拿回，
+    /// 所以不弹确认框。
+    pub fn clear_response(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.response, ResponseState::Idle) {
+            return;
+        }
+        // 必须先自增：在途的进度 / 完成回调靠 generation 判断自己是否过期（见 apply_outcome），
+        // 先把号改掉，换 response 时被 drop 的任务就再也写不回来了
+        self.generation += 1;
+        self.response = ResponseState::Idle;
+        // 编辑器是常驻实体，不随 response 一起 drop。留着上一条响应的文本，
+        // 下一条非 A 档响应到来时 apply_outcome 不会覆写它，残留内容会在 ⌘F 里冒出来
+        for (_, editor) in &self.response_editors {
+            editor.update(cx, |e, cx| e.set_value("", window, cx));
+        }
+        self.notice = None;
+        // 「证书」页签在 Idle 下不再出现，停在那一页会落到空态分支
+        self.response_section = ResponseSection::Body;
+        self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.headers_scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
 

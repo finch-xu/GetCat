@@ -2,35 +2,36 @@
 use std::path::PathBuf;
 
 use getcat_core::http::{
-    self, BodyStore, Client, HttpRequest, HttpResponse, Progress, RequestError,
+    self, BodyStore, HttpClients, HttpRequest, HttpResponse, Progress, RequestError,
 };
-use getcat_core::model::RequestSettings;
+use getcat_core::model::{HttpVersionPref, RequestSettings};
 use getcat_core::store::{copy_atomic_user, write_atomic_user};
 use gpui::{App, Global, Task};
 use gpui_tokio::Tokio;
 use tokio::sync::mpsc;
 
-/// 全局共享的 reqwest Client；发送流程从这里取用。
-pub struct HttpClient(pub Client);
+/// 全局共享的 reqwest Client 组；发送流程按 Tab 选的 HTTP 版本从这里取用。
+pub struct HttpClient(pub HttpClients);
 impl Global for HttpClient {}
 
 pub fn init(cx: &mut App) {
     gpui_tokio::init(cx);
-    cx.set_global(HttpClient(http::build_client()));
+    cx.set_global(HttpClient(http::build_clients()));
 }
 
 /// 按请求设置重建全局 client（设置改动后调用）。正在进行的请求继续用旧 client 直到结束。
 pub fn rebuild_client(cx: &mut App, settings: &RequestSettings) {
-    cx.set_global(HttpClient(http::build_client_with(settings)));
+    cx.set_global(HttpClient(http::build_clients_with(settings)));
 }
 
 /// 在 tokio runtime 上执行请求；返回的 gpui Task 被 drop 时底层 tokio 任务自动 abort。
 pub fn send(
     cx: &App,
     req: HttpRequest,
+    version: HttpVersionPref,
     progress: mpsc::Sender<Progress>,
 ) -> Task<anyhow::Result<Result<HttpResponse, RequestError>>> {
-    let client = cx.global::<HttpClient>().0.clone();
+    let client = cx.global::<HttpClient>().0.get(version).clone();
     Tokio::spawn_result(cx, async move {
         Ok(http::execute(&client, req, Some(progress)).await)
     })

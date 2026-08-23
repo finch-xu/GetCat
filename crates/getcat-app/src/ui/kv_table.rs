@@ -105,7 +105,8 @@ pub const DEFAULT_COLUMN_FRACTIONS: [f32; COLUMNS] = [0.30, 0.42, 0.28];
 pub const MIN_COLUMN_FRACTION: f32 = 0.12;
 /// 表格密度：与 gpui-component `Table` 的 small 档对齐（行高 30 px），
 /// 行高与单元格内边距都从这个 `Size` 取，不再各写各的像素值。
-const TABLE_SIZE: Size = Size::Small;
+/// 公开出去是为了让「默认参数（Header）」那块只读表与本表行高一致。
+pub const TABLE_SIZE: Size = Size::Small;
 
 /// 拖动表头分隔线时携带的数据：正在拖第几条分隔线（在列 `ix` 与 `ix + 1` 之间）。
 /// gpui 的 `on_drag` 要求拖拽值同时是一个可渲染的"拖拽预览"，这里什么都不画。

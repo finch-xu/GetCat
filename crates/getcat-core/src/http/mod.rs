@@ -10,7 +10,7 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderName, HeaderValue};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use url::Url;
@@ -18,12 +18,43 @@ use url::Url;
 pub use error::RequestError;
 
 use crate::body::spill::{HEAD_BYTES, SpillFile};
-use crate::model::{BodyKind, FormValue, Method, RequestDraft, RequestSettings, ResponseMeta};
+use crate::model::{
+    BodyKind, FormValue, HttpVersionPref, Method, RequestDraft, RequestSettings, ResponseMeta,
+};
+use crate::tls;
 use crate::url::build_url;
 
 pub type Client = reqwest::Client;
 
 pub const USER_AGENT_VALUE: &str = concat!("GetCat/", env!("CARGO_PKG_VERSION"));
+
+/// 每次请求自动带上的默认请求头，作为 reqwest 的 client 级 default headers 下发。
+/// 值固定不可编辑，用户只能整条开关（见 [`RequestSettings::disabled_default_headers`]）。
+/// 数组顺序即界面上的展示顺序。
+///
+/// 合并语义由 reqwest 负责：发请求时以 vacant-entry 方式合入，所以请求自己填的
+/// 同名 header 天然优先，这里不需要任何合并代码。
+///
+/// 几条值得记下的取舍：
+/// - `Accept-Encoding` 的取值必须与本 crate 开启的解压 feature 一致（gzip / brotli /
+///   zstd，**没有** deflate）。多报一个 deflate，服务端真回 `Content-Encoding: deflate`
+///   时解压中间件会走 identity 分支，响应体直接变成一堆压缩字节。
+/// - `Connection` 对 HTTP/1.1 而言是协议默认、对 HTTP/2 会被 hyper 静默剔除，
+///   两边都不产生实际效果；留着只是为了让这份「默认发了什么」的清单是完整的。
+pub const DEFAULT_HEADERS: &[(&str, &str)] = &[
+    ("Accept", "*/*"),
+    ("Accept-Encoding", "gzip, br, zstd"),
+    ("User-Agent", USER_AGENT_VALUE),
+    ("Connection", "keep-alive"),
+];
+
+/// `DEFAULT_HEADERS` 里那条 `Accept-Encoding` 的 key，`build_client_tuned` 要单独认它。
+const ACCEPT_ENCODING_KEY: &str = "accept-encoding";
+
+/// 某条默认头是否启用。`disabled` 存的是小写 key。
+pub fn default_header_enabled(disabled: &[String], key: &str) -> bool {
+    !disabled.iter().any(|d| d.eq_ignore_ascii_case(key))
+}
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(33);
 /// 响应体驻留内存的阈值；超过即落盘为 `BodyStore::Spilled`，没有总上限。
@@ -236,20 +267,98 @@ pub fn build_client() -> Client {
 /// 按设置构建 reqwest client。设置改动后整个 client 要重建：超时、跳转策略与 TLS 校验
 /// 都是 builder 级别的选项。`timeout_secs == 0` 表示不设总超时（连接超时仍然固定 10 s）。
 pub fn build_client_with(settings: &RequestSettings) -> Client {
+    build_client_tuned(settings, |b| b)
+}
+
+/// `build_client_with` 的可加料版本：`tune` 负责按 HTTP 版本偏好动 ALPN。
+fn build_client_tuned(
+    settings: &RequestSettings,
+    tune: impl FnOnce(reqwest::ClientBuilder) -> reqwest::ClientBuilder,
+) -> Client {
     let redirect = if settings.follow_redirects {
         reqwest::redirect::Policy::limited(settings.max_redirects as usize)
     } else {
         reqwest::redirect::Policy::none()
     };
+    let disabled = &settings.disabled_default_headers;
+    let mut defaults = HeaderMap::new();
+    for (key, value) in DEFAULT_HEADERS {
+        if !default_header_enabled(disabled, key) {
+            continue;
+        }
+        // 常量表里的键值都是合法的，解析不出来只可能是改常量时写错了
+        let name = HeaderName::from_bytes(key.as_bytes()).expect("default header name");
+        let value = HeaderValue::from_static(value);
+        defaults.insert(name, value);
+    }
+    // 关掉 Accept-Encoding 光是「不发这个头」没有用：解压中间件会在请求缺该头时
+    // 自动补上。要真的拿到原始压缩字节，得连自动解压一起关。
+    let decompress = default_header_enabled(disabled, ACCEPT_ENCODING_KEY);
+
     let mut builder = Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .user_agent(USER_AGENT_VALUE)
+        .default_headers(defaults)
+        .gzip(decompress)
+        .brotli(decompress)
+        .zstd(decompress)
         .redirect(redirect)
-        .danger_accept_invalid_certs(!settings.verify_tls);
+        .danger_accept_invalid_certs(!settings.verify_tls)
+        // 把对端证书塞进响应的 extensions；不开的话 TlsInfo 根本不会被记录，
+        // 「证书」页签也就无从谈起
+        .tls_info(true);
     if settings.timeout_secs > 0 {
         builder = builder.timeout(Duration::from_secs(settings.timeout_secs));
     }
-    builder.build().expect("reqwest client")
+    tune(builder).build().expect("reqwest client")
+}
+
+/// 三个 HTTP 版本偏好各一个 client。
+///
+/// 走多 client 而不是 per-request 参数，是因为版本由 ALPN 协商决定，只能在
+/// builder 级定死；`RequestBuilder::version()` 只是断言，协商不上就直接报错。
+/// `Client` 内部是 Arc、连接池按需建立，闲着的那两个几乎不占资源。
+#[derive(Clone)]
+pub struct HttpClients {
+    auto: Client,
+    http1: Client,
+    http2: Client,
+}
+
+impl HttpClients {
+    pub fn get(&self, pref: HttpVersionPref) -> &Client {
+        match pref {
+            HttpVersionPref::Auto => &self.auto,
+            HttpVersionPref::Http1 => &self.http1,
+            HttpVersionPref::Http2 => &self.http2,
+        }
+    }
+}
+
+/// 默认设置的一组 client（启动兜底）。
+pub fn build_clients() -> HttpClients {
+    build_clients_with(&RequestSettings::default())
+}
+
+pub fn build_clients_with(settings: &RequestSettings) -> HttpClients {
+    HttpClients {
+        auto: build_client_with(settings),
+        http1: build_client_tuned(settings, |b| b.http1_only()),
+        // 对 https 是「ALPN 只提供 h2」，对明文 http 则是 h2c prior knowledge——
+        // 后者多数服务端不支持，属于用户显式选 HTTP/2 的代价
+        http2: build_client_tuned(settings, |b| b.http2_prior_knowledge()),
+    }
+}
+
+/// 协商到的版本的展示名。`{:?}` 会把 h2 印成 "HTTP/2.0"，这里统一成通用叫法。
+fn version_label(version: reqwest::Version) -> String {
+    match version {
+        reqwest::Version::HTTP_09 => "HTTP/0.9".to_string(),
+        reqwest::Version::HTTP_10 => "HTTP/1.0".to_string(),
+        reqwest::Version::HTTP_11 => "HTTP/1.1".to_string(),
+        reqwest::Version::HTTP_2 => "HTTP/2".to_string(),
+        reqwest::Version::HTTP_3 => "HTTP/3".to_string(),
+        other => format!("{other:?}"),
+    }
 }
 
 pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
@@ -506,6 +615,15 @@ pub(crate) async fn execute_with_threshold(
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
     let total = resp.content_length();
+    let http_version = Some(version_label(resp.version()));
+    // 主机名取最终 URL（跟随跳转之后），证书是跟这个主机握的手。
+    // extensions 必须在 bytes_stream() 消费掉 resp 之前读走。
+    let certificate = resp
+        .extensions()
+        .get::<reqwest::tls::TlsInfo>()
+        .and_then(|info| info.peer_certificate())
+        .and_then(|der| tls::inspect(der, resp.url().host_str().unwrap_or("")))
+        .map(Box::new);
 
     let mut sink = Sink::with_capacity(total, spill_threshold);
     let mut stream = resp.bytes_stream();
@@ -542,6 +660,8 @@ pub(crate) async fn execute_with_threshold(
             duration,
             body_len: body.len(),
             content_type,
+            http_version,
+            certificate,
         },
         body,
     })
@@ -632,15 +752,29 @@ mod tests {
 
     #[test]
     fn every_settings_combination_builds_a_client() {
+        // 默认头的禁用清单也进来遍历一遍：关掉 Accept-Encoding 会连带改动
+        // gzip/brotli/zstd 三个 builder 开关，是这里唯一有分支的一维
+        let header_sets = [
+            Vec::new(),
+            vec!["user-agent".to_string()],
+            vec!["accept-encoding".to_string()],
+            DEFAULT_HEADERS
+                .iter()
+                .map(|(k, _)| k.to_ascii_lowercase())
+                .collect(),
+        ];
         for timeout_secs in [0, 5] {
             for follow_redirects in [true, false] {
                 for verify_tls in [true, false] {
-                    let _ = build_client_with(&RequestSettings {
-                        timeout_secs,
-                        follow_redirects,
-                        max_redirects: 3,
-                        verify_tls,
-                    });
+                    for disabled_default_headers in &header_sets {
+                        let _ = build_client_with(&RequestSettings {
+                            timeout_secs,
+                            follow_redirects,
+                            max_redirects: 3,
+                            verify_tls,
+                            disabled_default_headers: disabled_default_headers.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -663,6 +797,90 @@ mod tests {
             text: r#"{"a":1}"#.into(),
         };
         assert_eq!(run(&d).await.unwrap().meta.status, 201);
+    }
+
+    /// 起一个照单全收的 server，按给定设置发一次 GET，返回它**实际收到**的请求头。
+    ///
+    /// 默认头是 client 级下发的，`prepare()` 产出的 `HttpRequest.headers` 里根本看不到，
+    /// 服务端这一侧是「少发 / 多发一个头」唯一可靠的观测点。
+    async fn sent_headers(settings: &RequestSettings, headers: Vec<KeyValue>) -> HeaderMap {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut d = draft(Method::Get, server.uri());
+        d.headers = headers;
+        let client = build_client_with(settings);
+        execute(&client, prepare(&d).unwrap(), None).await.unwrap();
+        server.received_requests().await.unwrap().remove(0).headers
+    }
+
+    #[tokio::test]
+    async fn default_headers_are_sent() {
+        let sent = sent_headers(&RequestSettings::default(), vec![]).await;
+        for (key, value) in DEFAULT_HEADERS {
+            assert_eq!(
+                sent.get(*key).map(|v| v.to_str().unwrap()),
+                Some(*value),
+                "默认头 {key} 没有原样发出去"
+            );
+        }
+    }
+
+    /// 请求自己填的同名 header 必须赢：reqwest 是以 vacant-entry 语义合入 client 级
+    /// 默认头的，这条钉住那个语义——一旦上游改成 append，服务端会收到两个 Accept。
+    #[tokio::test]
+    async fn request_header_overrides_default_header() {
+        let sent = sent_headers(
+            &RequestSettings::default(),
+            vec![KeyValue::new("Accept", "application/json")],
+        )
+        .await;
+        assert_eq!(sent["accept"], "application/json");
+        assert_eq!(sent.get_all("accept").iter().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn disabled_default_header_is_not_sent() {
+        let settings = RequestSettings {
+            disabled_default_headers: vec!["user-agent".into()],
+            ..Default::default()
+        };
+        let sent = sent_headers(&settings, vec![]).await;
+        assert!(sent.get("user-agent").is_none());
+        // 只关掉点名的那一条，其余照发
+        assert_eq!(sent["accept"], "*/*");
+    }
+
+    /// 关掉 Accept-Encoding 不能只是「少发一个头」：解压中间件会在请求缺该头时自己补上，
+    /// 那样开关等于没按。所以这一条必须连自动解压一起关，用户拿到的才是原始压缩字节。
+    #[tokio::test]
+    async fn disabling_accept_encoding_also_disables_decompression() {
+        let server = MockServer::start().await;
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(b"hello gzip").unwrap();
+        let gz = enc.finish().unwrap();
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(gz.clone())
+                    .insert_header("content-encoding", "gzip"),
+            )
+            .mount(&server)
+            .await;
+
+        let settings = RequestSettings {
+            disabled_default_headers: vec!["accept-encoding".into()],
+            ..Default::default()
+        };
+        let client = build_client_with(&settings);
+        let d = draft(Method::Get, server.uri());
+        let resp = execute(&client, prepare(&d).unwrap(), None).await.unwrap();
+
+        assert_eq!(resp.body.memory().unwrap(), &gz[..]);
+        let sent = server.received_requests().await.unwrap().remove(0).headers;
+        assert!(sent.get("accept-encoding").is_none());
     }
 
     /// Content-Length / Transfer-Encoding / Host 由 reqwest/hyper 自行计算，用户手填的值

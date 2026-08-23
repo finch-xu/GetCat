@@ -43,6 +43,10 @@ directories = "6.0.0"
 tempfile = "3.27.0"
 ulid = { version = "3.0.0", features = ["serde"] }
 
+# TLS 证书体检：解析对端叶子证书（纯 Rust，无 C 依赖）；sha2 只用来算指纹
+x509-parser = "0.18.1"
+sha2 = "0.11.0"
+
 # dev
 wiremock = "0.6.5"
 flate2 = "1.1"

@@ -31,6 +31,7 @@ actions!(
         CloseTab,
         ToggleSidebar,
         SaveRequest,
+        DuplicateTab,
         FindInResponse,
         OpenSettings
     ]

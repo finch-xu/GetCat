@@ -2,6 +2,8 @@
 
 use getcat_core::body::tier::ViewTier;
 use getcat_core::http::{BodyStore, RequestError};
+use getcat_core::model::HttpVersionPref;
+use getcat_core::tls::CertificateInfo;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
@@ -21,7 +23,9 @@ use crate::i18n::tr;
 use crate::state::request_tab::{RequestTab, ResponseSection};
 use crate::state::response::{ResponseState, ResponseView};
 use crate::ui::body_view::{render_header_rows, render_text_lines};
-use crate::ui::text::{content_kind_label, error_detail, error_kind, tier_notice};
+use crate::ui::text::{
+    cert_warning_label, content_kind_label, error_detail, error_kind, tier_notice,
+};
 use crate::ui::{format_bytes, format_duration, status_color};
 use crate::{FindInResponse, SendRequest};
 
@@ -39,6 +43,50 @@ fn empty_state_frame(cx: &App) -> Div {
         .text_color(cx.theme().muted_foreground)
 }
 
+/// 「证书」页签：体检结论在前，证书原文字段在后。
+///
+/// 字段值一律原样展示（主体、颁发者、SAN 都是证书里的原文），只有体检结论
+/// 是我们下的判断、需要翻译——与 `ui::text` 的规则一致。
+fn render_certificate(info: &CertificateInfo) -> AnyElement {
+    let san = if info.san.is_empty() {
+        tr!("cert.san_empty").to_string()
+    } else {
+        info.san.join("\n")
+    };
+    let list = DescriptionList::new()
+        .columns(1)
+        .bordered(false)
+        .small()
+        .label_width(rems(7.))
+        .item(tr!("cert.subject"), info.subject.clone(), 1)
+        .item(tr!("cert.issuer"), info.issuer.clone(), 1)
+        .item(tr!("cert.not_before"), info.not_before.clone(), 1)
+        .item(tr!("cert.not_after"), info.not_after.clone(), 1)
+        .item(tr!("cert.san"), san, 1)
+        .item(tr!("cert.serial"), info.serial.clone(), 1)
+        .item(
+            tr!("cert.signature_algorithm"),
+            info.signature_algorithm.clone(),
+            1,
+        )
+        .item(tr!("cert.fingerprint"), info.sha256_fingerprint.clone(), 1);
+
+    v_flex()
+        .id("certificate-section")
+        .size_full()
+        .min_h_0()
+        .overflow_y_scroll()
+        .p_3()
+        .gap_3()
+        .children(
+            info.warnings.iter().enumerate().map(|(ix, w)| {
+                Alert::warning(("cert-warning", ix), cert_warning_label(*w)).xsmall()
+            }),
+        )
+        .child(list)
+        .into_any_element()
+}
+
 /// 档位提示：官方 `Alert` 的 banner 形态，底色 / 边框 / 图标全部来自主题。
 fn notice_bar(text: impl Into<SharedString>) -> AnyElement {
     Alert::warning("tier-notice", text.into())
@@ -53,40 +101,62 @@ impl RequestTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (is_done, has_pretty, headers_count) = match &self.response {
-            ResponseState::Done { view, .. } => (true, view.has_pretty(), view.header_rows.len()),
-            _ => (false, false, 0),
+        // 只取用得上的两样（一个 bool、一个 Copy 枚举），不整份 clone 证书——
+        // 那是八个 String，每帧重绘都要重新分配一遍
+        let (is_done, has_pretty, headers_count, has_certificate, banner) = match &self.response {
+            ResponseState::Done { view, .. } => {
+                let cert = view.meta.certificate.as_deref();
+                (
+                    true,
+                    view.has_pretty(),
+                    view.header_rows.len(),
+                    cert.is_some(),
+                    // 证书没问题时不打扰，只有体检出结果才挂横幅
+                    cert.filter(|info| !info.is_trustworthy())
+                        .and_then(|info| info.warnings.first().copied()),
+                )
+            }
+            _ => (false, false, 0, false, None),
         };
         let section = self.response_section;
+        // 页签随响应变：http 请求没有证书，那一页就不该出现
+        let sections = ResponseSection::visible(has_certificate);
+        let selected_section = sections.iter().position(|s| *s == section).unwrap_or(0);
+        let clicked_sections = sections.clone();
+        // Idle 下没东西可清；InFlight 归 URL 栏的取消按钮管，这里不掺和
+        let can_clear = matches!(
+            self.response,
+            ResponseState::Done { .. } | ResponseState::Failed { .. }
+        );
 
         v_flex()
             .size_full()
             .min_h_0()
+            // 顶栏拆成两行：状态元数据与操作一行、页签与 Pretty/Raw 一行。全挤在一行时，
+            // 右侧按钮组 flex_none 不收缩、左侧又没裁剪，窄面板下状态文字会直接画到按钮上。
+            // 请求侧的 Body 工具条早就是这么拆的（见 request_pane::render_body_section）。
             .child(
                 h_flex()
-                    .h_10()
+                    .h_9()
                     .px_3()
                     .gap_3()
                     .items_center()
                     .justify_between()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(div().min_w_0().child(self.render_status_line(cx)))
+                    // 可压缩 + 裁剪：再窄也只是把 HTTP 版本这类次要信息切掉，不会溢出压到按钮上
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .child(self.render_status_line(cx)),
+                    )
                     .child(
                         h_flex()
                             .flex_none()
-                            .gap_3()
+                            .gap_1()
                             .items_center()
-                            .when_some(self.notice.clone(), |h, notice| {
-                                h.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .max_w_96()
-                                        .truncate()
-                                        .child(notice.text()),
-                                )
-                            })
+                            // Button 没有 aria_label（只实现 InteractiveElement），
+                            // tooltip 就是这三个图标按钮对外的可读名字，一个都不能省
                             .when(is_done, |h| {
                                 h.child(
                                     Button::new("find-in-response")
@@ -106,57 +176,127 @@ impl RequestTab {
                                     Button::new("save-body")
                                         .ghost()
                                         .xsmall()
-                                        .label(tr!("response.save_to_file"))
+                                        .icon(IconName::HardDrive)
+                                        .tooltip(tr!("response.save_to_file"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.save_body(window, cx)
                                         })),
                                 )
                             })
-                            // 只有存在美化文本时才提供 Pretty/Raw 切换
-                            .when(has_pretty, |h| {
+                            .when(can_clear, |h| {
                                 h.child(
-                                    TabBar::new("pretty-raw")
-                                        .segmented()
+                                    Button::new("clear-response")
+                                        .ghost()
                                         .xsmall()
-                                        .selected_index(if self.pretty { 0 } else { 1 })
-                                        .on_click(cx.listener(|this, ix: &usize, window, cx| {
-                                            this.set_pretty(*ix == 0, window, cx)
-                                        }))
-                                        .child("Pretty")
-                                        .child("Raw"),
+                                        .icon(IconName::Delete)
+                                        .tooltip(tr!("response.clear"))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.clear_response(window, cx)
+                                        })),
                                 )
-                            })
-                            .child(
-                                TabBar::new("response-sections")
-                                    .underline()
-                                    .xsmall()
-                                    .selected_index(if section == ResponseSection::Body {
-                                        0
-                                    } else {
-                                        1
-                                    })
-                                    .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                                        this.response_section = if *ix == 0 {
-                                            ResponseSection::Body
-                                        } else {
-                                            ResponseSection::Headers
-                                        };
-                                        cx.notify();
-                                    }))
-                                    .child("Body")
-                                    .child(Tab::new().label(if headers_count > 0 {
+                            }),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .h_9()
+                    .px_3()
+                    .gap_3()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        TabBar::new("response-sections")
+                            .underline()
+                            .xsmall()
+                            .selected_index(selected_section)
+                            .on_click(cx.listener(move |this, ix: &usize, _, cx| {
+                                if let Some(next) = clicked_sections.get(*ix) {
+                                    this.response_section = *next;
+                                    cx.notify();
+                                }
+                            }))
+                            .children(sections.iter().map(|s| match s {
+                                ResponseSection::Body => Tab::new().label("Body"),
+                                ResponseSection::Headers => {
+                                    Tab::new().label(if headers_count > 0 {
                                         format!("Headers ({headers_count})")
                                     } else {
                                         "Headers".to_string()
-                                    })),
-                            ),
-                    ),
+                                    })
+                                }
+                                ResponseSection::Certificate => {
+                                    Tab::new().label(tr!("response.section_certificate"))
+                                }
+                            })),
+                    )
+                    // 只有存在美化文本时才提供 Pretty/Raw 切换
+                    .when(has_pretty, |h| {
+                        h.child(
+                            TabBar::new("pretty-raw")
+                                .segmented()
+                                .xsmall()
+                                .selected_index(if self.pretty { 0 } else { 1 })
+                                .on_click(cx.listener(|this, ix: &usize, window, cx| {
+                                    this.set_pretty(*ix == 0, window, cx)
+                                }))
+                                .child("Pretty")
+                                .child("Raw"),
+                        )
+                    }),
             )
+            // 搜索提示原本挤在顶栏右侧（max_w_96），是把那一行撑爆的主因之一。
+            // 挪成横幅后既不再抢顶栏的宽度，文字也不用截断了。
+            .when_some(self.notice.clone(), |v, notice| {
+                v.child(
+                    Alert::info("search-notice", notice.text())
+                        .banner()
+                        .xsmall(),
+                )
+            })
+            .when_some(banner, |v, warning| {
+                v.child(self.render_certificate_banner(warning, cx))
+            })
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .child(self.render_response_body(section, window, cx)),
+            )
+    }
+
+    /// 证书体检出问题时挂在响应上方的常驻横幅。
+    ///
+    /// 这条只在请求**成功**时出现——校验关着，自签名 / 过期证书照样能连上，
+    /// 用户需要知道「连是连上了，但这张证书不可信」。
+    fn render_certificate_banner(
+        &self,
+        warning: getcat_core::tls::CertWarning,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_1()
+            .border_b_1()
+            .border_color(cx.theme().warning.opacity(0.3))
+            .bg(cx.theme().warning.opacity(0.08))
+            .text_xs()
+            .child(div().flex_1().min_w_0().child(tr!(
+                "response.cert_banner",
+                issue = cert_warning_label(warning)
+            )))
+            .child(
+                Button::new("view-certificate")
+                    .ghost()
+                    .xsmall()
+                    .label(tr!("response.cert_view"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.response_section = ResponseSection::Certificate;
+                        cx.notify();
+                    })),
             )
     }
 
@@ -216,6 +356,19 @@ impl RequestTab {
                         .text_color(cx.theme().muted_foreground)
                         .child(error_detail(error)),
                 )
+                // 显式挑了版本又失败，多半是服务端不支持这一版——reqwest 的原话
+                // （"frame with invalid size" 之类）指不到这一点，补一句去处
+                .when(self.http_version != HttpVersionPref::Auto, |v| {
+                    v.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr!(
+                                "response.forced_version_hint",
+                                version = self.http_version.label()
+                            )),
+                    )
+                })
                 .into_any_element(),
             ResponseState::Done { body, view } => match section {
                 ResponseSection::Body => self.render_body_view(body, view, cx),
@@ -223,6 +376,11 @@ impl RequestTab {
                     render_header_rows(view.header_rows.clone(), &self.headers_scroll, cx)
                         .into_any_element()
                 }
+                ResponseSection::Certificate => match &view.meta.certificate {
+                    Some(info) => render_certificate(info),
+                    // 上一条响应有证书、这一条没有：页签已经消失，内容跟着回落到 Body
+                    None => self.render_body_view(body, view, cx),
+                },
             },
         }
     }
@@ -387,6 +545,10 @@ impl RequestTab {
                             .child(format_bytes(view.meta.body_len)),
                     )
                     .child(div().text_color(muted).child(content_kind_label(view.kind)))
+                    // 选了 Auto 时，这是唯一能看出到底走了 h1 还是 h2 的地方
+                    .when_some(view.meta.http_version.clone(), |h, version| {
+                        h.child(div().text_color(muted).child(version))
+                    })
                     .into_any_element()
             }
         }

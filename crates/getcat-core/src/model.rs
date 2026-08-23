@@ -4,6 +4,8 @@ use std::{path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
+use crate::tls::CertificateInfo;
+
 /// 已保存请求与 Tab 的标识；26 字符 Crockford Base32 字符串落盘。ulid 3.0 的构造函数是 `Ulid::generate()`。
 pub use ulid::Ulid;
 
@@ -51,6 +53,16 @@ impl Method {
             Method::Delete => "DELETE",
             Method::Head => "HEAD",
             Method::Options => "OPTIONS",
+        }
+    }
+
+    /// 标签栏角标用的缩写：那里的空间比侧栏的 method 列还紧，
+    /// 只有 DELETE / OPTIONS 需要收，其余原样返回。
+    pub fn short(self) -> &'static str {
+        match self {
+            Method::Delete => "DEL",
+            Method::Options => "OPT",
+            other => other.as_str(),
         }
     }
 
@@ -331,6 +343,38 @@ impl LanguagePref {
     ];
 }
 
+/// 这次请求走哪个 HTTP 版本。只活在当前 Tab 的这次会话里，不进 [`RequestDraft`]、不落盘。
+///
+/// 版本是 ALPN 协商的结果，只能在 client 级别定死（`http1_only` /
+/// `http2_prior_knowledge`）——reqwest 的 per-request `version()` 只是个断言，
+/// 协商不上就直接报 `UserUnsupportedVersion`。所以每个偏好各配一个 client。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HttpVersionPref {
+    /// ALPN 自己谈：https 优先 h2，谈不拢回落 http/1.1
+    #[default]
+    Auto,
+    Http1,
+    Http2,
+}
+
+impl HttpVersionPref {
+    /// 顺序即下拉菜单里的顺序。
+    pub const ALL: [HttpVersionPref; 3] = [
+        HttpVersionPref::Auto,
+        HttpVersionPref::Http1,
+        HttpVersionPref::Http2,
+    ];
+
+    /// 协议名照写不翻译；`Auto` 不是协议名，UI 那边会换成本地化文案。
+    pub fn label(self) -> &'static str {
+        match self {
+            HttpVersionPref::Auto => "Auto",
+            HttpVersionPref::Http1 => "HTTP/1.1",
+            HttpVersionPref::Http2 => "HTTP/2",
+        }
+    }
+}
+
 /// 发送请求的行为设置（`settings.json` 的 `request` 段）；改动后要重建 HTTP client。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestSettings {
@@ -343,9 +387,18 @@ pub struct RequestSettings {
     /// 跟随跳转的最大次数（仅 follow_redirects 为真时有效）。
     #[serde(default = "default_max_redirects")]
     pub max_redirects: u32,
-    /// 校验 HTTPS 证书；关掉后自签证书也能请求（本地调试用）。
-    #[serde(default = "default_true")]
+    /// 校验 HTTPS 证书。默认**关闭**：本地调试大量对着自签名接口发请求，
+    /// 开着的话握手直接失败、连证书都拿不到。关掉后仍会解析对端证书并在
+    /// 有问题时提示（见 [`crate::tls`]），不是「不管了」。
+    #[serde(default)]
     pub verify_tls: bool,
+    /// 被用户关掉的默认请求头（小写 key，取值见 [`crate::http::DEFAULT_HEADERS`]）。
+    /// 空表示全部启用。
+    ///
+    /// 存「禁用清单」而不是「启用清单」：往 `DEFAULT_HEADERS` 里加条目时，
+    /// 老的 `settings.json` 不必迁移，新头自动生效。
+    #[serde(default)]
+    pub disabled_default_headers: Vec<String>,
 }
 
 fn default_timeout_secs() -> u64 {
@@ -364,7 +417,8 @@ impl Default for RequestSettings {
             timeout_secs: default_timeout_secs(),
             follow_redirects: true,
             max_redirects: default_max_redirects(),
-            verify_tls: true,
+            verify_tls: false,
+            disabled_default_headers: Vec::new(),
         }
     }
 }
@@ -457,6 +511,15 @@ pub struct ResponseMeta {
     pub duration: Duration,
     pub body_len: u64,
     pub content_type: Option<String>,
+    /// 实际协商到的版本（"HTTP/1.1" / "HTTP/2"）。选了 Auto 时这是唯一能知道
+    /// 到底走了哪条路的地方。
+    pub http_version: Option<String>,
+    /// 对端叶子证书；只有 https 且握手成功才有。响应不落盘，所以这里放
+    /// 解析好的结构没有兼容负担。
+    ///
+    /// Box 是因为它有近 240 字节，而绝大多数请求（http、以及不看证书的场景）
+    /// 用不上——inline 会把整个 `ResponseState` 撑到每次移动都拖着这坨。
+    pub certificate: Option<Box<CertificateInfo>>,
 }
 
 #[cfg(test)]
@@ -470,6 +533,29 @@ mod tests {
         }
         assert_eq!(Method::parse("get"), Some(Method::Get));
         assert_eq!(Method::parse("BREW"), None);
+    }
+
+    /// 标签栏的 method 角标列只有 40 px，缩写不能比它还宽。
+    #[test]
+    fn method_short_names_fit_the_tab_badge() {
+        for m in Method::ALL {
+            assert!(m.short().len() <= 5, "{} 太长，会挤掉标签标题", m.short());
+        }
+        assert_eq!(Method::Delete.short(), "DEL");
+        assert_eq!(Method::Options.short(), "OPT");
+        // 本来就短的不动，保持和侧栏的 method 列一致
+        assert_eq!(Method::Get.short(), "GET");
+        assert_eq!(Method::Patch.short(), "PATCH");
+    }
+
+    #[test]
+    fn http_version_pref_defaults_to_auto() {
+        assert_eq!(HttpVersionPref::default(), HttpVersionPref::Auto);
+        // ALL 的顺序就是下拉菜单顺序，Auto 排最前
+        assert_eq!(HttpVersionPref::ALL[0], HttpVersionPref::Auto);
+        // 协议名照写不翻译
+        assert_eq!(HttpVersionPref::Http1.label(), "HTTP/1.1");
+        assert_eq!(HttpVersionPref::Http2.label(), "HTTP/2");
     }
 
     /// `ALL` 的顺序就是格式分段控件上的位置，UI 靠下标做选中与切换。
@@ -592,16 +678,31 @@ mod tests {
         assert_eq!(s.request.timeout_secs, 30);
         assert!(s.request.follow_redirects);
         assert_eq!(s.request.max_redirects, 10);
-        assert!(s.request.verify_tls);
+        // 默认关闭：本地调试大量对着自签名接口，开着的话连握手都过不去
+        assert!(!s.request.verify_tls);
+        // 空清单 = 默认头全启用；老 settings.json 没有这个字段时就落到这里
+        assert!(s.request.disabled_default_headers.is_empty());
         assert_eq!(s.editor_font_size, 13);
         assert!(s.check_updates_on_launch);
 
+        // 老配置里显式写着 true 的必须原样保留：改默认值不该动用户已经做过的选择
         let partial: AppSettings = serde_json::from_str(
-            r#"{"request":{"verify_tls":false},"editor_font_size":16,"check_updates_on_launch":false}"#,
+            r#"{"request":{"verify_tls":true},"editor_font_size":16,"check_updates_on_launch":false}"#,
         )
         .unwrap();
-        assert!(!partial.request.verify_tls);
+        assert!(partial.request.verify_tls);
         assert_eq!(partial.request.timeout_secs, 30);
+        assert!(partial.request.disabled_default_headers.is_empty());
+
+        // 关掉过默认头的配置读回来要原样保留
+        let disabled: AppSettings = serde_json::from_str(
+            r#"{"request":{"disabled_default_headers":["user-agent","connection"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            disabled.request.disabled_default_headers,
+            ["user-agent", "connection"]
+        );
         assert_eq!(partial.editor_font_size, 16);
         assert!(!partial.check_updates_on_launch);
 

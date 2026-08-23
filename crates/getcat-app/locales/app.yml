@@ -155,6 +155,24 @@ url_bar:
   save_tooltip:
     en: Save request
     zh-CN: 保存请求
+  more_tooltip:
+    en: More actions
+    zh-CN: 更多操作
+  duplicate_tab:
+    en: Duplicate tab
+    zh-CN: 复制标签页
+  http_version_tooltip:
+    en: HTTP version for this request
+    zh-CN: 这次请求走的 HTTP 版本
+  http_version_auto:
+    en: Auto
+    zh-CN: 自动
+  http_version_auto_hint:
+    en: Auto (negotiate via ALPN)
+    zh-CN: 自动（由 ALPN 协商）
+  http3_unsupported:
+    en: HTTP/3 (not supported yet)
+    zh-CN: HTTP/3（暂不支持）
 
 request:
   path_params:
@@ -187,6 +205,18 @@ request:
   hint_form_data_content_type:
     en: GetCat generates the form-data Content-Type (with boundary); the Content-Type header is ignored
     zh-CN: form-data 的 Content-Type（含 boundary）由 GetCat 生成，Headers 中的 Content-Type 将被忽略
+  default_headers:
+    en: Default headers
+    zh-CN: 默认参数（Header）
+  default_headers_global:
+    en: Global
+    zh-CN: 全局
+  default_headers_desc:
+    en: Sent with every request unless this request sets the same header
+    zh-CN: 每个请求都会自动带上；本请求填了同名 Header 时以本请求为准
+  default_headers_overridden:
+    en: Overridden by a header in this request
+    zh-CN: 已被本请求的同名 Header 覆盖
 
 kv:
   param_key:
@@ -257,6 +287,9 @@ response:
   save_to_file:
     en: Save to file…
     zh-CN: 保存到文件…
+  clear:
+    en: Clear response
+    zh-CN: 清空响应
   binary_no_preview:
     en: Binary content has no text preview; use “Save to file…” in the top right to export it
     zh-CN: 二进制内容不提供文本预览，可用右上角「保存到文件…」导出
@@ -298,6 +331,61 @@ response:
     preview:
       en: "Response exceeds %{size}; written to a temp file, previewing the first %{head}"
       zh-CN: "响应超过 %{size}，已写入临时文件，仅预览前 %{head}"
+  section_certificate:
+    en: Certificate
+    zh-CN: 证书
+  cert_banner:
+    en: "Certificate problem: %{issue}. The request still went through because TLS verification is off."
+    zh-CN: "证书异常：%{issue}。TLS 校验已关闭，请求仍照常发出。"
+  cert_view:
+    en: View certificate
+    zh-CN: 查看证书
+  forced_version_hint:
+    en: "This request was forced to %{version}. If the server doesn't speak it, switch the selector in the URL bar back to Auto."
+    zh-CN: "这次请求被强制走 %{version}。如果服务端不支持，把 URL 栏里的选择器切回「自动」。"
+
+# 证书页签的字段名与体检结论。字段值（主体、颁发者、SAN）是证书原文，不翻译。
+cert:
+  warning:
+    expired:
+      en: expired
+      zh-CN: 已过期
+    not_yet_valid:
+      en: not valid yet (check the system clock)
+      zh-CN: 尚未生效（请检查系统时钟）
+    hostname_mismatch:
+      en: hostname does not match the certificate
+      zh-CN: 主机名与证书不符
+    self_signed:
+      en: self-signed, no trust chain
+      zh-CN: 自签名，没有信任链
+  subject:
+    en: Subject
+    zh-CN: 主体
+  issuer:
+    en: Issuer
+    zh-CN: 颁发者
+  not_before:
+    en: Valid from
+    zh-CN: 生效时间
+  not_after:
+    en: Valid until
+    zh-CN: 到期时间
+  san:
+    en: Alt names
+    zh-CN: 备用名称
+  san_empty:
+    en: none (a certificate without SAN is not trusted by modern clients)
+    zh-CN: 无（不带 SAN 的证书不被现代客户端信任）
+  serial:
+    en: Serial
+    zh-CN: 序列号
+  signature_algorithm:
+    en: Signature
+    zh-CN: 签名算法
+  fingerprint:
+    en: SHA-256
+    zh-CN: SHA-256 指纹
 
 notice:
   virtual_search:
@@ -512,8 +600,8 @@ settings:
     en: Verify TLS certificates
     zh-CN: 校验 TLS 证书
   verify_tls_desc:
-    en: When off, self-signed and expired certificates are accepted; only for local debugging
-    zh-CN: 关闭后接受自签名 / 过期证书，仅建议用于本地调试
+    en: Off by default so local self-signed endpoints work. Certificate problems are still detected and shown in the response's Certificate tab. Turn it on and a bad certificate aborts the handshake instead.
+    zh-CN: 默认关闭，本地自签名接口才连得上。关闭后依然会检测证书问题并在响应的「证书」页签里展示。打开后遇到坏证书会直接握手失败。
   storage:
     en: Storage
     zh-CN: 存储位置

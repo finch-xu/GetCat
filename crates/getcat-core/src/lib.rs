@@ -5,4 +5,5 @@ pub mod detect;
 pub mod http;
 pub mod model;
 pub mod store;
+pub mod tls;
 pub mod url;
