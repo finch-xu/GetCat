@@ -169,6 +169,13 @@ cargo run -p getcat-app --features inspector    # 元素检查器：⌘⌥I / Ct
 GETCAT_UPDATE_CHECK=1 cargo run -p getcat-app   # 开发构建也在启动时检查更新（只检查不安装）
 ```
 
+本地测试接口：`tools/testserver/server.py` 是一个零依赖（只用 Python 标准库）的小 server，专门提供难伺候的接口 —— 慢响应、超大响应体（1 / 5 / 10 / 20 / 50 MB）、chunked 滴流、任意状态码、中途断连、超多超长响应头，用来手工验证大响应分档、流式进度与取消。启动后打开首页就是带参数说明的接口清单，每个示例都能一键复制完整 URL 粘到 GetCat。
+
+```bash
+python3 tools/testserver/server.py                             # 127.0.0.1:8765，首页即接口清单
+python3 tools/testserver/server.py --port 9000 --host 0.0.0.0  # 换端口 / 让同网段设备也能访问
+```
+
 提交前：`cargo fmt --all`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。CI 会在三平台跑构建与测试，并用 cargo-deny 拦截 copyleft 依赖。
 
 ## 许可证

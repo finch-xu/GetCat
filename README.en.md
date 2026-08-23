@@ -169,6 +169,13 @@ cargo run -p getcat-app --features inspector    # element inspector: ⌘⌥I / C
 GETCAT_UPDATE_CHECK=1 cargo run -p getcat-app   # make dev builds check for updates at startup too (check only, no install)
 ```
 
+Local test endpoints: `tools/testserver/server.py` is a dependency-free (Python standard library only) server that deliberately misbehaves — slow responses, huge bodies (1 / 5 / 10 / 20 / 50 MB), chunked dripping, arbitrary status codes, mid-transfer disconnects, and floods of oversized response headers. Use it to exercise large-response tiering, streaming progress, and cancellation by hand. Its home page lists every endpoint with its parameters, and each example copies a full URL straight into GetCat.
+
+```bash
+python3 tools/testserver/server.py                             # 127.0.0.1:8765, home page = endpoint list
+python3 tools/testserver/server.py --port 9000 --host 0.0.0.0  # different port / reachable from other devices
+```
+
 Before committing: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`. CI builds and tests on all three platforms and uses cargo-deny to block copyleft dependencies.
 
 ## License
