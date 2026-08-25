@@ -3,10 +3,12 @@
 // 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入
 // gpui 重导出的 `#[proc_macro_attribute] test`，与标准库 `#[test]` 同名冲突，
 // 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
+use std::cell::Cell;
 use std::rc::Rc;
 
 use getcat_core::model::{
-    Method, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms,
+    MAX_TAB_ROWS, Method, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid,
+    WorkspaceState, now_ms,
 };
 use getcat_core::store::Loaded;
 use gpui::prelude::FluentBuilder as _;
@@ -16,8 +18,7 @@ use gpui::{
     Subscription, UniformListScrollHandle, Window, div, point, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IconName, Root, Selectable, Sizable, Theme, ThemeMode, ThemeStyled,
-    TitleBar, WindowExt,
+    ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
     alert::Alert,
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
@@ -25,7 +26,6 @@ use gpui_component::{
     input::{Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
     status_bar::StatusBar,
-    tab::{Tab, TabBar},
     v_flex,
 };
 
@@ -40,8 +40,8 @@ use crate::state::update;
 use crate::templates;
 use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
 use crate::ui::curl_sheet::{CURL_SHEET_WIDTH, CurlSheet, import_button};
-use crate::ui::method_color;
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
+use crate::ui::tab_strip::{next_tab_rows, page_count, tabs_per_page};
 use crate::{
     CloseTab, DuplicateTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest,
     ToggleSidebar,
@@ -97,8 +97,17 @@ pub struct Workspace {
     saved: Rc<Vec<SavedRequest>>,
     /// 侧栏列表的滚动句柄。
     saved_scroll: UniformListScrollHandle,
-    /// 标签栏的横向滚动句柄：左右箭头与「激活项滚入视口」都靠它。
+    /// 标签栏的横向滚动句柄：单行模式下左右箭头与「激活项滚入视口」都靠它。
     tab_scroll: ScrollHandle,
+    /// 标签栏行数：1 = 单行横向滚动，`MAX_TAB_ROWS` = 多行分页。写入 workspace.json。
+    tab_rows: u8,
+    /// 多行模式当前页；纯会话状态，不落盘（重启后从激活标签重新算就够了）。
+    tab_page: usize,
+    /// 标签区在上一帧量到的可用宽度，分页用它算每行装几个。
+    ///
+    /// `Cell` 而不是普通字段：这是在 prepaint 里写的，走 `&mut self` 会让每帧的
+    /// 布局测量都触发一次重绘（gpui-component 的 TabBar 出于同样理由用 `Rc<RefCell>`）。
+    strip_width: Rc<Cell<f32>>,
     focus_handle: FocusHandle,
     /// 全局更新器状态的副本（观察到变化时同步），状态栏提示与「关于」页据此渲染。
     update_status: UpdateStatus,
@@ -149,6 +158,9 @@ impl Workspace {
             saved: Rc::new(saved),
             saved_scroll: UniformListScrollHandle::new(),
             tab_scroll: ScrollHandle::new(),
+            tab_rows: state.tab_rows.clamp(1, MAX_TAB_ROWS),
+            tab_page: 0,
+            strip_width: Rc::new(Cell::new(0.)),
             focus_handle: cx.focus_handle(),
             update_status: update::status(cx),
             code_sheet: cx.new(|cx| CodeSheet::new(window, cx)),
@@ -217,11 +229,6 @@ impl Workspace {
     #[cfg(test)]
     pub fn tab_count(&self) -> usize {
         self.tabs.len()
-    }
-
-    #[cfg(test)]
-    pub fn active_index(&self) -> usize {
-        self.active
     }
 
     #[cfg(test)]
@@ -320,9 +327,16 @@ impl Workspace {
     /// 快照口径与「保存」一致：`draft()` 只取当前 Body 模式对应的内容，
     /// 停在 none 时 raw 编辑器里的草稿文字不会被带过去。
     pub fn duplicate_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let source_ix = self.active;
+        self.duplicate_tab(self.active, window, cx);
+    }
+
+    /// 复制指定 Tab；`duplicate_active` 与标签右键菜单都走这里。
+    pub fn duplicate_tab(&mut self, source_ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if source_ix >= self.tabs.len() {
+            return;
+        }
         let (draft, raw_format) = {
-            let t = self.active_tab().read(cx);
+            let t = self.tabs[source_ix].read(cx);
             (t.draft(cx), t.raw_format)
         };
 
@@ -376,6 +390,41 @@ impl Workspace {
         cx.notify();
     }
 
+    /// 关闭除 `keep` 之外的所有 Tab。
+    ///
+    /// 从后往前删：正序删会让后面的下标一路前移，`keep` 自己也会跟着漂。
+    /// 每个都要删草稿文件，语义与 [`Self::close_tab`] 一致。
+    pub fn close_other_tabs(&mut self, keep: usize, cx: &mut Context<Self>) {
+        if keep >= self.tabs.len() || self.tabs.len() == 1 {
+            return;
+        }
+        for ix in (0..self.tabs.len()).rev() {
+            if ix == keep {
+                continue;
+            }
+            if let Some(store) = store(cx) {
+                store.delete_draft(self.tabs[ix].read(cx).id);
+            }
+            self.tabs.remove(ix);
+        }
+        self.active = 0;
+        self.reveal_active_tab();
+        self.persist_workspace(cx);
+        cx.notify();
+    }
+
+    /// 关闭所有 Tab。工作区不留空窗——照 [`Self::close_tab`] 关最后一个时的做法补一个新的。
+    pub fn close_all_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for tab in &self.tabs {
+            if let Some(store) = store(cx) {
+                store.delete_draft(tab.read(cx).id);
+            }
+        }
+        self.tabs.clear();
+        // new_tab 自己会 persist + notify
+        self.new_tab(window, cx);
+    }
+
     pub fn activate(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix < self.tabs.len() && ix != self.active {
             self.active = ix;
@@ -385,21 +434,78 @@ impl Workspace {
         }
     }
 
-    /// 让激活的标签滚进视口。标签多到溢出时，不这么做就会出现「新建了标签却看不见」。
+    /// 让激活的标签露出来。标签多到装不下时，不这么做就会出现「新建了标签却看不见」。
     ///
-    /// `scroll_to_item` 的下标是滚动容器的直接子元素下标；当前用的 `TabVariant::Tab`
-    /// 没有滑动指示器，子元素就是「全部标签 + 末尾的空白占位」，所以与标签下标一一对应。
-    fn reveal_active_tab(&self) {
-        self.tab_scroll.scroll_to_item(self.active);
+    /// 单行滚动、多行翻页——两种模式各有各的「露出来」。
+    fn reveal_active_tab(&mut self) {
+        if self.tab_rows > 1 {
+            let per_page = tabs_per_page(self.strip_width.get(), self.tab_rows);
+            self.tab_page = self.active / per_page.max(1);
+        } else {
+            self.tab_scroll.scroll_to_item(self.active);
+        }
     }
 
-    /// 标签栏横向滚一步；`dir` 为 -1 看左边、+1 看右边。
-    /// gpui 的约定是向右滚时 `offset.x` 变负。
-    pub fn scroll_tabs(&mut self, dir: f32, cx: &mut Context<Self>) {
-        let max = self.tab_scroll.max_offset().x;
-        let x = (self.tab_scroll.offset().x - px(TAB_SCROLL_STEP) * dir).clamp(-max, px(0.));
-        self.tab_scroll.set_offset(point(x, px(0.)));
+    /// 左右按钮：单行时横向滚一步，多行时翻一页。`dir` 为 -1 往左 / 上一页，+1 反之。
+    pub fn step_tabs(&mut self, dir: i32, cx: &mut Context<Self>) {
+        if self.tab_rows > 1 {
+            let per_page = tabs_per_page(self.strip_width.get(), self.tab_rows);
+            let pages = page_count(self.tabs.len(), per_page);
+            let next = self.tab_page as i32 + dir;
+            self.tab_page = next.clamp(0, pages as i32 - 1) as usize;
+        } else {
+            // gpui 的约定是向右滚时 `offset.x` 变负
+            let max = self.tab_scroll.max_offset().x;
+            let x =
+                (self.tab_scroll.offset().x - px(TAB_SCROLL_STEP) * dir as f32).clamp(-max, px(0.));
+            self.tab_scroll.set_offset(point(x, px(0.)));
+        }
         cx.notify();
+    }
+
+    /// 单行 ⇄ 多行。切过去时把当前标签所在那页翻出来，免得切完发现选中的标签不见了。
+    pub fn toggle_tab_rows(&mut self, cx: &mut Context<Self>) {
+        self.tab_rows = next_tab_rows(self.tab_rows);
+        self.reveal_active_tab();
+        self.persist_workspace(cx);
+        cx.notify();
+    }
+
+    pub fn tab_rows(&self) -> u8 {
+        self.tab_rows
+    }
+
+    pub fn tab_page(&self) -> usize {
+        self.tab_page
+    }
+
+    pub fn active_index(&self) -> usize {
+        self.active
+    }
+
+    pub(crate) fn tab_scroll(&self) -> &ScrollHandle {
+        &self.tab_scroll
+    }
+
+    /// 标签区上一帧量到的可用宽度。
+    pub fn strip_width(&self) -> f32 {
+        self.strip_width.get()
+    }
+
+    /// 供标签栏在 prepaint 里回填可用宽度的句柄。
+    pub(crate) fn strip_width_cell(&self) -> Rc<Cell<f32>> {
+        self.strip_width.clone()
+    }
+
+    /// 渲染标签栏需要的每个 Tab 的信息。
+    pub(crate) fn tabs_meta(&self, cx: &App) -> Vec<(Method, SharedString, bool)> {
+        self.tabs
+            .iter()
+            .map(|t| {
+                let t = t.read(cx);
+                (t.current_method(cx), t.title(cx), t.dirty)
+            })
+            .collect()
     }
 
     /// 退出 / 关窗前：每个 Tab 立即投递草稿快照（跳过去抖）。
@@ -418,6 +524,7 @@ impl Workspace {
             sidebar_collapsed: self.sidebar_collapsed,
             theme: self.theme,
             split: self.split,
+            tab_rows: self.tab_rows,
         }
     }
 
@@ -846,131 +953,6 @@ impl Workspace {
                 ),
         )
     }
-
-    fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let titles: Vec<(Method, SharedString, bool)> = self
-            .tabs
-            .iter()
-            .map(|t| {
-                let t = t.read(cx);
-                (t.current_method(cx), t.title(cx), t.dirty)
-            })
-            .collect();
-        // max_offset / bounds 只在 prepaint 阶段写入：首帧、以及标签装得下时都是 0。
-        let max_x = self.tab_scroll.max_offset().x;
-        let overflowing = max_x > px(0.);
-        // 必须自己再夹一次：set_offset 不夹值，div 只在 prepaint 夹，
-        // 直接读回的瞬时越界值会被误判成「还能接着滚」
-        let offset_x = self.tab_scroll.offset().x.clamp(-max_x, px(0.));
-        TabBar::new("request-tabs")
-            .w_full()
-            .pl_1()
-            // 标题是 URL 路径，长起来能顶到 /v1/chat/completions；封顶后 label 自己
-            // 省略号截断，prefix 的角标与 suffix 的关闭按钮保持原尺寸。
-            // 上限比 spec 的 180 宽 20 px：prefix 多了 40 px 的 method 角标，
-            // 不放宽的话 label 只剩不到半个词的位置。
-            .max_width(px(200.))
-            .track_scroll(&self.tab_scroll)
-            // 官方内置的溢出菜单：∨ 展开全部标签、当前项打勾，点一下直接跳。
-            // 它只切换选中不负责滚动，滚动由 activate 里的 reveal_active_tab 兜住。
-            .menu(true)
-            // 箭头只在真装不下时出现。max_offset 要等布局算完才有值，
-            // 所以刚好溢出的那一帧还看不到，下一次重绘就正常了。
-            .when(overflowing, |bar| {
-                bar.suffix(
-                    h_flex()
-                        .items_center()
-                        .gap_0p5()
-                        .pr_1()
-                        .child(
-                            Button::new("tabs-scroll-left")
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::ChevronLeft)
-                                .disabled(offset_x >= px(-0.5))
-                                .tooltip(tr!("tab.scroll_left"))
-                                .on_click(cx.listener(|this, _, _, cx| this.scroll_tabs(-1., cx))),
-                        )
-                        .child(
-                            Button::new("tabs-scroll-right")
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::ChevronRight)
-                                .disabled(offset_x <= -max_x + px(0.5))
-                                .tooltip(tr!("tab.scroll_right"))
-                                .on_click(cx.listener(|this, _, _, cx| this.scroll_tabs(1., cx))),
-                        ),
-                )
-            })
-            .prefix(
-                div().pr_2().child(
-                    Button::new("new-tab")
-                        .outline()
-                        .small()
-                        .icon(IconName::Plus)
-                        .tooltip_with_action(tr!("tab.new"), &NewTab, None)
-                        .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
-                ),
-            )
-            .selected_index(self.active)
-            .on_click(cx.listener(|this, ix: &usize, _, cx| this.activate(*ix, cx)))
-            .children(
-                titles
-                    .into_iter()
-                    .enumerate()
-                    .map(|(ix, (method, title, dirty))| {
-                        let aria = if dirty {
-                            tr!("tab.aria_dirty", title = title)
-                        } else {
-                            tr!("tab.aria", title = title)
-                        };
-                        // 角标走 prefix 而不是拼进 label：max_width 下 prefix 被包了
-                        // flex_shrink_0，只有 label 会被省略号截断；而且溢出菜单与 aria
-                        // 用的都是 label 文本，method 不该混进去。
-                        // prefix 只能设一次，未保存的圆点必须并进同一个元素。
-                        // Tab 根节点没有水平 padding，不补 pl 角标会贴死左边缘。
-                        Tab::new()
-                            .label(title)
-                            .aria_label(aria)
-                            .pl_2()
-                            .prefix(
-                                h_flex()
-                                    .gap_1()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .w_10()
-                                            .flex_none()
-                                            .text_xs()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(method_color(method, cx))
-                                            .child(method.short()),
-                                    )
-                                    .when(dirty, |h| {
-                                        // 未保存改动：标题前的圆点（spec §7.1）
-                                        h.child(
-                                            div()
-                                                .size_1p5()
-                                                .rounded_full_style(cx)
-                                                .bg(cx.theme().primary),
-                                        )
-                                    }),
-                            )
-                            .suffix(
-                                Button::new(("close-tab", ix))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(IconName::Close)
-                                    .tooltip(tr!("tab.close"))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        // 阻止冒泡到 Tab 的 on_click，否则关闭后会再触发 activate(ix)
-                                        cx.stop_propagation();
-                                        this.close_tab(ix, window, cx)
-                                    })),
-                            )
-                    }),
-            )
-    }
 }
 
 /// 关闭 `closing` 后新的 active 下标；`len` 为关闭前的 Tab 数（≥ 2）。
@@ -1288,7 +1270,7 @@ impl Render for Workspace {
                                         v_flex()
                                             .size_full()
                                             .min_w_0()
-                                            .child(self.render_tab_bar(cx))
+                                            .child(self.render_tab_strip(cx))
                                             .child(div().flex_1().min_h_0().child(active)),
                                     ),
                                 ),

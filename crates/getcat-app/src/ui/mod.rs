@@ -8,6 +8,7 @@ pub mod request_pane;
 pub mod response_pane;
 pub mod settings_dialog;
 pub mod sidebar;
+pub mod tab_strip;
 pub mod text;
 pub mod tool_rail;
 pub mod url_bar;
@@ -132,6 +133,54 @@ mod tests {
             Theme::change(ThemeMode::Light, None, cx);
             assert_eq!(status_color(100, cx), cx.theme().muted_foreground);
             assert_eq!(status_color(600, cx), cx.theme().muted_foreground);
+        });
+    }
+
+    /// WCAG 2.1 相对亮度。
+    fn relative_luminance(color: Hsla) -> f32 {
+        let rgba = gpui::Rgba::from(color);
+        let channel = |v: f32| {
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(rgba.r) + 0.7152 * channel(rgba.g) + 0.0722 * channel(rgba.b)
+    }
+
+    fn contrast_ratio(a: Hsla, b: Hsla) -> f32 {
+        let (la, lb) = (relative_luminance(a), relative_luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    /// 选中标签的底色从「纯白 / 纯背景色」换成了淡主题色——原来它与标签栏底色只差
+    /// 1.02:1，扫一眼根本认不出当前是哪个标签。方法角标压在这层新底色上，可读性
+    /// 必须一并钉住：调色时任何一支方法色跌破 4.8:1，这条就会红。
+    #[gpui::test]
+    fn method_colors_stay_readable_on_the_active_tab(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::install(cx);
+
+            for (label, mode) in [("浅色", ThemeMode::Light), ("深色", ThemeMode::Dark)] {
+                Theme::change(mode, None, cx);
+                let active: Hsla = *cx.theme().tokens.tab_active;
+                for method in Method::ALL {
+                    let ratio = contrast_ratio(method_color(method, cx), active);
+                    assert!(
+                        ratio >= 4.8,
+                        "{label}下 {} 在选中标签底色上只有 {ratio:.2}:1",
+                        method.as_str()
+                    );
+                }
+                // 选中与未选中要一眼分得出，否则这次调色就白改了
+                let ratio = contrast_ratio(active, *cx.theme().tokens.tab_bar);
+                assert!(
+                    ratio >= 1.08,
+                    "{label}下选中标签与标签栏底色只差 {ratio:.3}:1，看不出哪个是当前标签"
+                );
+            }
         });
     }
 

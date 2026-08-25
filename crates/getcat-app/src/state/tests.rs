@@ -43,7 +43,8 @@ use crate::state::workspace::{SIDEBAR_DEFAULT_WIDTH, SidebarSection, ToolSection
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
-use getcat_core::model::LanguagePref;
+use crate::ui::tab_strip::{page_count, tabs_per_page};
+use getcat_core::model::{LanguagePref, MAX_TAB_ROWS};
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
     cx.update(|cx| {
@@ -1177,6 +1178,7 @@ fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
         sidebar_collapsed: false,
         theme: ThemePref::Dark,
         split: SplitDirection::Horizontal,
+        tab_rows: 1,
     });
     assert!(store.flush());
     let loaded = store.load_all();
@@ -1670,11 +1672,11 @@ fn tab_bar_draws_with_many_tabs(cx: &mut TestAppContext) {
     // 画过一帧后布局才算出溢出量，这时箭头才有意义
     cx.update(|_, cx| {
         ws.update(cx, |ws, cx| {
-            ws.scroll_tabs(1., cx);
-            ws.scroll_tabs(-1., cx);
+            ws.step_tabs(1, cx);
+            ws.step_tabs(-1, cx);
             // 反复滚到头也不该把偏移推出边界
             for _ in 0..20 {
-                ws.scroll_tabs(-1., cx);
+                ws.step_tabs(-1, cx);
             }
         })
     });
@@ -2875,6 +2877,131 @@ fn response_wrap_is_unavailable_without_an_editor_tier_body(cx: &mut TestAppCont
             "还没有响应时没什么可换行的"
         );
     });
+}
+/// 标签右键菜单的三个动作。都不弹二次确认——草稿本来就随时落盘，
+/// 「关闭即删草稿」是 `close_tab` 早就定下的语义。
+#[gpui::test]
+fn tab_menu_actions_duplicate_and_close(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            for _ in 0..3 {
+                ws.new_tab(window, cx);
+            }
+        })
+    });
+    cx.read(|app| assert_eq!(ws.read(app).tab_count(), 4));
+
+    // 复制指定下标（而不是当前）：副本插在源右侧并成为当前
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.duplicate_tab(0, window, cx)));
+    cx.read(|app| {
+        assert_eq!(ws.read(app).tab_count(), 5);
+        assert_eq!(ws.read(app).active_index(), 1, "副本插在源 Tab 右侧并激活");
+    });
+
+    // 关闭其他：留下的必须是指定的那一个，不能因为删除时下标前移而删错
+    let keep_id = cx.read(|app| ws.read(app).tab_at(2).read(app).id);
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.close_other_tabs(2, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 1);
+        assert_eq!(
+            ws.tab_at(0).read(app).id,
+            keep_id,
+            "留下的应当是第 2 个 Tab"
+        );
+        assert_eq!(ws.active_index(), 0);
+    });
+
+    // 关闭所有：工作区不留空窗，补一个全新的空 Tab
+    let before = cx.read(|app| ws.read(app).tab_at(0).read(app).id);
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_all_tabs(window, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.tab_count(), 1, "关光之后要补一个新 Tab");
+        assert_ne!(ws.tab_at(0).read(app).id, before, "补的是全新的 Tab");
+    });
+
+    // 关掉的 Tab 的草稿文件都得删干净，否则重启会诈尸
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert_eq!(loaded.drafts.len(), 1, "只该剩下最后那个新 Tab 的草稿");
+}
+
+/// 多行模式：三行为一页，左右按钮翻页，切换行数会写进 workspace.json。
+#[gpui::test]
+fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            for _ in 0..15 {
+                ws.new_tab(window, cx);
+            }
+        })
+    });
+    cx.update(|window, _| window.blur());
+
+    cx.read(|app| assert_eq!(ws.read(app).tab_rows(), 1, "默认单行"));
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_tab_rows(cx)));
+    cx.read(|app| assert_eq!(ws.read(app).tab_rows(), MAX_TAB_ROWS));
+
+    // 画一帧，标签区才量得到可用宽度；900 px 下每行 4 个（TAB_WIDTH = 200）、每页 12 个
+    let ws_element = ws.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
+        ws_element.into_any_element()
+    });
+    cx.read(|app| {
+        let width = ws.read(app).strip_width();
+        assert!(width > 0., "画过一帧后应当量到宽度");
+        assert!(
+            tabs_per_page(width, MAX_TAB_ROWS) < 16,
+            "16 个标签在 900 px 下装不进一页，否则这条测不到翻页"
+        );
+    });
+
+    // 翻到下一页，再翻回来；两端都不该越界
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.step_tabs(1, cx)));
+    cx.read(|app| assert_eq!(ws.read(app).tab_page(), 1));
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            for _ in 0..10 {
+                ws.step_tabs(1, cx);
+            }
+        })
+    });
+    cx.read(|app| {
+        let ws = ws.read(app);
+        let pages = page_count(
+            ws.tab_count(),
+            tabs_per_page(ws.strip_width(), MAX_TAB_ROWS),
+        );
+        assert_eq!(ws.tab_page(), pages - 1, "翻到底就停住，不越界");
+    });
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            for _ in 0..10 {
+                ws.step_tabs(-1, cx);
+            }
+        })
+    });
+    cx.read(|app| assert_eq!(ws.read(app).tab_page(), 0, "翻回第一页就停住"));
+
+    // 激活一个在后面几页的标签，视图要跟着翻过去。
+    // 先切到第一个：最后新建的 Tab 本来就是当前项，直接 activate 它是空操作。
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.activate(0, cx)));
+    cx.read(|app| assert_eq!(ws.read(app).tab_page(), 0));
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.activate(15, cx)));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        let per_page = tabs_per_page(ws.strip_width(), MAX_TAB_ROWS);
+        assert_eq!(ws.tab_page(), 15 / per_page, "激活的标签必须在当前页里");
+    });
+
+    assert!(store.flush());
+    let state = read_workspace(&store).expect("workspace.json written");
+    assert_eq!(state.tab_rows, MAX_TAB_ROWS, "行数偏好要落盘");
 }
 
 /// 粘一条 curl → 解析 → 导入成新 Tab。整条链路走一遍。

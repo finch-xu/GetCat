@@ -194,6 +194,30 @@ tab:
   scroll_right:
     en: Show tabs on the right
     zh-CN: 向右查看标签
+  prev_page:
+    en: Previous page of tabs
+    zh-CN: 上一页标签
+  next_page:
+    en: Next page of tabs
+    zh-CN: 下一页标签
+  rows_toggle:
+    en: Show tabs on up to three rows
+    zh-CN: 最多三行展示标签
+  rows_toggle_off:
+    en: Show tabs on a single row
+    zh-CN: 单行展示标签
+  menu_duplicate:
+    en: Duplicate tab
+    zh-CN: 复制当前 Tab
+  menu_close_others:
+    en: Close other tabs
+    zh-CN: 关闭其他 Tab
+  menu_close_all:
+    en: Close all tabs
+    zh-CN: 关闭所有 Tab
+  strip_aria:
+    en: Request tabs
+    zh-CN: 请求标签栏
 
 url_bar:
   placeholder:

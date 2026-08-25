@@ -495,6 +495,17 @@ pub struct WorkspaceState {
     /// 请求 / 响应分栏方向；旧文件没有此字段时为左右（响应区在右侧）。
     #[serde(default)]
     pub split: SplitDirection,
+    /// 标签栏行数：1 = 单行横向滚动，[`MAX_TAB_ROWS`] = 多行分页。
+    /// 旧文件没有此字段时为单行；越界值读入后夹回合法范围。
+    #[serde(default = "default_tab_rows")]
+    pub tab_rows: u8,
+}
+
+/// 标签栏多行模式的行数上限。再多行标签栏就该自己占半屏了。
+pub const MAX_TAB_ROWS: u8 = 3;
+
+fn default_tab_rows() -> u8 {
+    1
 }
 
 fn default_sidebar_collapsed() -> bool {
@@ -510,6 +521,7 @@ impl Default for WorkspaceState {
             sidebar_collapsed: default_sidebar_collapsed(),
             theme: ThemePref::default(),
             split: SplitDirection::default(),
+            tab_rows: default_tab_rows(),
         }
     }
 }
@@ -675,6 +687,10 @@ mod tests {
         let ws: WorkspaceState = serde_json::from_str("{}").unwrap();
         assert_eq!(ws, WorkspaceState::default());
         assert_eq!(ws.theme, ThemePref::System);
+        // 旧 workspace.json 没有 tab_rows：单行，与改动前的标签栏一致
+        assert_eq!(ws.tab_rows, 1);
+        let rows: WorkspaceState = serde_json::from_str(r#"{"tab_rows":3}"#).unwrap();
+        assert_eq!(rows.tab_rows, MAX_TAB_ROWS);
         // 首次启动侧栏收成图标栏；旧文件缺字段时同样收起
         assert!(ws.sidebar_collapsed);
         let expanded: WorkspaceState =
