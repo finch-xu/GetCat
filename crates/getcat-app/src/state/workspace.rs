@@ -235,6 +235,7 @@ impl Workspace {
         } else {
             self.sidebar_section = section;
             self.sidebar_collapsed = false;
+            self.reset_workspace_panels(cx);
         }
         self.persist_workspace(cx);
         cx.notify();
@@ -257,6 +258,18 @@ impl Workspace {
     #[cfg(test)]
     pub fn sidebar_width(&self) -> Option<f32> {
         self.sidebar_width
+    }
+
+    /// 测试用：`ResizableState` 记下的各 panel 宽度，用来钉住侧栏不会被比例重分配压窄。
+    #[cfg(test)]
+    pub fn sidebar_panel_sizes(&self, cx: &App) -> Vec<f32> {
+        self.sidebar_state
+            .read(cx)
+            .sizes()
+            .iter()
+            .copied()
+            .map(f32::from)
+            .collect()
     }
 
     #[cfg(test)]
@@ -408,6 +421,9 @@ impl Workspace {
 
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
+        if !self.sidebar_collapsed {
+            self.reset_workspace_panels(cx);
+        }
         self.persist_workspace(cx);
         cx.notify();
     }
@@ -464,7 +480,7 @@ impl Workspace {
         self.split
     }
 
-    /// 拖拽分隔条松手：记录侧栏宽度并写回。
+    /// 拖拽分隔条松手：记录侧栏宽度并写回，然后把 panel 交还给 `sidebar_width` 驱动。
     fn on_sidebar_resized(&mut self, state: &Entity<ResizableState>, cx: &mut Context<Self>) {
         let Some(width) = state.read(cx).sizes().first().copied().map(f32::from) else {
             return;
@@ -473,6 +489,40 @@ impl Workspace {
             self.sidebar_width = Some(width);
             self.persist_workspace(cx);
         }
+        // 拖拽把 panel 的 size 写成了 Some(...)，从此它盖过 `initial_size`。宽度已经记进
+        // `sidebar_width` 了，这里立刻还原成 None，维持下面那条不变量。
+        self.reset_workspace_panels(cx);
+    }
+
+    /// 把侧栏 panel 的尺寸交还给 [`Self::sidebar_width`]——它才是侧栏宽度的唯一权威，
+    /// `ResizableState` 只负责拖拽交互本身。
+    ///
+    /// 不这么做的话侧栏会「展开几秒后自己缩一点」：gpui-component 的 `ResizablePanel`
+    /// 在 `visible(false)` 时 render 第一件事就是 `return div()`，既不 prepaint 也不写
+    /// `ResizableState::sizes`。于是收起期间 sizes 停在陈旧的 `[侧栏宽, 容器全宽]`，
+    /// 其总和远大于容器宽度；而 `ResizablePanelGroup` 只要容器尺寸一变就会按
+    /// `size / total` 的比例重分配（启动后更新检查回来改变状态栏、窗口 resize 都算），
+    /// 侧栏于是被按 `300 / 1500` 这样的错误比例压窄。
+    ///
+    /// `reset_panel` 把 panel 的 size 置回 `None`，于是 render 重新采用 `initial_size`
+    /// （侧栏用的就是渲染时传下去的 `sidebar_width`；主工作区没有 initial_size，回到
+    /// 由 flex 填满剩余空间）。而 `adjust_to_container_size` 只要见到任一 panel 的 size
+    /// 是 `None` 就早退——上游正是靠这条保护「有尺寸偏好的 panel 不被没偏好的拖着走」。
+    ///
+    /// **两个 panel 都要 reset**：只 reset 侧栏是不够的。侧栏展开后的第一帧，
+    /// `update_panel_size` 会把它的 size 从 `None` 写回 `Some`（`sizes[0]` 此时还是
+    /// 占位的 `PANEL_MIN_SIZE`），而主工作区的 `sizes[1]` 早在收起那一帧就被量成了
+    /// 容器全宽、此后再不更新。两个 `Some` 一凑齐，早退失效，比例重分配照样发生。
+    /// 主工作区被 reset 后 `sizes[1]` 不再等于 `PANEL_MIN_SIZE`，它的 size 就会一直
+    /// 保持 `None`，这条保护才真正立住。
+    fn reset_workspace_panels(&self, cx: &mut App) {
+        // 首帧之前 panels 还是空的，`reset_panel` 会直接索引 `sizes[ix]` 而 panic
+        let count = self.sidebar_state.read(cx).sizes().len();
+        self.sidebar_state.update(cx, |state, cx| {
+            for ix in 0..count {
+                state.reset_panel(ix, cx);
+            }
+        });
     }
 
     /// 侧栏列表读取用。

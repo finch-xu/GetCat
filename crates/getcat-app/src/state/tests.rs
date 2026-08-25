@@ -39,7 +39,7 @@ use crate::state::response::{ResponseState, ResponseView};
 use crate::state::settings;
 use crate::state::store;
 use crate::state::update::{self, InstallKind};
-use crate::state::workspace::{SidebarSection, ToolSection, Workspace};
+use crate::state::workspace::{SIDEBAR_DEFAULT_WIDTH, SidebarSection, ToolSection, Workspace};
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
@@ -2788,4 +2788,47 @@ async fn unsupported_platform_has_no_updater(cx: &mut TestAppContext) {
         cx.update(|_, cx| ws.read(cx).update_status().clone()),
         gpui_updater::UpdateStatus::Idle
     );
+}
+
+/// 侧栏展开后不该自己变窄。
+///
+/// 回归 gpui-component 的这条坑：`ResizablePanel` 在 `visible(false)` 时 render 直接
+/// `return div()`，既不 prepaint 也不写 `ResizableState::sizes`，于是侧栏收起期间 sizes
+/// 停在陈旧的 `[侧栏宽, 容器全宽]`，总和远大于容器；此后只要容器尺寸一变
+/// （启动后更新检查回来改状态栏、窗口 resize 都算），`ResizablePanelGroup` 就按
+/// `size / total` 的比例重分配，把侧栏压窄——用户看到的就是「展开几秒后自己缩了一点」。
+///
+/// 三帧分别对应：收起态记下「主工作区占满全宽」、展开、容器变窄触发重分配。
+#[gpui::test]
+fn sidebar_keeps_its_width_when_the_container_resizes(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    // 聚焦中的 Input 渲染时会调 macOS 的 set_text_content_type，测试窗口没有真实句柄
+    cx.update(|window, _| window.blur());
+
+    let draw = |cx: &mut VisualTestContext, width: f32| {
+        let element = ws.clone();
+        cx.draw(point(px(0.), px(0.)), size(px(width), px(800.)), |_, _| {
+            element.into_any_element()
+        });
+    };
+
+    // 默认收起：这一帧让 ResizableState 记下「主工作区独占全宽」
+    draw(cx, 1200.);
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_sidebar(cx)));
+    draw(cx, 1200.);
+    // 容器宽度一变就会触发 adjust_to_container_size —— 漂移原本发生在这里
+    draw(cx, 1100.);
+
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert!(!ws.sidebar_collapsed(), "侧栏应当是展开的");
+        let sizes = ws.sidebar_panel_sizes(app);
+        assert_eq!(sizes.len(), 2, "工作区就两个 panel：侧栏与主区");
+        assert!(
+            (sizes[0] - SIDEBAR_DEFAULT_WIDTH).abs() < 1.0,
+            "侧栏被重分配压成了 {} px，应当保持 {SIDEBAR_DEFAULT_WIDTH} px",
+            sizes[0]
+        );
+    });
 }
