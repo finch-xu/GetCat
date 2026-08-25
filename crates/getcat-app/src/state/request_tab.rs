@@ -32,6 +32,7 @@ use tokio::sync::mpsc;
 use crate::bridge;
 use crate::i18n::{Locale, tr};
 use crate::state::response::{CancelFlag, ResponseState, ResponseView, prepare_guarded};
+use crate::state::settings;
 use crate::state::store::store;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
 
@@ -181,6 +182,12 @@ fn save_dialog_dir(cx: &App) -> PathBuf {
         .unwrap_or_else(|| std::env::home_dir().unwrap_or_default())
 }
 
+/// 当前的换行偏好 `(请求体, 响应体)`。
+fn wrap_prefs(cx: &App) -> (bool, bool) {
+    let s = settings::settings(cx);
+    (s.wrap_request_body, s.wrap_response_body)
+}
+
 pub struct RequestTab {
     /// Tab 的稳定标识：也是草稿文件名 `drafts/<id>.json`。
     pub id: TabId,
@@ -212,6 +219,10 @@ pub struct RequestTab {
     pub body_hint: Option<BodyHint>,
     body_editors: Vec<(RawFormat, Entity<EditorState>)>,
     response_editors: Vec<(&'static str, Entity<EditorState>)>,
+    /// 已套用到编辑器上的换行开关 `(请求体, 响应体)`。偏好是全局的，但 `set_soft_wrap`
+    /// 只能在有 `Window` 时调用，所以由 `render` 比对这份缓存来补齐——任何一个 Tab
+    /// 改了偏好，其余 Tab 下一帧自动跟上，不需要 Workspace 逐个广播。
+    applied_wrap: (bool, bool),
     pub request_section: RequestSection,
     pub response_section: ResponseSection,
     pub pretty: bool,
@@ -242,6 +253,8 @@ impl RequestTab {
         let form_data =
             cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true));
 
+        // 换行是全局偏好：新建的 Tab 直接按当前设置建，不必等第一次 render 去纠正
+        let wrap = wrap_prefs(cx);
         let body_editors: Vec<(RawFormat, Entity<EditorState>)> = RawFormat::ALL
             .iter()
             .map(|f| {
@@ -252,7 +265,7 @@ impl RequestTab {
                         EditorState::new(window, cx)
                             .language(lang)
                             .line_number(true)
-                            .soft_wrap(false)
+                            .soft_wrap(wrap.0)
                     }),
                 )
             })
@@ -266,7 +279,7 @@ impl RequestTab {
                         EditorState::new(window, cx)
                             .language(*lang)
                             .line_number(true)
-                            .soft_wrap(false)
+                            .soft_wrap(wrap.1)
                             .searchable(true)
                     }),
                 )
@@ -331,6 +344,7 @@ impl RequestTab {
             body_hint: None,
             body_editors,
             response_editors,
+            applied_wrap: wrap,
             request_section: RequestSection::Params,
             response_section: ResponseSection::Body,
             pretty: true,
@@ -957,10 +971,65 @@ impl RequestTab {
             cx.open_with_system(path);
         }
     }
+
+    /// 把全局换行偏好补到本 Tab 的编辑器上；由 `render` 每帧调用，值没变时是空操作。
+    ///
+    /// 走「render 时比对」而不是「改设置时广播」：`set_soft_wrap` 需要 `Window`，
+    /// 而 `settings::update` 只拿得到 `App`。在自己的 `render` 里 update 子实体不会
+    /// 触发 gpui 的重入 panic——被借的是 `EditorState`，不是 `RequestTab` 自己。
+    fn sync_body_wrap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let wanted = wrap_prefs(cx);
+        if wanted == self.applied_wrap {
+            return;
+        }
+        if wanted.0 != self.applied_wrap.0 {
+            for (_, editor) in &self.body_editors {
+                editor.update(cx, |e, cx| e.set_soft_wrap(wanted.0, window, cx));
+            }
+        }
+        if wanted.1 != self.applied_wrap.1 {
+            for (_, editor) in &self.response_editors {
+                editor.update(cx, |e, cx| e.set_soft_wrap(wanted.1, window, cx));
+            }
+        }
+        self.applied_wrap = wanted;
+    }
+
+    /// 测试用：已套用到编辑器上的换行开关 `(请求体, 响应体)`。
+    #[cfg(test)]
+    pub fn applied_wrap(&self) -> (bool, bool) {
+        self.applied_wrap
+    }
+
+    /// 请求体「自动换行」开关。偏好是全局的，落 `settings.json`。
+    pub fn toggle_request_wrap(&mut self, cx: &mut Context<Self>) {
+        settings::update(cx, |s| s.wrap_request_body = !s.wrap_request_body);
+        cx.notify();
+    }
+
+    /// 响应体「自动换行」开关。只对 A 档（只读 Editor）有意义，B/C 档按行虚拟化，
+    /// 调用点负责在那两档下禁用按钮。
+    pub fn toggle_response_wrap(&mut self, cx: &mut Context<Self>) {
+        settings::update(cx, |s| s.wrap_response_body = !s.wrap_response_body);
+        cx.notify();
+    }
+
+    /// 响应体当前这一档是否支持换行：只有 A 档的只读 Editor 支持。
+    /// B/C 档走 `uniform_list`，它要求所有行等高，换行会直接打破这个前提。
+    pub fn response_wrap_available(&self) -> bool {
+        match &self.response {
+            ResponseState::Done { view, .. } => view
+                .doc(self.pretty)
+                .is_some_and(|d| d.tier == ViewTier::Editor),
+            _ => false,
+        }
+    }
 }
 
 impl Render for RequestTab {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 换行是全局偏好，但只有这里同时拿得到 `Window` 与所有编辑器实体
+        self.sync_body_wrap(window, cx);
         // 两个方向各用一个 id：ResizablePanelGroup 按 id 记住拖出来的尺寸，上下与左右互不串扰
         let group = match self.split {
             SplitDirection::Vertical => v_resizable("request-response-v"),

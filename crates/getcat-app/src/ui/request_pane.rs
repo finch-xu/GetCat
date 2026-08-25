@@ -5,7 +5,7 @@ use getcat_core::model::RawFormat;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, Sizable,
+    ActiveTheme, Icon, Selectable, Sizable,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     h_flex,
@@ -15,6 +15,7 @@ use gpui_component::{
     v_flex,
 };
 
+use crate::assets::ICON_WRAP_TEXT;
 use crate::i18n::tr;
 use crate::state::request_tab::{BodyMode, RequestSection, RequestTab};
 use crate::state::settings;
@@ -262,6 +263,7 @@ impl RequestTab {
     pub fn render_body_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let mode = self.body_mode;
         let current_format = self.raw_format;
+        let wrap_request = settings::settings(cx).wrap_request_body;
         v_flex()
             .size_full()
             .gap_3()
@@ -323,7 +325,22 @@ impl RequestTab {
                                                 this.format_body(window, cx)
                                             })),
                                     )
-                                }),
+                                })
+                                // 换行是全局偏好而非本 Tab 的状态：两边的正文编辑器各有
+                                // 一个开关，改一处所有 Tab 一起跟。Button 没有 aria_label
+                                // （只实现 InteractiveElement），tooltip 就是它对屏幕阅读器
+                                // 的名字，不能省。
+                                .child(
+                                    Button::new("wrap-request-body")
+                                        .ghost()
+                                        .small()
+                                        .icon(Icon::empty().path(ICON_WRAP_TEXT))
+                                        .selected(wrap_request)
+                                        .tooltip(tr!("request.wrap_lines"))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.toggle_request_wrap(cx)
+                                        })),
+                                ),
                         )
                     }),
             )

@@ -2832,3 +2832,47 @@ fn sidebar_keeps_its_width_when_the_container_resizes(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// 换行是**全局**偏好而不是每个 Tab 各管各的：在一个 Tab 上按下开关，其余 Tab 的
+/// 编辑器下一帧就得跟上。同步走的是 `render` 里比对缓存——`set_soft_wrap` 需要
+/// `Window`，而 `settings::update` 只拿得到 `App`，没法在改设置的当场推给所有 Tab。
+#[gpui::test]
+fn wrap_preference_is_global_and_reaches_every_tab(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let first = new_tab(cx);
+    let second = new_tab(cx);
+
+    // 默认：请求体换行（自己写的 JSON，横向找行尾更烦），响应体不换行（保持行对齐好扫）
+    cx.read(|app| {
+        assert_eq!(first.read(app).applied_wrap(), (true, false));
+        assert_eq!(second.read(app).applied_wrap(), (true, false));
+    });
+
+    cx.update(|_, cx| first.update(cx, |t, cx| t.toggle_request_wrap(cx)));
+    cx.read(|app| assert!(!settings::settings(app).wrap_request_body));
+
+    draw_tab(&first, cx);
+    draw_tab(&second, cx);
+    cx.read(|app| {
+        assert_eq!(first.read(app).applied_wrap(), (false, false));
+        assert_eq!(
+            second.read(app).applied_wrap(),
+            (false, false),
+            "另一个 Tab 的编辑器也要跟上全局偏好"
+        );
+    });
+}
+
+/// 响应体换行只在 A 档（只读 Editor）可用；没有响应、或大响应走按行虚拟化时都不可用。
+/// `uniform_list` 要求所有行等高，换行会直接打破这个前提。
+#[gpui::test]
+fn response_wrap_is_unavailable_without_an_editor_tier_body(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.read(|app| {
+        assert!(
+            !tab.read(app).response_wrap_available(),
+            "还没有响应时没什么可换行的"
+        );
+    });
+}

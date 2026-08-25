@@ -439,6 +439,13 @@ pub struct AppSettings {
     /// 界面语言；旧版 settings.json 没有这个字段时按跟随系统处理。
     #[serde(default)]
     pub language: LanguagePref,
+    /// 请求体编辑器自动换行。**默认开**：请求体是自己写的，横向找不到行尾比多几行更烦。
+    #[serde(default = "default_true")]
+    pub wrap_request_body: bool,
+    /// 响应体编辑器自动换行。**默认关**：响应多是美化过的结构化文本，保持行与缩进
+    /// 对齐才好扫；需要看长行时随时可以开。
+    #[serde(default)]
+    pub wrap_response_body: bool,
 }
 
 pub const EDITOR_FONT_SIZE_RANGE: std::ops::RangeInclusive<u32> = 10..=24;
@@ -454,6 +461,8 @@ impl Default for AppSettings {
             editor_font_size: default_editor_font_size(),
             check_updates_on_launch: true,
             language: LanguagePref::System,
+            wrap_request_body: true,
+            wrap_response_body: false,
         }
     }
 }
@@ -687,6 +696,9 @@ mod tests {
         assert!(s.request.disabled_default_headers.is_empty());
         assert_eq!(s.editor_font_size, 13);
         assert!(s.check_updates_on_launch);
+        // 请求体默认换行、响应体默认不换行；两者都能被老 settings.json 的缺字段兜住
+        assert!(s.wrap_request_body);
+        assert!(!s.wrap_response_body);
 
         // 老配置里显式写着 true 的必须原样保留：改默认值不该动用户已经做过的选择
         let partial: AppSettings = serde_json::from_str(
@@ -742,6 +754,8 @@ mod tests {
                 .unwrap();
         assert_eq!(legacy.language, LanguagePref::System);
         assert_eq!(legacy.editor_font_size, 14);
+        assert!(legacy.wrap_request_body);
+        assert!(!legacy.wrap_response_body);
     }
 
     #[test]

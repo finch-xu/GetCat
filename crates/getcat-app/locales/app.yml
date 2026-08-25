@@ -203,6 +203,9 @@ request:
   format_json_tooltip:
     en: Re-indent the JSON body
     zh-CN: 重新缩进 JSON 请求体
+  wrap_lines:
+    en: Wrap long lines
+    zh-CN: 长行自动换行
   hint_invalid_json:
     en: Not valid JSON — nothing to format
     zh-CN: 不是合法的 JSON，无法格式化
@@ -306,6 +309,12 @@ response:
   clear:
     en: Clear response
     zh-CN: 清空响应
+  wrap_lines:
+    en: Wrap long lines
+    zh-CN: 长行自动换行
+  wrap_unavailable:
+    en: Large responses render line by line and can’t wrap; scroll sideways instead
+    zh-CN: 大响应按行渲染，无法换行，请横向滚动查看
   binary_no_preview:
     en: Binary content has no text preview; use “Save to file…” in the top right to export it
     zh-CN: 二进制内容不提供文本预览，可用右上角「保存到文件…」导出

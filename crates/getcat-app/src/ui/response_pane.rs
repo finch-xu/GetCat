@@ -7,7 +7,7 @@ use getcat_core::tls::CertificateInfo;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, IconName, Sizable,
+    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable,
     alert::Alert,
     button::{Button, ButtonVariants},
     description_list::DescriptionList,
@@ -19,9 +19,11 @@ use gpui_component::{
     v_flex,
 };
 
+use crate::assets::ICON_WRAP_TEXT;
 use crate::i18n::tr;
 use crate::state::request_tab::{RequestTab, ResponseSection};
 use crate::state::response::{ResponseState, ResponseView};
+use crate::state::settings;
 use crate::ui::body_view::{render_header_rows, render_text_lines};
 use crate::ui::text::{
     cert_warning_label, content_kind_label, error_detail, error_kind, tier_notice,
@@ -128,6 +130,8 @@ impl RequestTab {
             self.response,
             ResponseState::Done { .. } | ResponseState::Failed { .. }
         );
+        let wrap_response = settings::settings(cx).wrap_response_body;
+        let wrap_available = self.response_wrap_available();
 
         v_flex()
             .size_full()
@@ -170,6 +174,25 @@ impl RequestTab {
                                         )
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.find_in_response(window, cx)
+                                        })),
+                                )
+                                // 换行只对 A 档的只读 Editor 有意义：B/C 档走 uniform_list，
+                                // 等高行是它的硬前提，换行会直接把虚拟化算法弄乱。那两档
+                                // 下按钮置灰并在 tooltip 里说明去处（横向滚动条现在常驻）。
+                                .child(
+                                    Button::new("wrap-response-body")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(Icon::empty().path(ICON_WRAP_TEXT))
+                                        .selected(wrap_response && wrap_available)
+                                        .disabled(!wrap_available)
+                                        .tooltip(if wrap_available {
+                                            tr!("response.wrap_lines")
+                                        } else {
+                                            tr!("response.wrap_unavailable")
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.toggle_response_wrap(cx)
                                         })),
                                 )
                                 .child(
