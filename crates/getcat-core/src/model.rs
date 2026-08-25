@@ -378,7 +378,7 @@ impl HttpVersionPref {
 /// 发送请求的行为设置（`settings.json` 的 `request` 段）；改动后要重建 HTTP client。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestSettings {
-    /// 整个请求（连接 + 读完响应）的总超时，秒；0 表示不限。
+    /// 整个请求（连接 + 读完响应）的总超时，秒；0 表示不限（默认值，见 [`default_timeout_secs`]）。
     #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u64,
     /// 是否自动跟随 3xx 跳转。
@@ -401,8 +401,10 @@ pub struct RequestSettings {
     pub disabled_default_headers: Vec<String>,
 }
 
+/// 默认**不限**总超时。调接口时「慢」和「挂了」得由人来判断：卡在 30 s 上限
+/// 会把一个还在跑的慢查询报成超时错误，而真正卡死的请求随时可以按取消。
 fn default_timeout_secs() -> u64 {
-    30
+    0
 }
 fn default_max_redirects() -> u32 {
     10
@@ -675,7 +677,8 @@ mod tests {
     fn app_settings_tolerate_missing_fields_and_round_trip() {
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s, AppSettings::default());
-        assert_eq!(s.request.timeout_secs, 30);
+        // 默认不限：慢接口不该被报成超时，卡死的随时可以取消
+        assert_eq!(s.request.timeout_secs, 0);
         assert!(s.request.follow_redirects);
         assert_eq!(s.request.max_redirects, 10);
         // 默认关闭：本地调试大量对着自签名接口，开着的话连握手都过不去
@@ -691,7 +694,7 @@ mod tests {
         )
         .unwrap();
         assert!(partial.request.verify_tls);
-        assert_eq!(partial.request.timeout_secs, 30);
+        assert_eq!(partial.request.timeout_secs, 0);
         assert!(partial.request.disabled_default_headers.is_empty());
 
         // 关掉过默认头的配置读回来要原样保留
