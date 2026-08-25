@@ -15,7 +15,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
     ParentElement, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, UniformListScrollHandle, Window, div, point, px,
+    Subscription, UniformListScrollHandle, WeakEntity, Window, div, point, px,
 };
 use gpui_component::{
     ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
@@ -205,6 +205,10 @@ impl Workspace {
                 .unwrap_or(0);
             ws.active_tab().update(cx, |t, cx| t.focus_url(window, cx));
         }
+
+        // 恢复出来的激活标签可能在很靠后的位置：光设 `active` 是不够的，标签栏还得滚 / 翻过去。
+        // 但这两件事都要等布局算完才做得准，所以推迟到首帧之后（见函数注释）。
+        Self::reveal_active_tab_after_first_frame(window, cx);
 
         apply_theme(ws.theme, Some(window), cx);
         // 跟随系统：系统外观变化时重新同步（固定明 / 暗时忽略）
@@ -444,6 +448,48 @@ impl Workspace {
         } else {
             self.tab_scroll.scroll_to_item(self.active);
         }
+    }
+
+    /// 等首帧画完再 reveal 一次。恢复现场（[`Self::restore`]）专用。
+    ///
+    /// [`Self::reveal_active_tab`] 的两条路都要读布局结果，而 `restore` 跑在首帧之前：
+    ///
+    /// - 多行靠 `strip_width`，它由标签栏的 `on_prepaint` 回填，此刻还是 0，
+    ///   `tabs_per_page` 退化成行数本身，页码算歪；
+    /// - 单行靠 `ScrollHandle::scroll_to_item`，它只记一个待办项，真正滚动的
+    ///   `scroll_to_active_item` 跑在 div 的 prepaint 里（zed e0931d5
+    ///   `crates/gpui/src/elements/div.rs:1908`），而它**早于**同一次 prepaint 里给滚动句柄
+    ///   写 `overflow` / `bounds` 的那两行（2337 / 2367）。首帧时 `overflow` 还是默认的
+    ///   `Visible`，滚动分支整段跳过；可 `child_bounds` 已经在这次 prepaint 里填好了，
+    ///   待办项于是被当成「已处理」清掉——请求就这么蒸发，且不会自动重试。
+    ///
+    /// 所以要嵌两层 `on_next_frame`：帧回调跑在 `window.draw` **之前**
+    /// （zed e0931d5 `crates/gpui/src/window.rs:1592`），而 `restore` 本身发生在首帧之前，
+    /// 第一层回调触发时依旧什么都没画。同样的理由见
+    /// [`RequestTab::find_in_response`](crate::state::request_tab::RequestTab::find_in_response)。
+    fn reveal_active_tab_after_first_frame(window: &mut Window, cx: &mut Context<Self>) {
+        fn reveal(ws: &WeakEntity<Workspace>, cx: &mut App) {
+            let Some(ws) = ws.upgrade() else { return };
+            ws.update(cx, |ws, cx| {
+                ws.reveal_active_tab();
+                cx.notify();
+            });
+        }
+
+        let ws = cx.entity().downgrade();
+        window.on_next_frame(move |window, _| {
+            let settled = ws.clone();
+            // 第二帧：布局已经量到，滚 / 翻过去
+            window.on_next_frame(move |window, cx| {
+                reveal(&ws, cx);
+                // 第三帧再校一次。单行刚溢出时滚动箭头是下一帧才出现的（`show_arrows` 要等
+                // `max_offset` 有值），标签区会因此窄掉箭头那一截，而 gpui 算滚动偏移用的是
+                // **上一帧**写进滚动句柄的 `bounds`——第一次算出来的偏移正好短这么点，
+                // 激活标签的右边缘会被压在箭头底下。`reveal_active_tab` 是幂等的
+                // （已经完整可见就什么都不动），补这一次只补差额，不会来回跳。
+                window.on_next_frame(move |_, cx| reveal(&settled, cx));
+            });
+        });
     }
 
     /// 左右按钮：单行时横向滚一步，多行时翻一页。`dir` 为 -1 往左 / 上一页，+1 反之。

@@ -2878,6 +2878,7 @@ fn response_wrap_is_unavailable_without_an_editor_tier_body(cx: &mut TestAppCont
         );
     });
 }
+
 /// 标签右键菜单的三个动作。都不弹二次确认——草稿本来就随时落盘，
 /// 「关闭即删草稿」是 `close_tab` 早就定下的语义。
 #[gpui::test]
@@ -3002,6 +3003,118 @@ fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
     assert!(store.flush());
     let state = read_workspace(&store).expect("workspace.json written");
     assert_eq!(state.tab_rows, MAX_TAB_ROWS, "行数偏好要落盘");
+}
+/// 写 `count` 份草稿加一份 workspace.json，第 `active` 个为激活项；返回按顺序排好的 id。
+///
+/// URL 特意写长：单行模式下标签宽度是「内容撑开、上限 `TAB_WIDTH`」，短标题会让 16 个标签
+/// 挤得下一屏，这条测试也就测不到滚动了。
+fn write_tabs_with_active(store: &Store, count: usize, active: usize, tab_rows: u8) -> Vec<Ulid> {
+    let ids: Vec<Ulid> = (0..count).map(|_| Ulid::generate()).collect();
+    for (i, id) in ids.iter().enumerate() {
+        store.write_draft(TabDraft {
+            id: *id,
+            draft: RequestDraft {
+                url: format!("https://api.test/a/rather/long/path/segment/{i}"),
+                ..Default::default()
+            },
+            saved_id: None,
+            dirty: false,
+        });
+    }
+    store.write_workspace(WorkspaceState {
+        tab_order: ids.clone(),
+        active: Some(ids[active]),
+        sidebar_width: None,
+        sidebar_collapsed: true,
+        theme: ThemePref::System,
+        split: SplitDirection::default(),
+        tab_rows,
+    });
+    assert!(store.flush());
+    ids
+}
+
+/// 走 `frames` 帧真实帧序：每帧**先**跑 `on_next_frame` 回调**再**画。
+///
+/// 顺序必须与 gpui 的帧循环一致（回调在 `window.draw` 之前，zed e0931d5
+/// `crates/gpui/src/window.rs:1592`）——`restore` 发生在首帧之前，只有照这个顺序泵帧，
+/// 才复现得出「第一层回调触发时还什么都没画」这个前提。
+fn pump_frames(ws: &Entity<Workspace>, frames: usize, cx: &mut VisualTestContext) {
+    for _ in 0..frames {
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        let element = ws.clone();
+        cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
+            element.into_any_element()
+        });
+    }
+}
+
+/// 重启后激活的标签在靠后的一页：多行模式下画完首帧必须自动翻到它所在那页。
+#[gpui::test]
+fn restore_reveals_active_tab_page_in_multi_row(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    const ACTIVE: usize = 13;
+    write_tabs_with_active(&store, 16, ACTIVE, MAX_TAB_ROWS);
+
+    let loaded = store.load_all();
+    assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.update(|window, _| window.blur());
+
+    // 三帧才够：第一帧出布局，第二帧滚动箭头出现（标签区随之变窄），第三帧偏移才算得准。
+    // 多泵一帧留点余量，免得断言钉死在准确的帧数上。
+    pump_frames(&ws, 4, cx);
+
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.active_index(), ACTIVE, "激活项应当来自 workspace.json");
+        let per_page = tabs_per_page(ws.strip_width(), MAX_TAB_ROWS);
+        let want = ACTIVE / per_page;
+        assert!(
+            want > 0,
+            "激活标签得落在第一页之外这条测试才有意义（per_page = {per_page}）"
+        );
+        assert_eq!(ws.tab_page(), want, "重启后要翻到激活标签所在那页");
+    });
+}
+
+/// 同一件事的单行版：重启后横向滚动条要把激活的标签滚进视口。
+#[gpui::test]
+fn restore_scrolls_active_tab_into_view_in_single_row(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    const ACTIVE: usize = 13;
+    write_tabs_with_active(&store, 16, ACTIVE, 1);
+
+    let loaded = store.load_all();
+    assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.update(|window, _| window.blur());
+
+    // 三帧才够：第一帧出布局，第二帧滚动箭头出现（标签区随之变窄），第三帧偏移才算得准。
+    // 多泵一帧留点余量，免得断言钉死在准确的帧数上。
+    pump_frames(&ws, 4, cx);
+
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.active_index(), ACTIVE, "激活项应当来自 workspace.json");
+        let scroll = ws.tab_scroll();
+        let offset = scroll.offset().x;
+        let viewport = scroll.bounds();
+        let item = scroll
+            .bounds_for_item(ACTIVE)
+            .expect("画过一帧后每个标签都该量到布局");
+        assert!(
+            viewport.size.width < item.right() - scroll.bounds().left(),
+            "16 个长标签在 900 px 下必须溢出，否则这条测不到滚动"
+        );
+        // `child_bounds` 记的是没套滚动偏移的布局位置，可视区判定要自己加回 offset
+        // （与 gpui `ScrollHandle::scroll_to_active_item` 的口径一致）
+        assert!(
+            item.left() + offset >= viewport.left() - px(0.5)
+                && item.right() + offset <= viewport.right() + px(0.5),
+            "重启后激活标签要落在可视区内：item = {item:?}，offset = {offset:?}，viewport = {viewport:?}"
+        );
+    });
 }
 
 /// 粘一条 curl → 解析 → 导入成新 Tab。整条链路走一遍。
