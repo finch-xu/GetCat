@@ -11,7 +11,7 @@
 
 use getcat_core::model::Method;
 use gpui::{App, Hsla, rgb};
-use gpui_component::{ActiveTheme, Theme, ThemeRegistry};
+use gpui_component::{ActiveTheme, Theme, ThemeRegistry, scroll::ScrollbarMode};
 
 const THEME_JSON: &str = include_str!("theme.json");
 const LIGHT: &str = "GetCat Light";
@@ -125,6 +125,15 @@ pub fn install(cx: &mut App) {
     let mode = theme.mode;
     // 重新套用当前模式，让刚换上的配置立刻生效（并同步 Base 层）。
     Theme::change(mode, None, cx);
+
+    // 滚动条常驻。上游默认是 `Scrolling`——只在滚动时画、静止后淡出，于是「这块内容
+    // 还能往右拉」这件事根本没有可见线索：响应体里一行超宽 JSON 看上去就只是被切掉了。
+    // 接口调试要盯的恰恰是长行，所以这里换成 `Always`。
+    //
+    // 必须放在 `Theme::change` **之后**：`change` 会用 `scrollbar_mode` 重建 Base 层投影，
+    // 反过来写就被它按旧值覆盖了。此后 `change` / `sync_system_appearance` 都从
+    // `Theme::scrollbar_mode` 读，切明暗不会退回默认（有测试钉住）。
+    Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
 }
 
 #[cfg(test)]
@@ -137,6 +146,25 @@ mod tests {
         let rgba = gpui::Rgba::from(color);
         let to8 = |v: f32| (v * 255.0).round() as u32;
         (to8(rgba.r) << 16) | (to8(rgba.g) << 8) | to8(rgba.b)
+    }
+
+    /// 滚动条常驻，且切换明暗后不退回上游默认的「滚动时才画」。
+    #[gpui::test]
+    fn install_pins_the_scrollbar_to_always_visible(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            install(cx);
+            assert_eq!(Theme::global(cx).scrollbar_mode, ScrollbarMode::Always);
+
+            for mode in [ThemeMode::Light, ThemeMode::Dark, ThemeMode::Light] {
+                Theme::change(mode, None, cx);
+                assert_eq!(
+                    Theme::global(cx).scrollbar_mode,
+                    ScrollbarMode::Always,
+                    "切到 {mode:?} 后滚动条退回了默认模式"
+                );
+            }
+        });
     }
 
     /// 配色取自 BucketCat 的 src/index.css；muted_foreground 是唯一一处
