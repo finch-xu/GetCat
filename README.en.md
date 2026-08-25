@@ -28,8 +28,8 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 - **Native and fast**: a GPU-rendered native window — not Electron, Tauri, or a WebView. One interface across macOS, Linux, and Windows.
 - **Large responses stay smooth**: streamed reception, live progress, cancel at any time. Up to 5 MB opens in the highlighted editor, up to 64 MB is line-virtualized, and anything larger spills to disk with a preview and one-click save — a few hundred MB won't lock up the UI.
 - **Complete request building**: GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS; path parameters (`{name}` in the URL), query, and headers; bodies as form-data (text and file fields, files streamed with a known length), x-www-form-urlencoded, raw JSON / Text / XML, or a whole binary file.
+- **Commands in and out**: the right-hand rail turns the current request into a cURL / Python snippet, and takes one back — paste a curl command (a browser's "Copy as cURL" works as-is) and it becomes a new tab, with anything that couldn't be carried over listed explicitly.
 - **Your data is yours**: no history, no stored responses, nothing uploaded anywhere. Saved requests, drafts, and settings are pretty-printed JSON files you can hand-edit and track in Git.
-- **Saves as you go**: every tab's draft is written to disk and restored on restart; ⌘S saves to the sidebar; tab order, split direction, and theme preference are all remembered.
 - **Theme follows the system**, or pin it to light / dark. The title bar is custom-drawn, so all three platforms look the same.
 - **Accessible**: every control has an accessible name and works with screen readers.
 

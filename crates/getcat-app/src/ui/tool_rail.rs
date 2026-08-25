@@ -14,6 +14,7 @@ use gpui_component::{
     v_flex,
 };
 
+use crate::assets::ICON_FILE_INPUT;
 use crate::i18n::tr;
 use crate::state::workspace::{ToolSection, Workspace};
 
@@ -21,12 +22,15 @@ impl ToolSection {
     pub fn title(self) -> SharedString {
         match self {
             ToolSection::CodeGen => tr!("tools.code.title"),
+            ToolSection::ImportCurl => tr!("tools.import_curl.title"),
         }
     }
 
-    fn icon(self) -> IconName {
+    fn icon(self) -> Icon {
         match self {
-            ToolSection::CodeGen => IconName::SquareTerminal,
+            ToolSection::CodeGen => Icon::new(IconName::SquareTerminal),
+            // 内置图标集里没有合适的「导入」图形，用补进 AppAssets 的那枚
+            ToolSection::ImportCurl => Icon::empty().path(ICON_FILE_INPUT),
         }
     }
 }
@@ -51,7 +55,7 @@ impl Workspace {
                 let section = *section;
                 Button::new(("rail-tool", section as usize))
                     .ghost()
-                    .icon(Icon::new(section.icon()).size_4())
+                    .icon(section.icon().size_4())
                     .tooltip(section.title())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_tool_section(section, window, cx)

@@ -28,8 +28,8 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 - **原生且轻快**：GPU 渲染的原生窗口，不是 Electron / Tauri / WebView；macOS、Linux、Windows 三平台同一套界面。
 - **大响应不卡**：流式接收、实时进度、随时取消；≤ 5 MB 用高亮编辑器，≤ 64 MB 按行虚拟化，更大的落盘预览 + 一键保存，百 MB 响应也不会拖住界面。
 - **完整的请求构造**：GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS；Path 参数（URL 中 `{name}`）、Query、Headers；Body 支持 form-data（文本 / 文件字段，文件定长流式上传）、x-www-form-urlencoded、raw JSON / Text / XML、binary 整文件上传。
+- **命令进出自如**：右侧栏可把当前请求转成 cURL / Python 示例，也能反过来粘一条 curl 命令导进来——浏览器「以 cURL 格式复制」的输出直接可用，没搬过来的选项会如实列出。
 - **数据属于你**：不存历史、不存响应、不上传任何东西。已保存请求、草稿、设置都是美化过的 JSON 文件，可手工编辑、可用 Git 管理。
-- **随手即存**：每个 Tab 的草稿自动落盘、重启恢复；⌘S 保存到侧栏；Tab 顺序、分栏方向、主题偏好都记住。
 - **主题与语言跟随系统**，也可固定浅色 / 深色、English / 中文；自绘标题栏，三平台外观一致。
 - **无障碍**：所有控件都有可访问名称，屏幕阅读器可用。
 

@@ -2876,3 +2876,95 @@ fn response_wrap_is_unavailable_without_an_editor_tier_body(cx: &mut TestAppCont
         );
     });
 }
+
+/// 粘一条 curl → 解析 → 导入成新 Tab。整条链路走一遍。
+#[gpui::test]
+fn importing_a_curl_command_opens_a_new_tab(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    // 当前 Tab 先填点东西：导入不该把它冲掉
+    let original = cx.read(|app| ws.read(app).active_tab());
+    change_url(&original, "https://api.test/keep-me", cx);
+
+    let cmd = r#"curl -X POST 'https://api.example.com/v1/users?page=2' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Token: abc' \
+  --data-raw '{"name":"cat"}' \
+  --compressed"#;
+    cx.update(|window, cx| {
+        ws.read(cx)
+            .curl_sheet
+            .clone()
+            .update(cx, |sheet, cx| sheet.set_text_for_test(cmd, window, cx))
+    });
+
+    // 解析结果先在抽屉里显示，运行时选项如实报出来
+    cx.read(|app| {
+        let sheet = ws.read(app).curl_sheet.read(app);
+        assert!(sheet.error().is_none());
+        let draft = sheet.draft().expect("解析成功");
+        assert_eq!(draft.method, Method::Post);
+        assert_eq!(draft.url, "https://api.example.com/v1/users");
+        assert_eq!(sheet.warnings().len(), 1, "--compressed 属于发送设置");
+    });
+
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.import_curl(window, cx)));
+
+    cx.read(|app| {
+        let w = ws.read(app);
+        assert_eq!(w.tab_count(), 2, "导入开的是新 Tab");
+        let tab = w.active_tab().read(app);
+        assert!(tab.dirty, "导入的 Tab 是未保存状态");
+        assert_eq!(tab.saved_id, None);
+        // 原来的 Tab 原样保留
+        assert_eq!(
+            w.tab_at(0).read(app).url.read(app).value(),
+            "https://api.test/keep-me"
+        );
+    });
+
+    // 抽屉清空，下次打开不会还留着上一条命令
+    cx.read(|app| assert!(ws.read(app).curl_sheet.read(app).draft().is_none()));
+
+    // 新 Tab 的草稿要落盘，重启后还在
+    assert!(store.flush());
+    let drafts = store.load_all().drafts;
+    assert!(
+        drafts
+            .iter()
+            .any(|d| d.draft.url == "https://api.example.com/v1/users"),
+        "导入的请求没有落草稿"
+    );
+}
+
+/// 解析不出来时不能给出草稿——「导入」按钮就是靠它置灰的。
+#[gpui::test]
+fn a_command_that_is_not_curl_yields_no_draft(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let sheet = cx.read(|app| ws.read(app).curl_sheet.clone());
+
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.set_text_for_test("wget https://x.com", window, cx)
+        })
+    });
+    cx.read(|app| {
+        let s = sheet.read(app);
+        assert!(s.draft().is_none());
+        assert!(s.error().is_some());
+    });
+
+    // 导入是空操作，不会凭空开 Tab
+    let before = cx.read(|app| ws.read(app).tab_count());
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.import_curl(window, cx)));
+    cx.read(|app| assert_eq!(ws.read(app).tab_count(), before));
+
+    // 清空输入后回到「没有内容」而不是「解析失败」
+    cx.update(|window, cx| sheet.update(cx, |s, cx| s.set_text_for_test("", window, cx)));
+    cx.read(|app| {
+        let s = sheet.read(app);
+        assert!(s.draft().is_none());
+        assert!(s.error().is_none(), "空输入不是错误");
+    });
+}

@@ -67,6 +67,52 @@ tools:
     editor_aria:
       en: Generated code
       zh-CN: 生成的代码
+  import_curl:
+    title:
+      en: Import cURL
+      zh-CN: 导入 cURL
+    placeholder:
+      en: "Paste a curl command, e.g. from a browser’s “Copy as cURL”"
+      zh-CN: "粘贴 curl 命令，例如浏览器的「以 cURL 格式复制」"
+    input_aria:
+      en: cURL command
+      zh-CN: cURL 命令
+    import:
+      en: Import as new tab
+      zh-CN: 导入为新 Tab
+    summary:
+      en: "%{method} · %{headers} headers · %{body}"
+      zh-CN: "%{method} · %{headers} 个请求头 · %{body}"
+    body_none:
+      en: no body
+      zh-CN: 无请求体
+    body_raw:
+      en: "%{format} body"
+      zh-CN: "%{format} 请求体"
+    body_form_data:
+      en: "form-data (%{count} fields)"
+      zh-CN: "form-data（%{count} 个字段）"
+    body_urlencoded:
+      en: "urlencoded (%{count} fields)"
+      zh-CN: "urlencoded（%{count} 个字段）"
+    body_binary:
+      en: file body
+      zh-CN: 文件请求体
+    warnings:
+      en: "Not carried over (%{count})"
+      zh-CN: "没有搬过来的部分（%{count} 项）"
+    warn_runtime:
+      en: "%{flag} — a send-time setting, configure it in Settings"
+      zh-CN: "%{flag} — 属于发送设置，请在「设置」里调整"
+    warn_unknown:
+      en: "%{flag} — unrecognized, skipped"
+      zh-CN: "%{flag} — 无法识别，已跳过"
+    warn_unsupported:
+      en: "%{flag} — not supported by GetCat"
+      zh-CN: "%{flag} — GetCat 不支持"
+    empty_hint:
+      en: The parsed request will be summarized here
+      zh-CN: 解析结果会显示在这里
 
 sidebar:
   rail_aria:

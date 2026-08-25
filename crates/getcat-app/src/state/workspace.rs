@@ -39,6 +39,7 @@ use crate::state::store::{banner, store};
 use crate::state::update;
 use crate::templates;
 use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
+use crate::ui::curl_sheet::{CURL_SHEET_WIDTH, CurlSheet, import_button};
 use crate::ui::method_color;
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
 use crate::{
@@ -73,10 +74,11 @@ impl SidebarSection {
 pub enum ToolSection {
     #[default]
     CodeGen,
+    ImportCurl,
 }
 
 impl ToolSection {
-    pub const ALL: [ToolSection; 1] = [ToolSection::CodeGen];
+    pub const ALL: [ToolSection; 2] = [ToolSection::CodeGen, ToolSection::ImportCurl];
 }
 
 pub struct Workspace {
@@ -104,6 +106,11 @@ pub struct Workspace {
     /// `Workspace::render` 内部渲染，做成 Workspace 上的 render 方法会二次借用本实体而 panic
     /// （详见 [`crate::ui::code_sheet`] 的模块注释）。抽屉是窗口级单例，全局一份。
     pub(crate) code_sheet: Entity<CodeSheet>,
+    /// 「导入 cURL」抽屉的正文。与 `code_sheet` 同样的约束：必须是独立实体。
+    pub(crate) curl_sheet: Entity<CurlSheet>,
+    /// 当前打开着的是哪个抽屉。`Sheet` 是窗口级单例，只靠 `has_active_sheet`
+    /// 分不清「点的是同一个（该收起）」还是「点的是另一个（该换内容）」。
+    open_tool: Option<ToolSection>,
     _subs: Vec<Subscription>,
 }
 
@@ -145,6 +152,8 @@ impl Workspace {
             focus_handle: cx.focus_handle(),
             update_status: update::status(cx),
             code_sheet: cx.new(|cx| CodeSheet::new(window, cx)),
+            curl_sheet: cx.new(|cx| CurlSheet::new(window, cx)),
+            open_tool: None,
             _subs: Vec::new(),
         };
 
@@ -1025,9 +1034,27 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 点当前开着的那个 → 收起；点另一个 → 换内容（与左侧栏同款手感）
+        if self.open_tool == Some(section) {
+            self.close_tool_sheet(window, cx);
+            return;
+        }
         match section {
             ToolSection::CodeGen => self.open_code_sheet(window, cx),
+            ToolSection::ImportCurl => self.open_curl_sheet(window, cx),
         }
+    }
+
+    /// 收起当前抽屉。
+    ///
+    /// 用 `open_tool` 而不是 `window.has_active_sheet` 判断有没有抽屉开着：后者内部走
+    /// `Root::read`，窗口根不是 `gpui_component::Root` 时直接 unwrap 一个 None
+    /// （`#[gpui::test]` 的测试窗口就是这样）。`open_tool` 本来就完整记录了这件事。
+    fn close_tool_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.open_tool.take().is_some() {
+            window.close_sheet(cx);
+        }
+        cx.notify();
     }
 
     /// 打开（或收起）代码抽屉。再点一次同一个图标就收起，与左侧栏「点当前功能收起」同款手感。
@@ -1035,11 +1062,8 @@ impl Workspace {
     /// builder 里**只把 `Entity<CodeSheet>` 传进去**，不碰 `self`：这个闭包是 `Fn`，
     /// 每帧在本实体的 `render` 内部执行，动一下 `self` 就会二次借用而 panic。
     pub fn open_code_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if window.has_active_sheet(cx) {
-            window.close_sheet(cx);
-            return;
-        }
         self.refresh_code_sheet(window, cx);
+        self.open_tool = Some(ToolSection::CodeGen);
 
         let code_sheet = self.code_sheet.clone();
         window.open_sheet(cx, move |sheet, _, _| {
@@ -1048,6 +1072,64 @@ impl Workspace {
                 .title(div().child(tr!("tools.code.title")))
                 .child(code_sheet.clone())
         });
+        cx.notify();
+    }
+
+    /// 打开「导入 cURL」抽屉。
+    ///
+    /// builder 里只放 `Entity<CurlSheet>` 与一个弱引用闭包，**绝不碰 `self`**：
+    /// 它是 `Fn`、每帧在本实体的 `render` 内部执行，动一下就二次借用 panic。
+    pub fn open_curl_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_tool = Some(ToolSection::ImportCurl);
+        let curl_sheet = self.curl_sheet.clone();
+        let ws = cx.entity().downgrade();
+
+        window.open_sheet(cx, move |sheet, _, cx| {
+            let body = curl_sheet.clone();
+            let ws = ws.clone();
+            // 解析不出来就没得导，按钮置灰而不是点了没反应
+            let ready = curl_sheet.read(cx).draft().is_some();
+            sheet
+                .size(px(CURL_SHEET_WIDTH))
+                .title(div().child(tr!("tools.import_curl.title")))
+                .footer(import_button(ready, move |_, window, cx| {
+                    if let Some(ws) = ws.upgrade() {
+                        ws.update(cx, |ws, cx| ws.import_curl(window, cx));
+                    }
+                }))
+                .child(body)
+        });
+        // 聚焦必须等到 Sheet 挂上之后：`open_sheet` 自己会接管焦点
+        // （`Root` 会记下打开前的焦点以便关闭时还原），在它之前聚焦一定被盖掉。
+        // 这个抽屉的第一动作就是粘贴，光标不在输入框里等于每次都要先点一下。
+        let sheet = self.curl_sheet.clone();
+        window.on_next_frame(move |window, cx| {
+            sheet.update(cx, |sheet, cx| sheet.focus(window, cx));
+        });
+        cx.notify();
+    }
+
+    /// 把抽屉里解析好的草稿开成一个新 Tab。
+    ///
+    /// 开新 Tab 而不是改当前那个：当前 Tab 多半正编到一半，导入不该把它冲掉。
+    pub fn import_curl(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = self.curl_sheet.read(cx).draft().cloned() else {
+            return;
+        };
+        // 与 duplicate_tab 同一条路径：建实体 → 装草稿 → 置脏 → 立即落草稿
+        self.new_tab(window, cx);
+        let tab = self.active_tab().clone();
+        tab.update(cx, |t, cx| {
+            t.load_draft(&draft, window, cx);
+            t.saved_id = None;
+            // load_draft 是不发事件的程序化写入，不会置脏，这里手动标记
+            t.mark_dirty(cx);
+            t.save_draft_now(cx);
+            cx.notify();
+        });
+        self.curl_sheet
+            .update(cx, |sheet, cx| sheet.clear(window, cx));
+        self.close_tool_sheet(window, cx);
     }
 
     /// 把当前 Tab 的草稿与默认头开关交给抽屉，重新生成代码。
