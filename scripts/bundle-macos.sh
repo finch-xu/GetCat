@@ -84,6 +84,7 @@ plutil -lint "$contents/Info.plist" >/dev/null
 printf 'APPL????' >"$contents/PkgInfo"
 cp "$binary" "$contents/MacOS/$bin_name"
 chmod 755 "$contents/MacOS/$bin_name"
+cp LICENSE "$contents/Resources/LICENSE"
 
 # 图标：1024 PNG → iconset（10 张）→ icns
 iconset="$stage/$app_name.iconset"
