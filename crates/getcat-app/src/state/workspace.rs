@@ -48,8 +48,8 @@ use crate::{
     ToggleSidebar,
 };
 
-/// 侧栏默认宽度（spec §7.1）。
-pub const SIDEBAR_DEFAULT_WIDTH: f32 = 300.;
+/// 侧栏默认宽度（spec §4.3：两栏主从式分类列上线后加宽，容纳分类列 + 请求列）。
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 360.;
 
 /// 标签栏箭头一次滚动的距离，约一个标签宽（标签上限 200 px）。
 const TAB_SCROLL_STEP: f32 = 180.;
@@ -719,12 +719,10 @@ impl Workspace {
         &self.saved_scroll
     }
 
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     pub(crate) fn saved_filter(&self) -> &SavedFilter {
         &self.saved_filter
     }
 
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     pub fn set_saved_filter(&mut self, filter: SavedFilter, cx: &mut Context<Self>) {
         if self.saved_filter != filter {
             self.saved_filter = filter;
@@ -733,14 +731,12 @@ impl Workspace {
     }
 
     /// 当前过滤下的下标快照；渲染闭包拿它 + `saved_rc()`，每帧仍是 O(可见行)。
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     pub(crate) fn filtered_saved_indices(&self) -> Vec<usize> {
         saved_filter::filter_indices(&self.saved_filter, &self.saved)
     }
 
     /// 组织操作共用：`retag` 返回 None = 这条不动，Some(g) = 把 group 设为 g。
     /// 只重写真正变化的文件；**不碰 `updated_at`**（spec §3，组织操作不算内容修改）。
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     fn retag_saved(
         &mut self,
         mut retag: impl FnMut(&SavedRequest) -> Option<Option<String>>,
@@ -768,13 +764,11 @@ impl Workspace {
         cx.notify();
     }
 
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     pub fn move_saved_to_group(&mut self, id: Ulid, group: Option<String>, cx: &mut Context<Self>) {
         self.retag_saved(|r| (r.id == id).then(|| group.clone()), cx);
     }
 
     /// 重命名分类；目标名已存在时自然合并（推导模型下同名即同类）。
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     pub fn rename_group(&mut self, from: &str, to: &str, cx: &mut Context<Self>) {
         let Some(to) = saved_filter::normalize_group(to) else {
             return; // 空名不接受，对话框层已挡，这里兜底
@@ -793,7 +787,6 @@ impl Workspace {
     }
 
     /// 解散分类：成员回未分类，请求本身不删。
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     pub fn dissolve_group(&mut self, name: &str, cx: &mut Context<Self>) {
         self.retag_saved(|r| (r.group.as_deref() == Some(name)).then_some(None), cx);
     }
@@ -920,6 +913,155 @@ impl Workspace {
                     true
                 })
         });
+    }
+
+    /// 重命名分类：输入框对话框；同名即合并（正文写明）。
+    pub(crate) fn prompt_rename_group(
+        &mut self,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr!("dialog.rename_group.name"))
+                .default_value(SharedString::from(name.clone()))
+        });
+        let weak = cx.entity().downgrade();
+        let input_for_focus = input.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let input_for_content = input.clone();
+            let input_for_ok = input.clone();
+            let weak = weak.clone();
+            let from = name.clone();
+            dialog
+                .title(tr!("dialog.rename_group.title", name = from.clone()))
+                .content(move |content, _, cx| {
+                    content
+                        .child(
+                            Input::new(&input_for_content)
+                                .aria_label(tr!("dialog.rename_group.name")),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr!("dialog.rename_group.body")),
+                        )
+                })
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new().child(
+                                Button::new("cancel-rename")
+                                    .outline()
+                                    .label(tr!("common.cancel")),
+                            ),
+                        )
+                        .child(
+                            DialogAction::new().child(
+                                Button::new("ok-rename").primary().label(tr!("common.save")),
+                            ),
+                        ),
+                )
+                .on_ok(move |_, _, cx| {
+                    let to = input_for_ok.read(cx).value().to_string();
+                    if let Some(ws) = weak.upgrade() {
+                        ws.update(cx, |ws, cx| ws.rename_group(&from, &to, cx));
+                    }
+                    true
+                })
+        });
+        input_for_focus.update(cx, |s, cx| s.focus(window, cx));
+    }
+
+    /// 解散分类：AlertDialog 确认（与删除请求同款式样）。
+    pub(crate) fn confirm_dissolve_group(
+        &mut self,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let weak = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let weak = weak.clone();
+            let name = name.clone();
+            alert
+                .title(tr!("dialog.dissolve_group.title", name = name.clone()))
+                .description(tr!("dialog.dissolve_group.body"))
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(tr!("dialog.dissolve_group.ok"))
+                        .ok_variant(ButtonVariant::Danger)
+                        .cancel_text(tr!("common.cancel"))
+                        .show_cancel(true),
+                )
+                .on_ok(move |_, _, cx| {
+                    if let Some(ws) = weak.upgrade() {
+                        ws.update(cx, |ws, cx| ws.dissolve_group(&name, cx));
+                    }
+                    true
+                })
+        });
+    }
+
+    /// 「移动到分类 ▸ 新建分类…」：输入框对话框，确定后移动。
+    pub(crate) fn prompt_move_to_new_group(
+        &mut self,
+        id: Ulid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(tr!("dialog.move_to_new_group.name"))
+        });
+        let weak = cx.entity().downgrade();
+        let input_for_focus = input.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let input_for_content = input.clone();
+            let input_for_ok = input.clone();
+            let weak = weak.clone();
+            dialog
+                .title(tr!("dialog.move_to_new_group.title"))
+                .content(move |content, _, _| {
+                    content.child(
+                        Input::new(&input_for_content)
+                            .aria_label(tr!("dialog.move_to_new_group.name")),
+                    )
+                })
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new().child(
+                                Button::new("cancel-move")
+                                    .outline()
+                                    .label(tr!("common.cancel")),
+                            ),
+                        )
+                        .child(
+                            DialogAction::new()
+                                .child(Button::new("ok-move").primary().label(tr!("common.save"))),
+                        ),
+                )
+                .on_ok(move |_, _, cx| {
+                    let group =
+                        crate::state::saved_filter::normalize_group(&input_for_ok.read(cx).value());
+                    if let Some(ws) = weak.upgrade() {
+                        ws.update(cx, |ws, cx| ws.move_saved_to_group(id, group, cx));
+                    }
+                    true
+                })
+        });
+        input_for_focus.update(cx, |s, cx| s.focus(window, cx));
     }
 
     /// ⌘S / "保存"按钮：保存过的 Tab 直接覆盖；否则弹名字对话框。
@@ -1419,7 +1561,9 @@ impl Render for Workspace {
                                 .child(
                                     resizable_panel()
                                         .size(sidebar_width)
-                                        .size_range(px(180.)..px(420.))
+                                        // spec §4.3：拖拽范围随两栏分类列改宽（老 workspace.json 里
+                                        // < 280 的 sidebar_width 由 panel 的 min_w 自然夹住，不迁移）。
+                                        .size_range(px(280.)..px(560.))
                                         // 上游 `ResizablePanel` 内部无条件 `flex_grow_1`，且只在
                                         // panel size 为 None 时自带 `flex_none`。首次展开的那一帧
                                         // prepaint 会把占位的 `PANEL_MIN_SIZE` 覆写成 Some(实测宽)，

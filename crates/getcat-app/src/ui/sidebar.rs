@@ -2,11 +2,14 @@
 //!
 //! - **图标栏**（48 px，始终可见、从不移动）：顶部 logo，下面每个图标代表一个功能
 //!   （目前只有「已保存请求」），底部是主题切换（一个按钮三种图标）与设置。
-//! - **面板**（240 px，可拖宽）：点某个功能图标展开，顶部显示该功能的名字，下面是内容；
-//!   再点同一个图标（或顶部的收起按钮、⌘B）收起。
+//! - **面板**（可拖宽）：点某个功能图标展开，顶部显示该功能的名字，下面是内容；
+//!   再点同一个图标（或顶部的收起按钮、⌘B）收起。「已保存请求」内部是两栏主从式
+//!   （spec §4.1）：左边固定宽的分类列，右边是当前分类下的请求列表。
 //!
 //! 没有用 gpui-component 的 `Sidebar`：它要求子项实现 `SidebarItem`（菜单式），
 //! 而这里的列表是 `uniform_list` 虚拟化 + 每行带删除按钮，自绘更贴合。
+
+use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
@@ -26,6 +29,7 @@ use crate::assets::LOGO_PATH;
 use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::tab_title;
+use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::workspace::{SidebarSection, Workspace};
 use crate::templates::{self, TemplateGroup};
 use crate::ui::method_color;
@@ -309,113 +313,339 @@ impl Workspace {
                 )
                 .into_any_element();
         }
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .items_stretch()
+            .child(self.render_saved_groups(cx))
+            .child(self.render_saved_rows(window, cx))
+            .into_any_element()
+    }
+
+    /// 分类列（spec §4.1）：固定 116px，「全部」+（有未分类时）「未分类」+ 分隔线 + 分类。
+    fn render_saved_groups(&self, cx: &mut Context<Self>) -> AnyElement {
+        let groups = saved_filter::derive_groups(self.saved());
+        let uncategorized = saved_filter::uncategorized_count(self.saved());
+        let current = self.saved_filter().clone();
+        let active_bg = cx.theme().list_active;
+        let hover_bg = cx.theme().list_hover;
+        let muted = cx.theme().muted_foreground;
+        let radius = cx.theme().radius;
+        let weak = cx.entity().downgrade();
+
+        // (过滤器, 显示名, 计数, 是否真分类——真分类才有右键菜单)
+        let mut entries: Vec<(SavedFilter, SharedString, usize, bool)> = vec![(
+            SavedFilter::All,
+            tr!("sidebar.saved.filter_all"),
+            self.saved().len(),
+            false,
+        )];
+        if uncategorized > 0 {
+            entries.push((
+                SavedFilter::Uncategorized,
+                tr!("sidebar.saved.filter_uncategorized"),
+                uncategorized,
+                false,
+            ));
+        }
+        let fixed = entries.len();
+        for (name, count) in &groups {
+            entries.push((
+                SavedFilter::Group(name.clone()),
+                SharedString::from(name.clone()),
+                *count,
+                true,
+            ));
+        }
+
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (ix, (filter, label, count, is_group)) in entries.into_iter().enumerate() {
+            if ix == fixed && is_group {
+                // 固定项与分类项之间的分隔线（spec §4.1：伪项靠位置和分隔线区分）
+                rows.push(
+                    div()
+                        .h(px(1.))
+                        .mx_2()
+                        .my_1()
+                        .bg(cx.theme().sidebar_border)
+                        .into_any_element(),
+                );
+            }
+            let selected = current == filter;
+            let click_ws = weak.clone();
+            let click_filter = filter.clone();
+            let tooltip_label = label.clone();
+            let row = h_flex()
+                .id(("saved-group", ix))
+                .h_8()
+                .px_2()
+                .mx_1()
+                .gap_1()
+                .items_center()
+                .rounded(radius)
+                .text_xs()
+                .when(selected, |r| r.bg(active_bg))
+                .hover(|s| s.bg(hover_bg))
+                .aria_label(tr!(
+                    "sidebar.saved.group_row_aria",
+                    name = label.clone(),
+                    count = count
+                ))
+                // 超长名 truncate 后靠它看全名；Div 上的 tooltip 要求闭包形式（见 #logo）
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tooltip_label.clone()).build(window, cx)
+                })
+                .on_click(move |_, _, cx| {
+                    if let Some(ws) = click_ws.upgrade() {
+                        ws.update(cx, |ws, cx| ws.set_saved_filter(click_filter.clone(), cx));
+                    }
+                })
+                .child(div().flex_1().min_w_0().truncate().child(label.clone()))
+                .child(div().flex_none().text_color(muted).child(count.to_string()));
+            let row: AnyElement = if is_group {
+                let name = label.to_string();
+                let menu_ws = weak.clone();
+                row.context_menu(move |menu, _, _| {
+                    let rename_ws = menu_ws.clone();
+                    let dissolve_ws = menu_ws.clone();
+                    let rename_name = name.clone();
+                    let dissolve_name = name.clone();
+                    menu.item(
+                        PopupMenuItem::new(tr!("sidebar.saved.menu_rename_group")).on_click(
+                            move |_, window, cx| {
+                                if let Some(ws) = rename_ws.upgrade() {
+                                    ws.update(cx, |ws, cx| {
+                                        ws.prompt_rename_group(rename_name.clone(), window, cx)
+                                    });
+                                }
+                            },
+                        ),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new(tr!("sidebar.saved.menu_dissolve_group")).on_click(
+                            move |_, window, cx| {
+                                if let Some(ws) = dissolve_ws.upgrade() {
+                                    ws.update(cx, |ws, cx| {
+                                        ws.confirm_dissolve_group(dissolve_name.clone(), window, cx)
+                                    });
+                                }
+                            },
+                        ),
+                    )
+                })
+                .into_any_element()
+            } else {
+                row.into_any_element()
+            };
+            rows.push(row);
+        }
+
+        v_flex()
+            .id("saved-groups")
+            .role(Role::Group)
+            .aria_label(tr!("sidebar.saved.groups_aria"))
+            .debug_selector(|| "saved-groups".into())
+            .w(px(116.))
+            .flex_none()
+            .h_full()
+            .py_1()
+            .border_r_1()
+            .border_color(cx.theme().sidebar_border)
+            .overflow_y_scroll()
+            .children(rows)
+            .into_any_element()
+    }
+
+    /// 请求列：当前分类过滤下的已保存请求，右键菜单多一条「移动到分类 ▸」。
+    fn render_saved_rows(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // 渲染闭包只持有 Rc 与弱引用：每帧 O(可见行)，不复制列表内容。
         let saved = self.saved_rc();
+        let indices = Rc::new(self.filtered_saved_indices());
+        let group_names: Rc<Vec<String>> = Rc::new(
+            saved_filter::derive_groups(self.saved())
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect(),
+        );
         let active_saved = self.active_tab().read(cx).saved_id;
         let weak = cx.entity().downgrade();
-        let list = uniform_list("saved-requests", saved.len(), move |range, _window, cx| {
-            let active_bg = cx.theme().list_active;
-            let hover_bg = cx.theme().list_hover;
-            let muted = cx.theme().muted_foreground;
-            let radius = cx.theme().radius;
-            range
-                .map(|ix| {
-                    let request = &saved[ix];
-                    let id = request.id;
-                    let method = request.draft.method;
-                    let name: SharedString = request.name.clone().into();
-                    let tail = tab_title(&request.draft.url);
-                    let selected = active_saved == Some(id);
-                    let open = weak.clone();
-                    let delete = weak.clone();
-                    let menu_ws = weak.clone();
-                    // 行本身留 2 px 上下间隙，让选中底色成为一个悬浮的圆角块而不是整条色带
-                    div().h_11().w_full().py_0p5().child(
-                        h_flex()
-                            .id(("saved-row", ix))
-                            .group("saved-row")
-                            .size_full()
-                            .px_2()
-                            .gap_2()
-                            .items_center()
-                            .rounded(radius)
-                            .when(selected, |row| row.bg(active_bg))
-                            .hover(|style| style.bg(hover_bg))
-                            .aria_label(tr!("sidebar.saved.row_aria", name = name))
-                            .on_click(move |_, window, cx| {
-                                if let Some(ws) = open.upgrade() {
-                                    ws.update(cx, |ws, cx| ws.open_saved(id, window, cx));
-                                }
-                            })
-                            .child(
-                                div()
-                                    .w_12()
-                                    .flex_none()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(method_color(method, cx))
-                                    .child(method.as_str()),
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(div().text_sm().truncate().child(name))
-                                    .child(
-                                        div().text_xs().text_color(muted).truncate().child(tail),
-                                    ),
-                            )
-                            .child(
-                                Button::new(("saved-delete", ix))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(IconName::Delete)
-                                    // Button 只实现 InteractiveElement（非 Stateful），没有
-                                    // aria_label；tooltip 就是它对外的可读名字。
-                                    .tooltip(tr!("sidebar.saved.delete"))
-                                    .on_click(move |_, window, cx| {
-                                        // 不让点击冒泡成"打开"
-                                        cx.stop_propagation();
-                                        if let Some(ws) = delete.upgrade() {
-                                            ws.update(cx, |ws, cx| {
-                                                ws.confirm_delete_saved(id, window, cx)
-                                            });
-                                        }
-                                    }),
-                            )
-                            // 对象级命令放右键菜单（设计指南）：与行内按钮是同一组动作，
-                            // 键盘与辅助技术用户多一条可达路径
-                            .context_menu(move |menu, _, _| {
-                                let open = menu_ws.clone();
-                                let delete = menu_ws.clone();
-                                menu.item(
-                                    PopupMenuItem::new(tr!("sidebar.saved.menu_open")).on_click(
-                                        move |_, window, cx| {
-                                            if let Some(ws) = open.upgrade() {
-                                                ws.update(cx, |ws, cx| {
-                                                    ws.open_saved(id, window, cx)
-                                                });
-                                            }
-                                        },
-                                    ),
+        let list = uniform_list(
+            "saved-requests",
+            indices.len(),
+            move |range, _window, cx| {
+                let active_bg = cx.theme().list_active;
+                let hover_bg = cx.theme().list_hover;
+                let muted = cx.theme().muted_foreground;
+                let radius = cx.theme().radius;
+                range
+                    .map(|ix| {
+                        let request = &saved[indices[ix]];
+                        let id = request.id;
+                        let method = request.draft.method;
+                        let name: SharedString = request.name.clone().into();
+                        let tail = tab_title(&request.draft.url);
+                        let selected = active_saved == Some(id);
+                        let current_group = request.group.clone();
+                        let open = weak.clone();
+                        let delete = weak.clone();
+                        let menu_ws = weak.clone();
+                        let names = group_names.clone();
+                        // 行本身留 2 px 上下间隙，让选中底色成为一个悬浮的圆角块而不是整条色带
+                        div().h_11().w_full().py_0p5().child(
+                            h_flex()
+                                .id(("saved-row", ix))
+                                .group("saved-row")
+                                .size_full()
+                                .px_2()
+                                .gap_2()
+                                .items_center()
+                                .rounded(radius)
+                                .when(selected, |row| row.bg(active_bg))
+                                .hover(|style| style.bg(hover_bg))
+                                .aria_label(tr!("sidebar.saved.row_aria", name = name))
+                                .on_click(move |_, window, cx| {
+                                    if let Some(ws) = open.upgrade() {
+                                        ws.update(cx, |ws, cx| ws.open_saved(id, window, cx));
+                                    }
+                                })
+                                .child(
+                                    div()
+                                        .w_12()
+                                        .flex_none()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(method_color(method, cx))
+                                        .child(method.as_str()),
                                 )
-                                .separator()
-                                .item(
-                                    PopupMenuItem::new(tr!("sidebar.saved.menu_delete")).on_click(
-                                        move |_, window, cx| {
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(div().text_sm().truncate().child(name))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .truncate()
+                                                .child(tail),
+                                        ),
+                                )
+                                .child(
+                                    Button::new(("saved-delete", ix))
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Delete)
+                                        // Button 只实现 InteractiveElement（非 Stateful），没有
+                                        // aria_label；tooltip 就是它对外的可读名字。
+                                        .tooltip(tr!("sidebar.saved.delete"))
+                                        .on_click(move |_, window, cx| {
+                                            // 不让点击冒泡成"打开"
+                                            cx.stop_propagation();
                                             if let Some(ws) = delete.upgrade() {
                                                 ws.update(cx, |ws, cx| {
                                                     ws.confirm_delete_saved(id, window, cx)
                                                 });
                                             }
-                                        },
-                                    ),
+                                        }),
                                 )
-                            }),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
+                                // 对象级命令放右键菜单（设计指南）：与行内按钮是同一组动作，
+                                // 键盘与辅助技术用户多一条可达路径
+                                .context_menu(move |menu, window, cx| {
+                                    let open = menu_ws.clone();
+                                    let delete = menu_ws.clone();
+                                    let move_ws = menu_ws.clone();
+                                    let names = names.clone();
+                                    let current_group = current_group.clone();
+                                    menu.item(
+                                        PopupMenuItem::new(tr!("sidebar.saved.menu_open"))
+                                            .on_click(move |_, window, cx| {
+                                                if let Some(ws) = open.upgrade() {
+                                                    ws.update(cx, |ws, cx| {
+                                                        ws.open_saved(id, window, cx)
+                                                    });
+                                                }
+                                            }),
+                                    )
+                                    .separator()
+                                    .submenu(
+                                        tr!("sidebar.saved.menu_move_to"),
+                                        window,
+                                        cx,
+                                        move |menu, _, _| {
+                                            let mut menu = menu;
+                                            for name in names.iter() {
+                                                let target_ws = move_ws.clone();
+                                                let target = name.clone();
+                                                let disabled =
+                                                    current_group.as_deref() == Some(name.as_str());
+                                                menu = menu.item(
+                                                    PopupMenuItem::new(SharedString::from(
+                                                        name.clone(),
+                                                    ))
+                                                    .disabled(disabled)
+                                                    .on_click(move |_, _, cx| {
+                                                        if let Some(ws) = target_ws.upgrade() {
+                                                            ws.update(cx, |ws, cx| {
+                                                                ws.move_saved_to_group(
+                                                                    id,
+                                                                    Some(target.clone()),
+                                                                    cx,
+                                                                )
+                                                            });
+                                                        }
+                                                    }),
+                                                );
+                                            }
+                                            if current_group.is_some() {
+                                                let clear_ws = move_ws.clone();
+                                                menu = menu.separator().item(
+                                                    PopupMenuItem::new(tr!(
+                                                        "sidebar.saved.menu_clear_group"
+                                                    ))
+                                                    .on_click(move |_, _, cx| {
+                                                        if let Some(ws) = clear_ws.upgrade() {
+                                                            ws.update(cx, |ws, cx| {
+                                                                ws.move_saved_to_group(id, None, cx)
+                                                            });
+                                                        }
+                                                    }),
+                                                );
+                                            }
+                                            let new_ws = move_ws.clone();
+                                            menu.separator().item(
+                                                PopupMenuItem::new(tr!(
+                                                    "sidebar.saved.menu_new_group"
+                                                ))
+                                                .on_click(move |_, window, cx| {
+                                                    if let Some(ws) = new_ws.upgrade() {
+                                                        ws.update(cx, |ws, cx| {
+                                                            ws.prompt_move_to_new_group(
+                                                                id, window, cx,
+                                                            )
+                                                        });
+                                                    }
+                                                }),
+                                            )
+                                        },
+                                    )
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new(tr!("sidebar.saved.menu_delete"))
+                                            .on_click(move |_, window, cx| {
+                                                if let Some(ws) = delete.upgrade() {
+                                                    ws.update(cx, |ws, cx| {
+                                                        ws.confirm_delete_saved(id, window, cx)
+                                                    });
+                                                }
+                                            }),
+                                    )
+                                }),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
         .track_scroll(self.saved_scroll())
         .size_full();
 
@@ -423,6 +653,7 @@ impl Workspace {
             .relative()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .px_2()
             .pb_2()
             .child(list)

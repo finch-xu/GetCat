@@ -3413,3 +3413,75 @@ fn saved_filter_falls_back_to_all_when_the_group_vanishes(cx: &mut TestAppContex
         assert_eq!(*ws.read(app).saved_filter(), SavedFilter::All);
     });
 }
+
+/// 两栏面板：分类列画出「全部/未分类/分类」，切换过滤后请求列行数跟着变。
+#[gpui::test]
+fn saved_panel_draws_two_panes_and_filters_rows(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    // 两条请求：一条进「订单」，一条未分类
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/a", cx);
+    let a = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .unwrap();
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    let tab2 = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab2, "https://api.test/b", cx);
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab2.clone(), "乙".into(), cx);
+            ws.move_saved_to_group(a, Some("订单".into()), cx);
+            ws.toggle_sidebar(cx);
+        })
+    });
+    cx.update(|window, _| window.blur());
+
+    let draw = |cx: &mut VisualTestContext| {
+        let element = ws.clone();
+        cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+            element.into_any_element()
+        });
+    };
+    // 「全部」：两行
+    draw(cx);
+    cx.read(|app| {
+        let laid_out = ws
+            .read(app)
+            .saved_scroll()
+            .0
+            .borrow()
+            .last_item_size
+            .expect("saved list was laid out");
+        assert_eq!(laid_out.contents.height, px(SAVED_ROW_HEIGHT * 2.));
+    });
+    // 分类列画出来了（debug_selector 锚点）
+    assert!(
+        cx.debug_bounds("saved-groups").is_some(),
+        "分类列应当画了出来"
+    );
+
+    // 切到「订单」：一行
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_saved_filter(SavedFilter::Group("订单".into()), cx)
+        })
+    });
+    draw(cx);
+    cx.read(|app| {
+        let laid_out = ws
+            .read(app)
+            .saved_scroll()
+            .0
+            .borrow()
+            .last_item_size
+            .expect("saved list was laid out");
+        assert_eq!(laid_out.contents.height, px(SAVED_ROW_HEIGHT));
+    });
+}
+
+/// 宽度常量按 spec §4.3 调整。
+#[test]
+fn sidebar_width_constants_match_spec() {
+    assert_eq!(SIDEBAR_DEFAULT_WIDTH, 360.);
+}

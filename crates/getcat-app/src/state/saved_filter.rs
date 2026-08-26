@@ -12,15 +12,12 @@ pub enum SavedFilter {
     #[default]
     All,
     /// `group` 为 None 的请求。
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     Uncategorized,
     /// 某个分类。
-    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
     Group(String),
 }
 
 /// 分类名入库前的归一化：trim，空串归 None（= 未分类）。
-#[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
 pub fn normalize_group(name: &str) -> Option<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -32,7 +29,6 @@ pub fn normalize_group(name: &str) -> Option<String> {
 
 /// 推导分类清单：`(名称, 成员数)`，按不分大小写的字母序；
 /// 只差大小写的名字是两个分类（原样保存），排序相邻。
-#[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
 pub fn derive_groups(saved: &[SavedRequest]) -> Vec<(String, usize)> {
     let mut groups: Vec<(String, usize)> = Vec::new();
     for request in saved {
@@ -58,7 +54,6 @@ pub fn uncategorized_count(saved: &[SavedRequest]) -> usize {
 /// 过滤后的**下标**集合（保持原有排序）。返回下标而不是克隆整条请求：
 /// `SavedRequest` 里是完整的 `RequestDraft`（可能带大请求体），每次渲染克隆太贵；
 /// 渲染闭包拿 `saved` 的 Rc 快照 + 这份下标，仍是每帧 O(可见行)。
-#[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
 pub fn filter_indices(filter: &SavedFilter, saved: &[SavedRequest]) -> Vec<usize> {
     saved
         .iter()

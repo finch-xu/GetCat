@@ -155,6 +155,33 @@ sidebar:
     menu_delete:
       en: Delete…
       zh-CN: 删除…
+    filter_all:
+      en: All
+      zh-CN: 全部
+    filter_uncategorized:
+      en: Uncategorized
+      zh-CN: 未分类
+    groups_aria:
+      en: Categories
+      zh-CN: 分类列表
+    group_row_aria:
+      en: "Category %{name}, %{count} requests"
+      zh-CN: "分类 %{name}，%{count} 条请求"
+    menu_move_to:
+      en: Move to Category
+      zh-CN: 移动到分类
+    menu_new_group:
+      en: New Category…
+      zh-CN: 新建分类…
+    menu_clear_group:
+      en: Remove from Category
+      zh-CN: 移出分类
+    menu_rename_group:
+      en: Rename Category…
+      zh-CN: 重命名分类…
+    menu_dissolve_group:
+      en: Dissolve Category
+      zh-CN: 解散分类
   templates:
     title:
       en: Templates
@@ -569,6 +596,33 @@ dialog:
     name:
       en: Request name
       zh-CN: 请求名称
+  rename_group:
+    title:
+      en: "Rename category “%{name}”"
+      zh-CN: "重命名分类「%{name}」"
+    body:
+      en: Renaming to an existing category merges them.
+      zh-CN: 改成已存在的分类名会合并两个分类。
+    name:
+      en: Category name
+      zh-CN: 分类名称
+  dissolve_group:
+    title:
+      en: "Dissolve category “%{name}”?"
+      zh-CN: "解散分类「%{name}」？"
+    body:
+      en: Its requests move back to Uncategorized. No request is deleted.
+      zh-CN: 该分类下的请求会回到未分类，不会删除任何请求。
+    ok:
+      en: Dissolve
+      zh-CN: 解散
+  move_to_new_group:
+    title:
+      en: New category
+      zh-CN: 新建分类
+    name:
+      en: Category name
+      zh-CN: 分类名称
 
 status:
   update_restart:
