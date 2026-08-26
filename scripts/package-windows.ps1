@@ -20,6 +20,14 @@ $ErrorActionPreference = 'Stop'
 $outDir = if ($env:OUT_DIR) { $env:OUT_DIR } else { 'dist' }
 $archLabel = if ($env:ARCH_LABEL) { $env:ARCH_LABEL } else { 'x64' }
 
+# 文件名后缀与 WiX 的 -arch 取值恰好同名，但语义不同（一个是产物命名约定，一个是
+# MSI 的 Platform 字段），这里显式映射并拦下未知值，避免拼错后静默出错架构的包
+$wixArch = switch ($archLabel) {
+    'x64'   { 'x64' }
+    'arm64' { 'arm64' }
+    default { throw "未知的 ARCH_LABEL：$archLabel（支持 x64 / arm64）" }
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $repoRoot
 
@@ -95,7 +103,7 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
 
 $msi = Join-Path $outDir "GetCat-windows-$archLabel.msi"
 wix build `
-    -arch x64 `
+    -arch $wixArch `
     -ext WixToolset.Util.wixext `
     -d Version=$msiVersion `
     -d PayloadDir=$payloadDir `

@@ -105,9 +105,14 @@ pub fn asset_pattern_for(os: &str, arch: &str, win: WindowsPackage) -> Option<&'
         ("macos", "aarch64") => Some("macos-arm64.dmg"),
         ("macos", "x86_64") => Some("macos-x64.dmg"),
         ("linux", "x86_64") => Some("linux-x64.tar.gz"),
+        ("linux", "aarch64") => Some("linux-arm64.tar.gz"),
         ("windows", "x86_64") => Some(match win {
             WindowsPackage::Portable => "windows-x64.exe",
             WindowsPackage::Msi => "windows-x64.msi",
+        }),
+        ("windows", "aarch64") => Some(match win {
+            WindowsPackage::Portable => "windows-arm64.exe",
+            WindowsPackage::Msi => "windows-arm64.msi",
         }),
         _ => None,
     }
@@ -360,21 +365,24 @@ mod tests {
             asset_pattern_for("linux", "x86_64", Portable),
             Some("linux-x64.tar.gz")
         );
-        assert_eq!(asset_pattern_for("linux", "aarch64", Portable), None);
+        assert_eq!(
+            asset_pattern_for("linux", "aarch64", Portable),
+            Some("linux-arm64.tar.gz")
+        );
         assert_eq!(asset_pattern_for("freebsd", "x86_64", Portable), None);
         // 非 Windows 平台只有一种产物，安装方式不影响选择
         assert_eq!(
             asset_pattern_for("macos", "aarch64", WindowsPackage::Msi),
             Some("macos-arm64.dmg")
         );
-        // 当前构建平台必须有产物（CI 三平台都是 x86_64 / aarch64）
-        if cfg!(any(
-            all(
+        // 当前构建平台必须有产物（CI 三平台都发 x86_64 与 aarch64 两种架构）
+        if cfg!(all(
+            any(
                 target_os = "macos",
-                any(target_arch = "aarch64", target_arch = "x86_64")
+                target_os = "linux",
+                target_os = "windows"
             ),
-            all(target_os = "linux", target_arch = "x86_64"),
-            all(target_os = "windows", target_arch = "x86_64"),
+            any(target_arch = "aarch64", target_arch = "x86_64")
         )) {
             assert!(asset_pattern().is_some());
         }
@@ -391,6 +399,14 @@ mod tests {
         assert_eq!(
             asset_pattern_for("windows", "x86_64", WindowsPackage::Msi),
             Some("windows-x64.msi")
+        );
+        assert_eq!(
+            asset_pattern_for("windows", "aarch64", WindowsPackage::Portable),
+            Some("windows-arm64.exe")
+        );
+        assert_eq!(
+            asset_pattern_for("windows", "aarch64", WindowsPackage::Msi),
+            Some("windows-arm64.msi")
         );
     }
 

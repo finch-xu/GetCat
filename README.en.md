@@ -40,9 +40,9 @@ Download the package for your platform from [Releases](https://github.com/finch-
 | Platform | File | Notes |
 |---|---|---|
 | macOS (Apple Silicon / Intel) | `GetCat-macos-arm64.dmg` / `GetCat-macos-x64.dmg` | Signed and notarized — drag it into Applications |
-| Linux x64 | `GetCat-linux-x64.tar.gz` | Unpacks to `getcat` — see the system requirements below |
-| Windows x64 (installer) | `GetCat-windows-x64.msi` | Installs per-user, no administrator needed; launches from the Start menu |
-| Windows x64 (portable) | `GetCat-windows-x64.exe` | Single file, runs from anywhere — see the system requirements below |
+| Linux (x64 / arm64) | `GetCat-linux-x64.tar.gz` / `GetCat-linux-arm64.tar.gz` | Unpacks to `getcat` — see the system requirements below |
+| Windows (installer, x64 / arm64) | `GetCat-windows-x64.msi` / `GetCat-windows-arm64.msi` | Installs per-user, no administrator needed; launches from the Start menu |
+| Windows (portable, x64 / arm64) | `GetCat-windows-x64.exe` / `GetCat-windows-arm64.exe` | Single file, runs from anywhere — see the system requirements below |
 
 <details>
 <summary>Supported Linux distributions</summary>
@@ -96,10 +96,10 @@ If that prints nothing or reports no devices, install the driver for your GPU:
 
 Requires **Windows 10 1803 (April 2018 Update) or later**, or Windows 11. The interface renders through Direct3D 11, so graphics hardware from around 2010 is enough (feature level 10.1 and up) — DirectX 12 is not required.
 
-Either build works — pick whichever suits you:
+Either build works — pick whichever suits you (on ARM devices such as Snapdragon laptops, grab the `-arm64` package):
 
-- **`GetCat-windows-x64.msi` (installer)**: installs into `%LOCALAPPDATA%\Programs\GetCat`, needs no administrator rights, adds a Start menu entry, and uninstalls from Apps & features.
-- **`GetCat-windows-x64.exe` (portable)**: a single file — keep it on a USB stick or anywhere else and double-click it; nothing is written to the registry.
+- **`GetCat-windows-<arch>.msi` (installer)**: installs into `%LOCALAPPDATA%\Programs\GetCat`, needs no administrator rights, adds a Start menu entry, and uninstalls from Apps & features.
+- **`GetCat-windows-<arch>.exe` (portable)**: a single file — keep it on a USB stick or anywhere else and double-click it; nothing is written to the registry.
 
 In-app updates work for both: an MSI install pulls the new MSI and upgrades silently, while the portable build replaces its own exe.
 

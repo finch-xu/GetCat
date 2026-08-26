@@ -13,9 +13,9 @@ concurrency:
   cancel-in-progress: false
 
 # 发布流水线总览：
-#   verify-version ─ create-draft ─┬─ build-macos (arm64 / x64 矩阵) ─┐
-#                                  ├─ build-linux-x64                ─┼─ sign ─ publish
-#                                  └─ build-windows-x64              ─┘
+#   verify-version ─ create-draft ─┬─ build-macos (arm64 / x64 矩阵)   ─┐
+#                                  ├─ build-linux (x64 / arm64 矩阵)   ─┼─ sign ─ publish
+#                                  └─ build-windows (x64 / arm64 矩阵) ─┘
 #
 # 构建 job 与 sign job 绑定 GitHub 环境 `prod`，secrets 在 Settings > Environments > prod 里配置：
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY   （macOS 签名，p12 base64）
@@ -184,12 +184,22 @@ jobs:
         run: gh release upload "$RELEASE_TAG" "dist/GetCat-macos-${{ matrix.label }}.dmg" --clobber
 
   # 选 22.04 而非 24.04：二进制只能向上兼容 glibc，构建机越老、能跑的发行版越多（22.04 = glibc 2.35）。
-  build-linux-x64:
-    name: Build Linux x64
+  # arm64 用 GitHub 原生 ARM runner（public 仓库免费）原生编译，不做交叉编译——
+  # gpui 的系统依赖（Wayland / X11 / Vulkan）交叉起来太折腾。
+  build-linux:
+    name: Build Linux ${{ matrix.label }}
     needs: [verify-version, create-draft]
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
     environment: prod
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            runner: ubuntu-22.04
+          - label: arm64
+            runner: ubuntu-22.04-arm
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -200,7 +210,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: linux-x64
+          key: linux-${{ matrix.label }}
 
       # 与 ci.yml 相同：gpui 需要 Wayland / X11 / xkbcommon / fontconfig 头文件和 Vulkan loader
       - name: Install system dependencies
@@ -212,18 +222,29 @@ jobs:
 
       - name: Build & package
         shell: bash
+        env:
+          ARCH_LABEL: ${{ matrix.label }}
         run: scripts/package-linux.sh
 
       - name: Upload to draft release
         shell: bash
-        run: gh release upload "$RELEASE_TAG" dist/GetCat-linux-x64.tar.gz --clobber
+        run: gh release upload "$RELEASE_TAG" "dist/GetCat-linux-${{ matrix.label }}.tar.gz" --clobber
 
-  build-windows-x64:
-    name: Build Windows x64
+  # arm64 用 windows-11-arm runner（目前仅 public 仓库可用）原生编译出 aarch64-pc-windows-msvc
+  build-windows:
+    name: Build Windows ${{ matrix.label }}
     needs: [verify-version, create-draft]
-    runs-on: windows-latest
+    runs-on: ${{ matrix.runner }}
     environment: prod
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            runner: windows-latest
+          - label: arm64
+            runner: windows-11-arm
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -234,7 +255,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: windows-x64
+          key: windows-${{ matrix.label }}
 
       # WiX v4+ 是跨平台的 .NET 全局工具，不依赖 runner 预装的 WiX v3
       - name: Install WiX
@@ -247,21 +268,23 @@ jobs:
 
       - name: Build & package
         shell: pwsh
+        env:
+          ARCH_LABEL: ${{ matrix.label }}
         run: scripts/package-windows.ps1
 
       # 免安装 exe 与 per-user MSI 一起发：装了 MSI 的用户靠安装目录里的 install-source.txt
       # 被识别出来，自动更新会挑 .msi 而不是裸 exe（crates/getcat-app/src/state/update.rs）
       - name: Upload to draft release
         shell: pwsh
-        run: gh release upload "$env:RELEASE_TAG" dist/GetCat-windows-x64.exe dist/GetCat-windows-x64.msi --clobber
+        run: gh release upload "$env:RELEASE_TAG" "dist/GetCat-windows-${{ matrix.label }}.exe" "dist/GetCat-windows-${{ matrix.label }}.msi" --clobber
 
   # 校验和与 minisign 签名集中在这里做：签名私钥只出现在这一个 job 里。
   # 应用内更新器用 Verification::Strict，任一平台缺 .minisig 或 SHA256SUMS 里缺它那一行，
-  # 那个平台的用户就会看到"更新失败"——所以五个资产缺一都不放行。
-  # Windows 有两份（免安装 exe + per-user MSI），装 MSI 的用户更新时拿的是 .msi。
+  # 那个平台的用户就会看到"更新失败"——所以八个资产缺一都不放行。
+  # Windows 每种架构有两份（免安装 exe + per-user MSI），装 MSI 的用户更新时拿的是 .msi。
   sign:
     name: Checksums & signatures
-    needs: [build-macos, build-linux-x64, build-windows-x64]
+    needs: [build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
     environment: prod
     env:
@@ -282,7 +305,10 @@ jobs:
           set -euo pipefail
           gh release download "$RELEASE_TAG" --dir assets --pattern 'GetCat-*'
           ls -la assets
-          for f in GetCat-macos-arm64.dmg GetCat-macos-x64.dmg GetCat-linux-x64.tar.gz GetCat-windows-x64.exe GetCat-windows-x64.msi; do
+          for f in GetCat-macos-arm64.dmg GetCat-macos-x64.dmg \
+                   GetCat-linux-x64.tar.gz GetCat-linux-arm64.tar.gz \
+                   GetCat-windows-x64.exe GetCat-windows-x64.msi \
+                   GetCat-windows-arm64.exe GetCat-windows-arm64.msi; do
             [ -f "assets/$f" ] || { echo "::error::缺少资产 $f"; exit 1; }
           done
 
@@ -301,7 +327,10 @@ jobs:
           printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
 
           cd assets
-          assets=(GetCat-macos-arm64.dmg GetCat-macos-x64.dmg GetCat-linux-x64.tar.gz GetCat-windows-x64.exe GetCat-windows-x64.msi)
+          assets=(GetCat-macos-arm64.dmg GetCat-macos-x64.dmg
+                  GetCat-linux-x64.tar.gz GetCat-linux-arm64.tar.gz
+                  GetCat-windows-x64.exe GetCat-windows-x64.msi
+                  GetCat-windows-arm64.exe GetCat-windows-arm64.msi)
           # 两个空格分隔的 "<hex>  <name>"，与更新器的解析（按空白切分、取 basename）兼容
           sha256sum "${assets[@]}" > SHA256SUMS
           for f in "${assets[@]}" SHA256SUMS; do
