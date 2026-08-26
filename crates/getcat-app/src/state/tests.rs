@@ -1371,7 +1371,7 @@ fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) 
     let id = cx
         .update(|_, cx| {
             ws.update(cx, |ws, cx| {
-                ws.finish_save(tab.clone(), "  用户列表 ".into(), cx)
+                ws.finish_save(tab.clone(), "  用户列表 ".into(), None, cx)
             })
         })
         .expect("tab still open");
@@ -1395,6 +1395,31 @@ fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) 
     assert_eq!((draft.saved_id, draft.dirty), (Some(id), false));
 }
 
+/// 保存时带分类：finish_save 的 group 参数进文件，分类列表随之出现。
+#[gpui::test]
+fn saving_with_a_group_persists_it(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/a", cx);
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab.clone(), "甲".into(), Some("订单".into()), cx)
+        })
+    })
+    .unwrap();
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert_eq!(loaded.requests[0].group.as_deref(), Some("订单"));
+    // ⌘S 覆盖：分类不变（overwrite_saved 路径不碰 group）
+    change_url(&tab, "https://api.test/a2", cx);
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.save_active(window, cx)));
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert_eq!(loaded.requests[0].group.as_deref(), Some("订单"));
+    assert_eq!(loaded.requests[0].draft.url, "https://api.test/a2");
+}
+
 /// F3：保存对话框在用户关闭 Tab 之后才确认——`finish_save` 必须是 no-op，
 /// 不能凭空写出请求文件，也不能复活已随 close_tab 删除的草稿文件。
 #[gpui::test]
@@ -1406,8 +1431,11 @@ fn finish_save_on_closed_tab_is_noop(cx: &mut TestAppContext) {
     let tab_id = cx.read(|app| tab.read(app).id);
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(1, window, cx)));
 
-    let result =
-        cx.update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "x".into(), cx)));
+    let result = cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab.clone(), "x".into(), None, cx)
+        })
+    });
     assert!(result.is_none());
     assert!(store.flush());
     assert_eq!(request_files(&store), 0);
@@ -1421,7 +1449,11 @@ fn save_active_overwrites_existing_without_prompt(cx: &mut TestAppContext) {
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/v1", cx);
     let id = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "接口".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "接口".into(), None, cx)
+            })
+        })
         .unwrap();
     // 真实时钟前进，让 updated_at 可区分
     std::thread::sleep(Duration::from_millis(2));
@@ -1449,7 +1481,11 @@ fn empty_name_falls_back_to_tab_title(cx: &mut TestAppContext) {
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/users/42", cx);
     let id = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "   ".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "   ".into(), None, cx)
+            })
+        })
         .unwrap();
     assert!(store.flush());
     assert_eq!(read_request(&store, id).unwrap().name, "/users/42");
@@ -1462,7 +1498,11 @@ fn open_saved_opens_tab_then_focuses_existing(cx: &mut TestAppContext) {
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/items/7", cx);
     let id = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "条目".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "条目".into(), None, cx)
+            })
+        })
         .unwrap();
     // 关掉这个 Tab（自动补一个空 Tab），再从侧栏打开
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.close_tab(0, window, cx)));
@@ -1847,7 +1887,11 @@ fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/gone", cx);
     let id = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "待删".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "待删".into(), None, cx)
+            })
+        })
         .unwrap();
     assert!(store.flush());
     assert_eq!(request_files(&store), 1);
@@ -1878,7 +1922,7 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
     let first = cx
         .update(|_, cx| {
             ws.update(cx, |ws, cx| {
-                ws.finish_save(first_tab.clone(), "第一".into(), cx)
+                ws.finish_save(first_tab.clone(), "第一".into(), None, cx)
             })
         })
         .unwrap();
@@ -1890,7 +1934,7 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
     let second = cx
         .update(|_, cx| {
             ws.update(cx, |ws, cx| {
-                ws.finish_save(second_tab.clone(), "第二".into(), cx)
+                ws.finish_save(second_tab.clone(), "第二".into(), None, cx)
             })
         })
         .unwrap();
@@ -3306,7 +3350,11 @@ fn organizing_saved_requests_rewrites_files_without_touching_updated_at(cx: &mut
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/a", cx);
     let id = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "甲".into(), None, cx)
+            })
+        })
         .unwrap();
     let before = cx.read(|app| ws.read(app).saved()[0].updated_at);
 
@@ -3352,13 +3400,21 @@ fn renaming_a_group_onto_another_merges_them(cx: &mut TestAppContext) {
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/a", cx);
     let a = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "甲".into(), None, cx)
+            })
+        })
         .unwrap();
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
     let tab2 = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab2, "https://api.test/b", cx);
     let b = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab2.clone(), "乙".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab2.clone(), "乙".into(), None, cx)
+            })
+        })
         .unwrap();
     cx.update(|_, cx| {
         ws.update(cx, |ws, cx| {
@@ -3385,7 +3441,11 @@ fn saved_filter_falls_back_to_all_when_the_group_vanishes(cx: &mut TestAppContex
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/a", cx);
     let id = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "甲".into(), None, cx)
+            })
+        })
         .unwrap();
     cx.update(|_, cx| {
         ws.update(cx, |ws, cx| {
@@ -3423,14 +3483,18 @@ fn saved_panel_draws_two_panes_and_filters_rows(cx: &mut TestAppContext) {
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://api.test/a", cx);
     let a = cx
-        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "甲".into(), None, cx)
+            })
+        })
         .unwrap();
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
     let tab2 = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab2, "https://api.test/b", cx);
     cx.update(|_, cx| {
         ws.update(cx, |ws, cx| {
-            ws.finish_save(tab2.clone(), "乙".into(), cx);
+            ws.finish_save(tab2.clone(), "乙".into(), None, cx);
             ws.move_saved_to_group(a, Some("订单".into()), cx);
             ws.toggle_sidebar(cx);
         })

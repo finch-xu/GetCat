@@ -112,7 +112,7 @@ Neither is code-signed yet, so SmartScreen will stop it the first time. For the 
 1. Pick a method, type a URL, and press **⌘ Enter** (Ctrl Enter on Windows / Linux) to send.
 2. Fill in parameters under the Params / Headers / Body tabs; any `{name}` in the URL shows up automatically in the path parameter table.
 3. The response pane shows status / time / size, toggles between Pretty and Raw, searches with **⌘ F**, and saves to a file.
-4. **⌘ S** saves the request to the sidebar — click it later to load it back.
+4. **⌘ S** saves the request to the sidebar — click it later to load it back. Saved requests support one-level categories: pick or create a category when saving, browse by category in the sidebar.
 
 | Action | macOS | Windows / Linux |
 |---|---|---|

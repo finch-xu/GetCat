@@ -596,6 +596,18 @@ dialog:
     name:
       en: Request name
       zh-CN: 请求名称
+    group_label:
+      en: Category
+      zh-CN: 分类
+    no_group:
+      en: No category
+      zh-CN: 无分类
+    new_group:
+      en: New category…
+      zh-CN: 新建分类…
+    new_group_name:
+      en: Category name
+      zh-CN: 分类名称
   rename_group:
     title:
       en: "Rename category “%{name}”"

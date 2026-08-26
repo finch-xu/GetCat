@@ -18,13 +18,15 @@ use gpui::{
     Subscription, UniformListScrollHandle, WeakEntity, Window, div, point, px,
 };
 use gpui_component::{
-    ActiveTheme, IconName, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
+    ActiveTheme, IconName, IndexPath, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar,
+    WindowExt,
     alert::Alert,
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
     h_flex,
     input::{Input, InputState},
     resizable::{ResizableState, h_resizable, resizable_panel},
+    select::{Select, SelectState},
     status_bar::StatusBar,
     v_flex,
 };
@@ -1077,7 +1079,7 @@ impl Workspace {
         let Some(existing) = self.saved.iter().find(|r| r.id == id).cloned() else {
             // 列表里已没有这条（文件被外部删除）：当作新保存
             let name = tab.read(cx).title(cx).to_string();
-            self.finish_save(tab.clone(), name, cx);
+            self.finish_save(tab.clone(), name, None, cx);
             return;
         };
         let request = SavedRequest {
@@ -1096,11 +1098,13 @@ impl Workspace {
     }
 
     /// 以给定名字保存为一条新请求（空名字回退为 Tab 标题）；返回新 id。
+    /// `group` 为 `None` 或空白时归为未分类（见 `saved_filter::normalize_group`）。
     /// 对话框确认时该 Tab 可能已被关闭（草稿已删除）：此时不写任何文件，返回 `None`。
     pub(crate) fn finish_save(
         &mut self,
         tab: Entity<RequestTab>,
         name: String,
+        group: Option<String>,
         cx: &mut Context<Self>,
     ) -> Option<Ulid> {
         if !self.tabs.contains(&tab) {
@@ -1112,7 +1116,8 @@ impl Workspace {
         } else {
             trimmed.to_string()
         };
-        let request = SavedRequest::new(name.clone(), tab.read(cx).draft(cx));
+        let mut request = SavedRequest::new(name.clone(), tab.read(cx).draft(cx));
+        request.group = group.and_then(|g| saved_filter::normalize_group(&g));
         let id = request.id;
         self.upsert_saved(request, cx);
         tab.update(cx, |t, cx| {
@@ -1156,19 +1161,56 @@ impl Workspace {
                 .placeholder(tr!("dialog.save_request.name"))
                 .default_value(default_name)
         });
+        // 选项 = 「无分类」 + 现有分类 + 「新建分类…」
+        let group_names: Vec<String> = saved_filter::derive_groups(&self.saved)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        let mut options: Vec<String> = vec![tr!("dialog.save_request.no_group").to_string()];
+        options.extend(group_names.iter().cloned());
+        options.push(tr!("dialog.save_request.new_group").to_string());
+        let new_group_row = options.len() - 1;
+        let select = cx.new(|cx| SelectState::new(options, Some(IndexPath::new(0)), window, cx));
+        let new_group_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(tr!("dialog.save_request.new_group_name"))
+        });
         let weak = cx.entity().downgrade();
         let input_for_focus = input.clone();
         window.open_dialog(cx, move |dialog, _, _| {
             let input_for_content = input.clone();
             let input_for_ok = input.clone();
+            let select_for_content = select.clone();
+            let select_for_ok = select.clone();
+            let new_group_for_content = new_group_input.clone();
+            let new_group_for_ok = new_group_input.clone();
+            let group_names = group_names.clone();
             let tab = tab.clone();
             let weak = weak.clone();
             dialog
                 .title(tr!("dialog.save_request.title"))
-                .content(move |content, _, _| {
-                    content.child(
-                        Input::new(&input_for_content).aria_label(tr!("dialog.save_request.name")),
-                    )
+                .content(move |content, _, cx| {
+                    let is_new = select_for_content
+                        .read(cx)
+                        .selected_index(cx)
+                        .map(|ix| ix.row == new_group_row)
+                        .unwrap_or(false);
+                    content
+                        .child(
+                            Input::new(&input_for_content)
+                                .aria_label(tr!("dialog.save_request.name")),
+                        )
+                        .child(
+                            div()
+                                .id("save-request-group")
+                                .aria_label(tr!("dialog.save_request.group_label"))
+                                .child(Select::new(&select_for_content)),
+                        )
+                        .when(is_new, |c| {
+                            c.child(
+                                Input::new(&new_group_for_content)
+                                    .aria_label(tr!("dialog.save_request.new_group_name")),
+                            )
+                        })
                 })
                 // `button_props` 的 ok_text/cancel_text 只被 AlertDialog 的自动 footer 消费；
                 // 普通 Dialog 必须自己拼 footer，否则 window.open_dialog 只更新状态、画面上不出现按钮。
@@ -1188,9 +1230,21 @@ impl Workspace {
                 )
                 .on_ok(move |_, _, cx| {
                     let name = input_for_ok.read(cx).value().to_string();
+                    let row = select_for_ok
+                        .read(cx)
+                        .selected_index(cx)
+                        .map(|ix| ix.row)
+                        .unwrap_or(0);
+                    let group = if row == 0 {
+                        None
+                    } else if row == new_group_row {
+                        saved_filter::normalize_group(&new_group_for_ok.read(cx).value())
+                    } else {
+                        Some(group_names[row - 1].clone())
+                    };
                     if let Some(ws) = weak.upgrade() {
                         ws.update(cx, |ws, cx| {
-                            ws.finish_save(tab.clone(), name, cx);
+                            ws.finish_save(tab.clone(), name, group, cx);
                         });
                     }
                     true

@@ -112,7 +112,7 @@ vulkaninfo --summary
 1. 选方法、输入 URL，按 **⌘ Enter**（Windows / Linux 为 Ctrl Enter）发送。
 2. 在 Params / Headers / Body 标签页填参数；URL 里的 `{name}` 会自动出现在 Path 参数表里。
 3. 响应区看状态 / 耗时 / 大小，Pretty / Raw 切换，**⌘ F** 在响应内搜索，或保存到文件。
-4. **⌘ S** 保存请求到侧栏，之后点开即用。
+4. **⌘ S** 保存请求到侧栏，之后点开即用。已保存请求支持单层分类：保存时选择或新建分类，侧栏按分类浏览。
 
 | 操作 | macOS | Windows / Linux |
 |---|---|---|
