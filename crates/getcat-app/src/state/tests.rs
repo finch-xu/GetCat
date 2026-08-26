@@ -40,7 +40,10 @@ use crate::state::saved_filter::SavedFilter;
 use crate::state::settings;
 use crate::state::store;
 use crate::state::update::{self, InstallKind};
-use crate::state::workspace::{SIDEBAR_DEFAULT_WIDTH, SidebarSection, ToolSection, Workspace};
+use crate::state::workspace::{
+    SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarSection, ToolSection,
+    Workspace,
+};
 use crate::ui::body_view::LINE_HEIGHT_PX;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
@@ -3548,4 +3551,6 @@ fn saved_panel_draws_two_panes_and_filters_rows(cx: &mut TestAppContext) {
 #[test]
 fn sidebar_width_constants_match_spec() {
     assert_eq!(SIDEBAR_DEFAULT_WIDTH, 360.);
+    assert_eq!(SIDEBAR_MIN_WIDTH, 280.);
+    assert_eq!(SIDEBAR_MAX_WIDTH, 560.);
 }

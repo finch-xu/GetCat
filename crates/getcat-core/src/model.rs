@@ -260,7 +260,7 @@ pub struct SavedRequest {
     pub id: Ulid,
     pub name: String,
     pub draft: RequestDraft,
-    /// v2 分组；v1 只保留字段，UI 不展示。
+    /// 分类名；侧栏按它分组展示（trim 后非空才生效），`None` = 未分类。v1 只保留字段。
     #[serde(default)]
     pub group: Option<String>,
     /// v2 导入溯源；v1 只保留字段。

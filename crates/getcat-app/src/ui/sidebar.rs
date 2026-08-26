@@ -313,19 +313,33 @@ impl Workspace {
                 )
                 .into_any_element();
         }
+        let groups = saved_filter::derive_groups(self.saved());
+        if groups.is_empty() {
+            // I1：一个分类都没有时，「全部」与「未分类」两行计数永远相同（都等于
+            // 总数或都为 0），分类列零信息量却白占 116px——直接不画它，请求列独占
+            // 整个面板宽度。spec §4.1 默认两栏并存，这条偏离已在终审中裁决为预期
+            // 行为。此时 saved_filter 必为 All（没有分类列就没有入口切到别的过滤器）。
+            return self.render_saved_rows(&groups, cx);
+        }
         h_flex()
             .flex_1()
             .min_h_0()
             .items_stretch()
-            .child(self.render_saved_groups(cx))
-            .child(self.render_saved_rows(window, cx))
+            .child(self.render_saved_groups(&groups, cx))
+            .child(self.render_saved_rows(&groups, cx))
             .into_any_element()
     }
 
     /// 分类列（spec §4.1）：固定 116px，「全部」+（有未分类时）「未分类」+ 分隔线 + 分类。
-    fn render_saved_groups(&self, cx: &mut Context<Self>) -> AnyElement {
-        let groups = saved_filter::derive_groups(self.saved());
-        let uncategorized = saved_filter::uncategorized_count(self.saved());
+    ///
+    /// `groups` 由 `render_saved_list` 算好传入，这里不再重复 `derive_groups`
+    /// （侧栏一帧只算一次分类，`render_saved_rows` 也复用同一份）。
+    fn render_saved_groups(
+        &self,
+        groups: &[(String, usize)],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let entries = saved_filter::group_entries(self.saved(), groups);
         let current = self.saved_filter().clone();
         let active_bg = cx.theme().list_active;
         let hover_bg = cx.theme().list_hover;
@@ -333,33 +347,22 @@ impl Workspace {
         let radius = cx.theme().radius;
         let weak = cx.entity().downgrade();
 
-        // (过滤器, 显示名, 计数, 是否真分类——真分类才有右键菜单)
-        let mut entries: Vec<(SavedFilter, SharedString, usize, bool)> = vec![(
-            SavedFilter::All,
-            tr!("sidebar.saved.filter_all"),
-            self.saved().len(),
-            false,
-        )];
-        if uncategorized > 0 {
-            entries.push((
-                SavedFilter::Uncategorized,
-                tr!("sidebar.saved.filter_uncategorized"),
-                uncategorized,
-                false,
-            ));
-        }
-        let fixed = entries.len();
-        for (name, count) in &groups {
-            entries.push((
-                SavedFilter::Group(name.clone()),
-                SharedString::from(name.clone()),
-                *count,
-                true,
-            ));
-        }
+        // 固定项（全部 + 可能的未分类）之后第一条即是分类项的位置，用来画分隔线。
+        let fixed = entries
+            .iter()
+            .take_while(|e| !matches!(e.filter, SavedFilter::Group(_)))
+            .count();
 
         let mut rows: Vec<AnyElement> = Vec::new();
-        for (ix, (filter, label, count, is_group)) in entries.into_iter().enumerate() {
+        for (ix, entry) in entries.into_iter().enumerate() {
+            let is_group = matches!(entry.filter, SavedFilter::Group(_));
+            let filter = entry.filter;
+            let count = entry.count;
+            let label: SharedString = match &filter {
+                SavedFilter::All => tr!("sidebar.saved.filter_all"),
+                SavedFilter::Uncategorized => tr!("sidebar.saved.filter_uncategorized"),
+                SavedFilter::Group(name) => SharedString::from(name.clone()),
+            };
             if ix == fixed && is_group {
                 // 固定项与分类项之间的分隔线（spec §4.1：伪项靠位置和分隔线区分）
                 rows.push(
@@ -374,7 +377,6 @@ impl Workspace {
             let selected = current == filter;
             let click_ws = weak.clone();
             let click_filter = filter.clone();
-            let tooltip_label = label.clone();
             let row = h_flex()
                 .id(("saved-group", ix))
                 .h_8()
@@ -386,15 +388,12 @@ impl Workspace {
                 .text_xs()
                 .when(selected, |r| r.bg(active_bg))
                 .hover(|s| s.bg(hover_bg))
+                .aria_selected(selected)
                 .aria_label(tr!(
                     "sidebar.saved.group_row_aria",
                     name = label.clone(),
                     count = count
                 ))
-                // 超长名 truncate 后靠它看全名；Div 上的 tooltip 要求闭包形式（见 #logo）
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(tooltip_label.clone()).build(window, cx)
-                })
                 .on_click(move |_, _, cx| {
                     if let Some(ws) = click_ws.upgrade() {
                         ws.update(cx, |ws, cx| ws.set_saved_filter(click_filter.clone(), cx));
@@ -403,6 +402,12 @@ impl Workspace {
                 .child(div().flex_1().min_w_0().truncate().child(label.clone()))
                 .child(div().flex_none().text_color(muted).child(count.to_string()));
             let row: AnyElement = if is_group {
+                // 「全部/未分类」是固定伪项，名字是文案不会被截断，tooltip 属于噪音
+                // （M3-d）；只有真分类（用户输入的名字）可能超长，才需要悬停看全名。
+                let tooltip_label = label.clone();
+                let row = row.tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tooltip_label.clone()).build(window, cx)
+                });
                 let name = label.to_string();
                 let menu_ws = weak.clone();
                 row.context_menu(move |menu, _, _| {
@@ -446,6 +451,8 @@ impl Workspace {
             .role(Role::Group)
             .aria_label(tr!("sidebar.saved.groups_aria"))
             .debug_selector(|| "saved-groups".into())
+            // 116px 像素例外（M3-f）：spec §4.1 把分类列定为固定宽，不随内容或
+            // 容器缩放，用 rem 刻度凑不出这个精确值，故直接写死像素。
             .w(px(116.))
             .flex_none()
             .h_full()
@@ -458,16 +465,14 @@ impl Workspace {
     }
 
     /// 请求列：当前分类过滤下的已保存请求，右键菜单多一条「移动到分类 ▸」。
-    fn render_saved_rows(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    ///
+    /// `groups` 由 `render_saved_list` 算好传入（与 `render_saved_groups` 共享
+    /// 同一份），这里只取名字给「移动到分类」菜单用，不再重复 `derive_groups`。
+    fn render_saved_rows(&self, groups: &[(String, usize)], cx: &mut Context<Self>) -> AnyElement {
         // 渲染闭包只持有 Rc 与弱引用：每帧 O(可见行)，不复制列表内容。
         let saved = self.saved_rc();
         let indices = Rc::new(self.filtered_saved_indices());
-        let group_names: Rc<Vec<String>> = Rc::new(
-            saved_filter::derive_groups(self.saved())
-                .into_iter()
-                .map(|(n, _)| n)
-                .collect(),
-        );
+        let group_names: Rc<Vec<String>> = Rc::new(groups.iter().map(|(n, _)| n.clone()).collect());
         let active_saved = self.active_tab().read(cx).saved_id;
         let weak = cx.entity().downgrade();
         let list = uniform_list(
@@ -503,6 +508,7 @@ impl Workspace {
                                 .rounded(radius)
                                 .when(selected, |row| row.bg(active_bg))
                                 .hover(|style| style.bg(hover_bg))
+                                .aria_selected(selected)
                                 .aria_label(tr!("sidebar.saved.row_aria", name = name))
                                 .on_click(move |_, window, cx| {
                                     if let Some(ws) = open.upgrade() {

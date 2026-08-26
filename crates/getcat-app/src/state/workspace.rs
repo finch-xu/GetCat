@@ -52,6 +52,10 @@ use crate::{
 
 /// 侧栏默认宽度（spec §4.3：两栏主从式分类列上线后加宽，容纳分类列 + 请求列）。
 pub const SIDEBAR_DEFAULT_WIDTH: f32 = 360.;
+/// 侧栏可拖拽的最小宽度（spec §4.3）。
+pub(crate) const SIDEBAR_MIN_WIDTH: f32 = 280.;
+/// 侧栏可拖拽的最大宽度（spec §4.3）。
+pub(crate) const SIDEBAR_MAX_WIDTH: f32 = 560.;
 
 /// 标签栏箭头一次滚动的距离，约一个标签宽（标签上限 200 px）。
 const TAB_SCROLL_STEP: f32 = 180.;
@@ -767,6 +771,8 @@ impl Workspace {
     }
 
     pub fn move_saved_to_group(&mut self, id: Ulid, group: Option<String>, cx: &mut Context<Self>) {
+        // 所有写 group 的入口统一在这里归一化（M3-a），调用方不必各自 trim/判空。
+        let group = group.and_then(|g| saved_filter::normalize_group(&g));
         self.retag_saved(|r| (r.id == id).then(|| group.clone()), cx);
     }
 
@@ -1617,7 +1623,7 @@ impl Render for Workspace {
                                         .size(sidebar_width)
                                         // spec §4.3：拖拽范围随两栏分类列改宽（老 workspace.json 里
                                         // < 280 的 sidebar_width 由 panel 的 min_w 自然夹住，不迁移）。
-                                        .size_range(px(280.)..px(560.))
+                                        .size_range(px(SIDEBAR_MIN_WIDTH)..px(SIDEBAR_MAX_WIDTH))
                                         // 上游 `ResizablePanel` 内部无条件 `flex_grow_1`，且只在
                                         // panel size 为 None 时自带 `flex_none`。首次展开的那一帧
                                         // prepaint 会把占位的 `PANEL_MIN_SIZE` 覆写成 Some(实测宽)，
