@@ -140,6 +140,9 @@ impl Workspace {
             .id("sidebar-panel")
             .role(Role::Group)
             .aria_label(section.title())
+            // 测试用锚点：回归测试量的是渲染后的实际宽度（ResizableState::sizes
+            // 反映不出 flex 收缩），非测试构建下这是内联空操作
+            .debug_selector(|| "sidebar-panel".into())
             .size_full()
             .bg(cx.theme().sidebar)
             .border_r_1()

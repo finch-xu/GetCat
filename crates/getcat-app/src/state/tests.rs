@@ -2835,6 +2835,93 @@ fn sidebar_keeps_its_width_when_the_container_resizes(cx: &mut TestAppContext) {
     });
 }
 
+/// 回归「点开侧栏后过几秒自己变窄」的真正路径——上面那条测的是
+/// `adjust_to_container_size` 的比例重分配（状态层），这条测的是 flex 收缩（样式层），
+/// 两者独立：`ResizableState::sizes` 全程不动，缩的是渲染出来的宽度。
+///
+/// 机制：启动后 `sizes` 里是占位的 `PANEL_MIN_SIZE`；首次展开的那一帧 prepaint 把
+/// 占位值覆写成 `Some(实测宽)`。而 `ResizablePanel` 只在 size 为 `None` 时才给自己
+/// `flex_none`——一旦是 `Some`，面板就带着 `flex_grow:1 + 默认 flex_shrink:1` 参与
+/// 布局，主区（flex_basis = 容器全宽）在下一次 Workspace 重新 render 时把它压掉
+/// 约 60 px。「过几秒」= 等到下一个触发重绘的事件（启动后的更新检查回调、任意点击）。
+#[gpui::test]
+fn sidebar_holds_rendered_width_after_first_expand(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    // 聚焦中的 Input 渲染时会调 macOS 的 set_text_content_type，测试窗口没有真实句柄
+    cx.update(|window, _| window.blur());
+
+    let draw = |cx: &mut VisualTestContext| {
+        let element = ws.clone();
+        cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+            element.into_any_element()
+        });
+    };
+
+    // 默认收起：这一帧主区被量成容器全宽，侧栏的 sizes 槽位停在占位值
+    draw(cx);
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_sidebar(cx)));
+    // 展开后的第一帧：panel size 还是 None（flex_none 生效），量出精确宽度，
+    // 但 prepaint 把占位值覆写成了 Some
+    draw(cx);
+    let expanded = cx
+        .debug_bounds("sidebar-panel")
+        .expect("展开后侧栏应当画了出来")
+        .size
+        .width;
+    assert_eq!(expanded, px(SIDEBAR_DEFAULT_WIDTH), "展开当帧就不该被压窄");
+
+    // 模拟任意一次触发 Workspace 重绘的事件（现实里是启动几秒后更新检查回来）
+    cx.update(|_, cx| ws.update(cx, |_, cx| cx.notify()));
+    draw(cx);
+    let after = cx
+        .debug_bounds("sidebar-panel")
+        .expect("重绘后侧栏应当还在")
+        .size
+        .width;
+    assert_eq!(after, expanded, "重绘后侧栏不该自己变窄");
+}
+
+/// 「启动即展开」的姊妹洞：第一帧两个 panel 的占位值**都**会被覆写成 `Some`，
+/// 「任一 panel 为 None 就不做比例重分配」的保护随之失效——此后窗口宽度一变，
+/// `adjust_to_container_size` 就按 size/total 把侧栏一起缩放，而不是只伸缩主区。
+#[gpui::test]
+fn sidebar_holds_width_when_restored_expanded_and_window_resizes(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    store.write_workspace(WorkspaceState {
+        sidebar_collapsed: false,
+        sidebar_width: Some(SIDEBAR_DEFAULT_WIDTH),
+        ..Default::default()
+    });
+    assert!(store.flush());
+    let loaded = store.load_all();
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.update(|window, _| window.blur());
+
+    let draw = |cx: &mut VisualTestContext, width: f32| {
+        let element = ws.clone();
+        cx.draw(point(px(0.), px(0.)), size(px(width), px(800.)), |_, _| {
+            element.into_any_element()
+        });
+    };
+
+    draw(cx, 1200.);
+    // 容器宽度一变就触发 adjust_to_container_size
+    draw(cx, 1000.);
+    cx.update(|_, cx| ws.update(cx, |_, cx| cx.notify()));
+    draw(cx, 1000.);
+    let after = cx
+        .debug_bounds("sidebar-panel")
+        .expect("侧栏应当画了出来")
+        .size
+        .width;
+    assert_eq!(
+        after,
+        px(SIDEBAR_DEFAULT_WIDTH),
+        "窗口变窄后侧栏应保持固定宽度，只伸缩主区"
+    );
+}
+
 /// 换行是**全局**偏好而不是每个 Tab 各管各的：在一个 Tab 上按下开关，其余 Tab 的
 /// 编辑器下一帧就得跟上。同步走的是 `render` 里比对缓存——`set_soft_wrap` 需要
 /// `Window`，而 `settings::update` 只拿得到 `App`，没法在改设置的当场推给所有 Tab。

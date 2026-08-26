@@ -90,6 +90,14 @@ pub struct Workspace {
     /// 用户拖出来的侧栏宽度；None 用默认值。
     sidebar_width: Option<f32>,
     sidebar_state: Entity<ResizableState>,
+    /// 首帧之后把 panel 的尺寸偏好归还为 None（见 [`Self::reset_workspace_panels`]）。
+    ///
+    /// 首帧 prepaint 会把 `ResizableState` 里占位的 `PANEL_MIN_SIZE` 覆写成
+    /// Some(实测宽)；启动即展开时**两个** panel 都会被写上，「任一 panel 为 None
+    /// 就不做比例重分配」的保护随之失效，此后窗口宽度一变，侧栏就被按
+    /// size/total 的比例缩放。首帧过后 sizes 已是真实值，占位覆写不会再发生，
+    /// 归一化一次即可永久恢复保护。
+    panels_normalize_pending: bool,
     theme: ThemePref,
     /// 请求 / 响应分栏方向（工作区级，写入 workspace.json）。
     split: SplitDirection,
@@ -153,6 +161,7 @@ impl Workspace {
             sidebar_section: SidebarSection::default(),
             sidebar_width: state.sidebar_width,
             sidebar_state: cx.new(|_| ResizableState::default()),
+            panels_normalize_pending: true,
             theme: state.theme,
             split: state.split,
             saved: Rc::new(saved),
@@ -659,12 +668,17 @@ impl Workspace {
     /// 把侧栏 panel 的尺寸交还给 [`Self::sidebar_width`]——它才是侧栏宽度的唯一权威，
     /// `ResizableState` 只负责拖拽交互本身。
     ///
-    /// 不这么做的话侧栏会「展开几秒后自己缩一点」：gpui-component 的 `ResizablePanel`
-    /// 在 `visible(false)` 时 render 第一件事就是 `return div()`，既不 prepaint 也不写
+    /// 这条防的是**比例重分配**路径：gpui-component 的 `ResizablePanel` 在
+    /// `visible(false)` 时 render 第一件事就是 `return div()`，既不 prepaint 也不写
     /// `ResizableState::sizes`。于是收起期间 sizes 停在陈旧的 `[侧栏宽, 容器全宽]`，
-    /// 其总和远大于容器宽度；而 `ResizablePanelGroup` 只要容器尺寸一变就会按
-    /// `size / total` 的比例重分配（启动后更新检查回来改变状态栏、窗口 resize 都算），
-    /// 侧栏于是被按 `300 / 1500` 这样的错误比例压窄。
+    /// 其总和远大于容器宽度；而 `ResizablePanelGroup` 只要容器宽度一变就会按
+    /// `size / total` 的比例重分配（窗口 resize），侧栏于是被按 `300 / 1500`
+    /// 这样的错误比例压窄。
+    ///
+    /// 注意「展开几秒后自己缩一点」的**可见**症状不走这条路，而是样式层的 flex
+    /// 收缩——panel size 一旦变成 Some 就丢掉内部的 `flex_none`，修复是 render 里
+    /// 调用方自己 `.flex_none()`（见那处注释）；「启动即展开」时首帧占位覆写造成
+    /// 的保护失效则由 [`Self::panels_normalize_pending`] 兜底。三者互补。
     ///
     /// `reset_panel` 把 panel 的 size 置回 `None`，于是 render 重新采用 `initial_size`
     /// （侧栏用的就是渲染时传下去的 `sidebar_width`；主工作区没有 initial_size，回到
@@ -1241,6 +1255,13 @@ fn render_banner(text: String) -> impl IntoElement {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 首帧 prepaint 把占位的 PANEL_MIN_SIZE 覆写成 Some(实测宽) 之后，归一化一次
+        // （见 `panels_normalize_pending` 字段注释）。sizes 为空说明首帧还没画过——
+        // 此时 `reset_panel` 会索引越界，留到下一次 render。
+        if self.panels_normalize_pending && !self.sidebar_state.read(cx).sizes().is_empty() {
+            self.panels_normalize_pending = false;
+            self.reset_workspace_panels(cx);
+        }
         let active = self.active_tab();
         let sidebar_width = px(self.sidebar_width.unwrap_or(SIDEBAR_DEFAULT_WIDTH));
         // gpui-component 的 Root::render() 不会自动画出 Dialog/Sheet/Notification 层，
@@ -1308,6 +1329,15 @@ impl Render for Workspace {
                                     resizable_panel()
                                         .size(sidebar_width)
                                         .size_range(px(180.)..px(420.))
+                                        // 上游 `ResizablePanel` 内部无条件 `flex_grow_1`，且只在
+                                        // panel size 为 None 时自带 `flex_none`。首次展开的那一帧
+                                        // prepaint 会把占位的 `PANEL_MIN_SIZE` 覆写成 Some(实测宽)，
+                                        // 此后若不由调用方钉死 flex，侧栏就带着默认 flex_shrink:1
+                                        // 参与布局，下一次 render 被主区（basis=容器全宽）压掉约
+                                        // 60 px——即「展开几秒后自己变窄」。上游文档点名要求有尺寸
+                                        // 偏好的 panel 自行 `.flex_none()`；flex_basis 仍由内部的
+                                        // 尺寸管理驱动，拖拽不受影响。
+                                        .flex_none()
                                         .visible(!self.sidebar_collapsed)
                                         .child(self.render_sidebar(window, cx)),
                                 )
