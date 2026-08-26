@@ -144,7 +144,8 @@ mod tests {
     fn open_creates_layout_and_roundtrips_all_three_kinds() {
         let (_dir, store) = open(Duration::ZERO);
         assert!(store.layout().requests_dir().is_dir());
-        let req = SavedRequest::new("a", RequestDraft::default());
+        let mut req = SavedRequest::new("a", RequestDraft::default());
+        req.group = Some("订单".into());
         let d = draft("https://d");
         let ws = WorkspaceState {
             tab_order: vec![d.id],
