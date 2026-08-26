@@ -20,6 +20,7 @@ import json
 import re
 import socket
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -32,6 +33,10 @@ MAX_BODY = 512 * 1024 * 1024
 
 # /slow 的上限，防止把 server 的线程永久占死。
 MAX_DELAY = 300.0
+
+# 需要读请求体的接口（/mcp）最多保留这么多字节；再大的 body 只 drain 不留，
+# 免得对着 /big 之类的接口 POST 大文件时把内存吃满。
+KEEP_BODY = 1024 * 1024
 
 
 class BadParam(Exception):
@@ -275,6 +280,18 @@ ROUTES_DOC = [
         "params": [],
         "examples": ["/empty"],
     },
+    {
+        "path": "/mcp",
+        "name": "MCP 服务器",
+        "desc": "最小 MCP（Model Context Protocol）端点，配 GetCat 侧栏的 MCP 模板，"
+                "只收 POST（浏览器点开会看到规范要求的 405）。同时应答两个协议时代："
+                "新版 2026-07-28 无状态请求（校验 MCP-Protocol-Version / Mcp-Method / Mcp-Name "
+                "头与 body 一致，不一致回 -32020 HeaderMismatch）；"
+                "旧版 2025-06-18 会话式（initialize 响应头发 Mcp-Session-Id，后续请求必须带上）。"
+                "内置一个 echo 工具供 tools/list、tools/call 调用。",
+        "params": [],
+        "examples": ["/mcp"],
+    },
 ]
 
 
@@ -460,10 +477,13 @@ class TestHandler(BaseHTTPRequestHandler):
             "/abort": self.ep_abort,
             "/headers": self.ep_headers,
             "/empty": self.ep_empty,
+            "/mcp": self.ep_mcp,
         }.get(path)
 
     def _drain_request_body(self):
-        """请求体读完丢弃。keep-alive 下不读干净，下一个请求就会解析到残留字节。"""
+        """请求体读完并保留前 KEEP_BODY 字节（给 /mcp 用）。
+        keep-alive 下不读干净，下一个请求就会解析到残留字节。"""
+        kept = bytearray()
         try:
             length = self.headers.get("Content-Length")
             if length:
@@ -473,6 +493,8 @@ class TestHandler(BaseHTTPRequestHandler):
                     if not data:
                         break
                     remaining -= len(data)
+                    if len(kept) < KEEP_BODY:
+                        kept += data[:KEEP_BODY - len(kept)]
             elif "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
                 while True:
                     line = self.rfile.readline()
@@ -482,10 +504,13 @@ class TestHandler(BaseHTTPRequestHandler):
                     if size == 0:
                         self.rfile.readline()
                         break
-                    self.rfile.read(size)
+                    data = self.rfile.read(size)
                     self.rfile.readline()
+                    if len(kept) < KEEP_BODY:
+                        kept += data[:KEEP_BODY - len(kept)]
         except (ValueError, OSError):
             self.close_connection = True
+        self.request_body = bytes(kept)
 
     # ---- 响应工具 ----
 
@@ -669,6 +694,170 @@ class TestHandler(BaseHTTPRequestHandler):
 
     def ep_empty(self):
         self.start(200, "application/json; charset=utf-8", 0)
+
+    # ---- MCP ----
+
+    def _mcp_error(self, http_code, rpc_code, message, msg_id=None, data=None, extra=None):
+        error = {"code": rpc_code, "message": message}
+        if data is not None:
+            error["data"] = data
+        self.send_json(http_code, {"jsonrpc": "2.0", "id": msg_id, "error": error}, extra=extra)
+
+    def _mcp_result(self, msg_id, result, extra=None):
+        self.send_json(200, {"jsonrpc": "2.0", "id": msg_id, "result": result}, extra=extra)
+
+    def ep_mcp(self):
+        """最小 MCP（Model Context Protocol）服务器，配 GetCat 的 MCP 模板。
+
+        同一端点应答两个协议时代，按 body 里有没有
+        params._meta["io.modelcontextprotocol/protocolVersion"] 区分：
+        - 新版 2026-07-28：无状态；校验 MCP-Protocol-Version / Mcp-Method / Mcp-Name
+          三个头与 body 镜像一致，不一致按规范回 400 + -32020 HeaderMismatch。
+        - 旧版（2025-06-18 等）：会话式；initialize 发 Mcp-Session-Id 响应头，
+          其余请求必须带该头（只查存在，不做真正的会话簿记）。
+        响应一律单 JSON 对象（规范允许服务器逐请求选择 JSON 或 SSE）。
+        """
+        if self.command != "POST":
+            # 新版规范：MCP 端点只收 POST，GET / DELETE 回 405。
+            self._mcp_error(405, -32600, "MCP 端点只接受 POST", extra=[("Allow", "POST")])
+            return
+
+        try:
+            msg = json.loads(self.request_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self._mcp_error(400, -32700, "请求体不是合法 JSON：%s" % exc)
+            return
+        if not isinstance(msg, dict):
+            self._mcp_error(400, -32600, "请求体应是单个 JSON-RPC 对象")
+            return
+
+        msg_id = msg.get("id")
+        method = msg.get("method")
+        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+        meta_version = meta.get("io.modelcontextprotocol/protocolVersion")
+        if not isinstance(method, str):
+            self._mcp_error(400, -32600, "缺少 method 字段")
+            return
+
+        if meta_version is not None:
+            self._mcp_stateless(msg_id, method, params, meta_version)
+        else:
+            self._mcp_session(msg_id, method, params)
+
+    # 模板里 tools/call 调的演示工具。
+    _MCP_ECHO_TOOL = {
+        "name": "echo",
+        "description": "Echo back arguments.text",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    }
+
+    _MCP_SERVER_INFO = {"name": "GetCat TestServer", "version": "1.0"}
+
+    def _mcp_stateless(self, msg_id, method, params, meta_version):
+        """新版 2026-07-28：先做规范要求的头/body 一致性校验，再分发。"""
+        if meta_version != "2026-07-28":
+            self._mcp_error(400, -32022, "不支持的协议版本：%s" % meta_version,
+                            msg_id, data={"supported": ["2026-07-28"]})
+            return
+
+        header_version = self.headers.get("MCP-Protocol-Version")
+        if header_version != meta_version:
+            self._mcp_error(400, -32020,
+                            "HeaderMismatch: MCP-Protocol-Version 头是 %r，body _meta 里是 %r"
+                            % (header_version, meta_version), msg_id)
+            return
+        header_method = self.headers.get("Mcp-Method")
+        if header_method != method:
+            self._mcp_error(400, -32020,
+                            "HeaderMismatch: Mcp-Method 头是 %r，body method 是 %r"
+                            % (header_method, method), msg_id)
+            return
+        if method == "tools/call":
+            header_name = self.headers.get("Mcp-Name")
+            if header_name != params.get("name"):
+                self._mcp_error(400, -32020,
+                                "HeaderMismatch: Mcp-Name 头是 %r，params.name 是 %r"
+                                % (header_name, params.get("name")), msg_id)
+                return
+
+        if msg_id is None:
+            # 通知：202 无 body（本修订的核心协议其实没有客户端通知，宽容处理）。
+            self.start(202, "application/json; charset=utf-8", 0)
+            return
+
+        server_meta = {"io.modelcontextprotocol/serverInfo": self._MCP_SERVER_INFO}
+        if method == "tools/list":
+            self._mcp_result(msg_id, {
+                "tools": [self._MCP_ECHO_TOOL],
+                # 2026-07-28 起 list 类结果必带的缓存字段
+                "ttlMs": 60000,
+                "cacheScope": "public",
+                "resultType": "complete",
+                "_meta": server_meta,
+            })
+        elif method == "tools/call":
+            content = self._mcp_echo(params)
+            if content is None:
+                self._mcp_error(400, -32602, "只有 echo 这一个工具，收到 %r" % params.get("name"),
+                                msg_id)
+                return
+            self._mcp_result(msg_id, {
+                "content": content,
+                "resultType": "complete",
+                "_meta": server_meta,
+            })
+        else:
+            # 新版规范：未实现的 RPC 方法回 404 + -32601
+            self._mcp_error(404, -32601, "方法未实现：%s" % method, msg_id)
+
+    def _mcp_session(self, msg_id, method, params):
+        """旧版会话式（2025-06-18 等）：initialize 之外的请求必须带会话头。"""
+        if method == "initialize":
+            requested = params.get("protocolVersion")
+            known = ("2025-03-26", "2025-06-18", "2025-11-25")
+            negotiated = requested if requested in known else "2025-06-18"
+            self._mcp_result(msg_id, {
+                "protocolVersion": negotiated,
+                "capabilities": {"tools": {}},
+                "serverInfo": self._MCP_SERVER_INFO,
+            }, extra=[("Mcp-Session-Id", uuid.uuid4().hex)])
+            return
+
+        if self.headers.get("Mcp-Session-Id") is None:
+            self._mcp_error(400, -32600,
+                            "缺少 Mcp-Session-Id 头：先发 initialize，从响应头里复制会话 id",
+                            msg_id)
+            return
+
+        if msg_id is None:
+            # notifications/initialized 等通知：202 无 body
+            self.start(202, "application/json; charset=utf-8", 0)
+            return
+
+        if method == "tools/list":
+            self._mcp_result(msg_id, {"tools": [self._MCP_ECHO_TOOL]})
+        elif method == "tools/call":
+            content = self._mcp_echo(params)
+            if content is None:
+                self._mcp_error(400, -32602, "只有 echo 这一个工具，收到 %r" % params.get("name"),
+                                msg_id)
+                return
+            self._mcp_result(msg_id, {"content": content, "isError": False})
+        else:
+            self._mcp_error(200, -32601, "方法未实现：%s" % method, msg_id)
+
+    @staticmethod
+    def _mcp_echo(params):
+        """echo 工具本体：认识就返回 content 块列表，不认识返回 None。"""
+        if params.get("name") != "echo":
+            return None
+        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        return [{"type": "text", "text": str(arguments.get("text", ""))}]
 
     # ---- 日志 ----
 

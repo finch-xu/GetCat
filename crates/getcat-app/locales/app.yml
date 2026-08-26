@@ -198,6 +198,12 @@ sidebar:
     variant_vision:
       en: With image
       zh-CN: 含图片
+    variant_mcp_stateless:
+      en: 2026-07-28 · stateless
+      zh-CN: 2026-07-28 · 无状态
+    variant_mcp_session:
+      en: 2025-06-18 · session
+      zh-CN: 2025-06-18 · 会话式
 
 tab:
   untitled:
