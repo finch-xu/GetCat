@@ -36,6 +36,7 @@ use crate::state::request_tab::{
     BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestTab, ResponseSection,
 };
 use crate::state::response::{ResponseState, ResponseView};
+use crate::state::saved_filter::SavedFilter;
 use crate::state::settings;
 use crate::state::store;
 use crate::state::update::{self, InstallKind};
@@ -3293,5 +3294,122 @@ fn a_command_that_is_not_curl_yields_no_draft(cx: &mut TestAppContext) {
         let s = sheet.read(app);
         assert!(s.draft().is_none());
         assert!(s.error().is_none(), "空输入不是错误");
+    });
+}
+
+/// 组织操作（移动/重命名/解散分类）批量重写文件但不碰 updated_at（spec §3）：
+/// updated_at 表达「内容何时改过」，组织操作不算，列表排序因此不被搅乱。
+#[gpui::test]
+fn organizing_saved_requests_rewrites_files_without_touching_updated_at(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/a", cx);
+    let id = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .unwrap();
+    let before = cx.read(|app| ws.read(app).saved()[0].updated_at);
+
+    // 移入分类
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(id, Some("订单".into()), cx)
+        })
+    });
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert_eq!(loaded.requests[0].group.as_deref(), Some("订单"));
+    assert_eq!(
+        loaded.requests[0].updated_at, before,
+        "移动分类不碰 updated_at"
+    );
+
+    // 重命名分类
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.rename_group("订单", "  订单v2 ", cx)));
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert_eq!(
+        loaded.requests[0].group.as_deref(),
+        Some("订单v2"),
+        "重命名 trim 后生效"
+    );
+    assert_eq!(loaded.requests[0].updated_at, before);
+
+    // 解散分类：成员回未分类，请求不删
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.dissolve_group("订单v2", cx)));
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert_eq!(loaded.requests.len(), 1);
+    assert_eq!(loaded.requests[0].group, None);
+    assert_eq!(loaded.requests[0].updated_at, before);
+}
+
+/// 重命名到已存在的分类名 = 合并（推导模型下同名即同类，spec §3）。
+#[gpui::test]
+fn renaming_a_group_onto_another_merges_them(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/a", cx);
+    let a = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .unwrap();
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    let tab2 = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab2, "https://api.test/b", cx);
+    let b = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab2.clone(), "乙".into(), cx)))
+        .unwrap();
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(a, Some("旧".into()), cx);
+            ws.move_saved_to_group(b, Some("新".into()), cx);
+            ws.rename_group("旧", "新", cx);
+        })
+    });
+    assert!(store.flush());
+    let loaded = store.load_all();
+    assert!(
+        loaded
+            .requests
+            .iter()
+            .all(|r| r.group.as_deref() == Some("新"))
+    );
+}
+
+/// 选中分类的最后一个成员被删 / 移走 / 解散后，过滤器回退「全部」（spec §7）。
+#[gpui::test]
+fn saved_filter_falls_back_to_all_when_the_group_vanishes(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/a", cx);
+    let id = cx
+        .update(|_, cx| ws.update(cx, |ws, cx| ws.finish_save(tab.clone(), "甲".into(), cx)))
+        .unwrap();
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(id, Some("g".into()), cx);
+            ws.set_saved_filter(SavedFilter::Group("g".into()), cx);
+        })
+    });
+    cx.read(|app| {
+        assert_eq!(ws.read(app).filtered_saved_indices(), vec![0]);
+    });
+    // 移出分类 → 分类消失 → 回退 All
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.move_saved_to_group(id, None, cx)));
+    cx.read(|app| {
+        assert_eq!(*ws.read(app).saved_filter(), SavedFilter::All);
+    });
+    // 再试删除路径
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(id, Some("h".into()), cx);
+            ws.set_saved_filter(SavedFilter::Group("h".into()), cx);
+            ws.delete_saved(id, cx);
+        })
+    });
+    cx.read(|app| {
+        assert_eq!(*ws.read(app).saved_filter(), SavedFilter::All);
     });
 }

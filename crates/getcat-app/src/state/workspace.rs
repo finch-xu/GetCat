@@ -34,6 +34,7 @@ use gpui_updater::UpdateStatus;
 use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
+use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::settings;
 use crate::state::store::{banner, store};
 use crate::state::update;
@@ -105,6 +106,8 @@ pub struct Workspace {
     saved: Rc<Vec<SavedRequest>>,
     /// 侧栏列表的滚动句柄。
     saved_scroll: UniformListScrollHandle,
+    /// 侧栏「已保存」当前的过滤器。会话状态，不落盘（spec §3），重启回「全部」。
+    saved_filter: SavedFilter,
     /// 标签栏的横向滚动句柄：单行模式下左右箭头与「激活项滚入视口」都靠它。
     tab_scroll: ScrollHandle,
     /// 标签栏行数：1 = 单行横向滚动，`MAX_TAB_ROWS` = 多行分页。写入 workspace.json。
@@ -166,6 +169,7 @@ impl Workspace {
             split: state.split,
             saved: Rc::new(saved),
             saved_scroll: UniformListScrollHandle::new(),
+            saved_filter: SavedFilter::default(),
             tab_scroll: ScrollHandle::new(),
             tab_rows: state.tab_rows.clamp(1, MAX_TAB_ROWS),
             tab_page: 0,
@@ -715,6 +719,92 @@ impl Workspace {
         &self.saved_scroll
     }
 
+    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
+    pub(crate) fn saved_filter(&self) -> &SavedFilter {
+        &self.saved_filter
+    }
+
+    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
+    pub fn set_saved_filter(&mut self, filter: SavedFilter, cx: &mut Context<Self>) {
+        if self.saved_filter != filter {
+            self.saved_filter = filter;
+            cx.notify();
+        }
+    }
+
+    /// 当前过滤下的下标快照；渲染闭包拿它 + `saved_rc()`，每帧仍是 O(可见行)。
+    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
+    pub(crate) fn filtered_saved_indices(&self) -> Vec<usize> {
+        saved_filter::filter_indices(&self.saved_filter, &self.saved)
+    }
+
+    /// 组织操作共用：`retag` 返回 None = 这条不动，Some(g) = 把 group 设为 g。
+    /// 只重写真正变化的文件；**不碰 `updated_at`**（spec §3，组织操作不算内容修改）。
+    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
+    fn retag_saved(
+        &mut self,
+        mut retag: impl FnMut(&SavedRequest) -> Option<Option<String>>,
+        cx: &mut Context<Self>,
+    ) {
+        let list = Rc::make_mut(&mut self.saved);
+        let mut changed = Vec::new();
+        for request in list.iter_mut() {
+            if let Some(new_group) = retag(request)
+                && request.group != new_group
+            {
+                request.group = new_group;
+                changed.push(request.clone());
+            }
+        }
+        if changed.is_empty() {
+            return;
+        }
+        if let Some(store) = store(cx) {
+            for request in changed {
+                store.write_request(request);
+            }
+        }
+        self.ensure_saved_filter_valid();
+        cx.notify();
+    }
+
+    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
+    pub fn move_saved_to_group(&mut self, id: Ulid, group: Option<String>, cx: &mut Context<Self>) {
+        self.retag_saved(|r| (r.id == id).then(|| group.clone()), cx);
+    }
+
+    /// 重命名分类；目标名已存在时自然合并（推导模型下同名即同类）。
+    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
+    pub fn rename_group(&mut self, from: &str, to: &str, cx: &mut Context<Self>) {
+        let Some(to) = saved_filter::normalize_group(to) else {
+            return; // 空名不接受，对话框层已挡，这里兜底
+        };
+        if from == to {
+            return;
+        }
+        // 正看着旧名就跟着切到新名，别让用户被甩回「全部」
+        if self.saved_filter == SavedFilter::Group(from.to_string()) {
+            self.saved_filter = SavedFilter::Group(to.clone());
+        }
+        self.retag_saved(
+            |r| (r.group.as_deref() == Some(from)).then(|| Some(to.clone())),
+            cx,
+        );
+    }
+
+    /// 解散分类：成员回未分类，请求本身不删。
+    #[allow(dead_code)] // TODO(Task 3)：侧栏 UI 接入后删除
+    pub fn dissolve_group(&mut self, name: &str, cx: &mut Context<Self>) {
+        self.retag_saved(|r| (r.group.as_deref() == Some(name)).then_some(None), cx);
+    }
+
+    /// 选中的分类没有成员了（删光/解散/合并走）→ 回退「全部」。
+    fn ensure_saved_filter_valid(&mut self) {
+        if !saved_filter::filter_still_valid(&self.saved_filter, &self.saved) {
+            self.saved_filter = SavedFilter::All;
+        }
+    }
+
     /// 侧栏点击：已有 Tab 打开着这条 → 激活它；否则新建 Tab 载入。
     pub fn open_saved(&mut self, id: Ulid, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(ix) = self
@@ -785,6 +875,7 @@ impl Workspace {
                 });
             }
         }
+        self.ensure_saved_filter_valid();
         cx.notify();
     }
 
