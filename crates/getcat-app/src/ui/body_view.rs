@@ -84,6 +84,74 @@ pub fn render_text_lines(
         .child(Scrollbar::new(handle).axis(ScrollbarAxis::Both))
 }
 
+/// SSE 事件列表：每行一个事件——序号 + event 名 + data（单行截断，换行以 ⏎ 标注）。
+/// 完整原文在「原始」视图里，这里只为快速扫一遍事件序列。
+pub fn render_sse_events(
+    rows: Arc<[(SharedString, SharedString)]>,
+    handle: &UniformListScrollHandle,
+    cx: &App,
+) -> impl IntoElement {
+    let count = rows.len();
+    let muted = cx.theme().muted_foreground;
+    let accent = cx.theme().primary;
+    let gutter = px(16. + 8. * digits(count) as f32);
+    let list = uniform_list("sse-events", count, move |range, _window, _cx| {
+        range
+            .map(|ix| {
+                let (event, data) = &rows[ix];
+                h_flex()
+                    .h(px(LINE_HEIGHT_PX))
+                    .items_center()
+                    .whitespace_nowrap()
+                    .child(
+                        div()
+                            .w(gutter)
+                            .flex_none()
+                            .pr_2()
+                            .text_right()
+                            .text_color(muted)
+                            .child(SharedString::from((ix + 1).to_string())),
+                    )
+                    .child(
+                        div()
+                            .w(px(200.))
+                            .flex_none()
+                            .pr_3()
+                            .truncate()
+                            .text_color(accent)
+                            .child(if event.is_empty() {
+                                // event 字段缺省时规范默认为 "message"
+                                tr!("response.sse_default_event")
+                            } else {
+                                event.clone()
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(SharedString::from(data.replace('\n', "⏎"))),
+                    )
+            })
+            .collect::<Vec<_>>()
+    })
+    .track_scroll(handle)
+    .size_full()
+    .px_3()
+    .font_family(cx.theme().mono_font_family.clone())
+    .text_size(cx.theme().mono_font_size);
+
+    div()
+        .id("sse-events-region")
+        .role(Role::Group)
+        .aria_label(tr!("response.sse_events_aria"))
+        .relative()
+        .size_full()
+        .child(list)
+        .child(Scrollbar::vertical(handle))
+}
+
 /// 响应头列表：每行一个 Header，名称列定宽、值列截断。
 pub fn render_header_rows(
     rows: Arc<[(SharedString, SharedString)]>,

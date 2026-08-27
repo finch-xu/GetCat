@@ -37,12 +37,13 @@ impl TemplateGroup {
     }
 }
 
-/// 行副标题的维度。大模型接口：最简纯文本 / 带图片的多模态；
+/// 行副标题的维度。大模型接口：最简纯文本 / 带图片的多模态 / SSE 流式；
 /// MCP：新版无状态（2026-07-28）/ 旧版会话式（2025-06-18）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TemplateVariant {
     Text,
     Vision,
+    Stream,
     McpStateless,
     McpSession,
 }
@@ -52,6 +53,7 @@ impl TemplateVariant {
         match self {
             TemplateVariant::Text => tr!("sidebar.templates.variant_text"),
             TemplateVariant::Vision => tr!("sidebar.templates.variant_vision"),
+            TemplateVariant::Stream => tr!("sidebar.templates.variant_stream"),
             TemplateVariant::McpStateless => tr!("sidebar.templates.variant_mcp_stateless"),
             TemplateVariant::McpSession => tr!("sidebar.templates.variant_mcp_session"),
         }
@@ -184,6 +186,16 @@ static TEMPLATES: &[RequestTemplate] = &[
         body: OPENAI_CHAT_VISION,
     },
     RequestTemplate {
+        id: "openai-chat-stream",
+        group: TemplateGroup::OpenAi,
+        api: "Chat Completions",
+        variant: TemplateVariant::Stream,
+        method: Method::Post,
+        url: "https://api.openai.com/v1/chat/completions",
+        headers: OPENAI_HEADERS,
+        body: OPENAI_CHAT_STREAM,
+    },
+    RequestTemplate {
         id: "openai-responses-text",
         group: TemplateGroup::OpenAi,
         api: "Responses",
@@ -204,6 +216,16 @@ static TEMPLATES: &[RequestTemplate] = &[
         body: OPENAI_RESPONSES_VISION,
     },
     RequestTemplate {
+        id: "openai-responses-stream",
+        group: TemplateGroup::OpenAi,
+        api: "Responses",
+        variant: TemplateVariant::Stream,
+        method: Method::Post,
+        url: "https://api.openai.com/v1/responses",
+        headers: OPENAI_HEADERS,
+        body: OPENAI_RESPONSES_STREAM,
+    },
+    RequestTemplate {
         id: "anthropic-messages-text",
         group: TemplateGroup::Anthropic,
         api: "Messages",
@@ -222,6 +244,16 @@ static TEMPLATES: &[RequestTemplate] = &[
         url: "https://api.anthropic.com/v1/messages",
         headers: ANTHROPIC_HEADERS,
         body: ANTHROPIC_MESSAGES_VISION,
+    },
+    RequestTemplate {
+        id: "anthropic-messages-stream",
+        group: TemplateGroup::Anthropic,
+        api: "Messages",
+        variant: TemplateVariant::Stream,
+        method: Method::Post,
+        url: "https://api.anthropic.com/v1/messages",
+        headers: ANTHROPIC_HEADERS,
+        body: ANTHROPIC_MESSAGES_STREAM,
     },
     RequestTemplate {
         id: "mcp-tools-list",
@@ -304,8 +336,26 @@ const OPENAI_CHAT_VISION: &str = r#"{
   "max_completion_tokens": 1024
 }"#;
 
+// 流式：OpenAI 的 usage 默认不随流返回，必须显式要（stream_options.include_usage），
+// 否则最后一块没有 token 统计，响应面板的 tokens / tok/s 都会缺席。
+const OPENAI_CHAT_STREAM: &str = r#"{
+  "model": "gpt-5.6",
+  "stream": true,
+  "stream_options": { "include_usage": true },
+  "messages": [
+    { "role": "user", "content": "Explain HTTP status code 429 in one sentence." }
+  ]
+}"#;
+
 const OPENAI_RESPONSES_TEXT: &str = r#"{
   "model": "gpt-5.6",
+  "input": "Explain HTTP status code 429 in one sentence."
+}"#;
+
+// Responses 的 usage 随 response.completed 事件自带，不需要额外开关。
+const OPENAI_RESPONSES_STREAM: &str = r#"{
+  "model": "gpt-5.6",
+  "stream": true,
   "input": "Explain HTTP status code 429 in one sentence."
 }"#;
 
@@ -332,6 +382,16 @@ const OPENAI_RESPONSES_VISION: &str = r#"{
 const ANTHROPIC_MESSAGES_TEXT: &str = r#"{
   "model": "claude-opus-5",
   "max_tokens": 1024,
+  "messages": [
+    { "role": "user", "content": "Explain HTTP status code 429 in one sentence." }
+  ]
+}"#;
+
+// Anthropic 的 usage 拆在两处随流自带：input 在 message_start、output 在 message_delta。
+const ANTHROPIC_MESSAGES_STREAM: &str = r#"{
+  "model": "claude-opus-5",
+  "max_tokens": 1024,
+  "stream": true,
   "messages": [
     { "role": "user", "content": "Explain HTTP status code 429 in one sentence." }
   ]
@@ -442,13 +502,15 @@ mod tests {
         assert!(find("nope").is_none());
     }
 
-    /// 每个分组应当出现的变体。大模型接口的维度是"纯文本 / 含图片"，
+    /// 每个分组应当出现的变体。大模型接口的维度是"纯文本 / 含图片 / SSE 流式"，
     /// MCP 的维度是协议时代（2026-07-28 无状态 / 2025-06-18 会话式）。
     fn variants_of(group: TemplateGroup) -> &'static [TemplateVariant] {
         match group {
-            TemplateGroup::OpenAi | TemplateGroup::Anthropic => {
-                &[TemplateVariant::Text, TemplateVariant::Vision]
-            }
+            TemplateGroup::OpenAi | TemplateGroup::Anthropic => &[
+                TemplateVariant::Text,
+                TemplateVariant::Vision,
+                TemplateVariant::Stream,
+            ],
             TemplateGroup::Mcp => &[TemplateVariant::McpStateless, TemplateVariant::McpSession],
         }
     }
@@ -569,6 +631,31 @@ mod tests {
                 assert!(text.contains(r#""source""#));
             }
             ref other => panic!("期望 Raw JSON 请求体，实际是 {other:?}"),
+        }
+    }
+
+    /// 流式模板必须真的开流：`stream: true` 一律要有；OpenAI Chat 还要
+    /// `stream_options.include_usage`，否则末块不带 usage、token 统计拼不出来。
+    #[test]
+    fn stream_templates_actually_stream() {
+        for template in all()
+            .iter()
+            .filter(|t| t.variant == TemplateVariant::Stream)
+        {
+            let body: serde_json::Value = serde_json::from_str(template.body).unwrap();
+            assert_eq!(
+                body["stream"].as_bool(),
+                Some(true),
+                "流式模板 {} 缺 stream: true",
+                template.id
+            );
+            if template.id == "openai-chat-stream" {
+                assert_eq!(
+                    body["stream_options"]["include_usage"].as_bool(),
+                    Some(true),
+                    "Chat Completions 流式模板必须带 include_usage"
+                );
+            }
         }
     }
 

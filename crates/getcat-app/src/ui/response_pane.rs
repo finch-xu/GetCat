@@ -21,10 +21,10 @@ use gpui_component::{
 
 use crate::assets::ICON_WRAP_TEXT;
 use crate::i18n::tr;
-use crate::state::request_tab::{RequestTab, ResponseSection};
-use crate::state::response::{ResponseState, ResponseView};
+use crate::state::request_tab::{RequestTab, ResponseSection, SseBodyMode};
+use crate::state::response::{ResponseState, ResponseView, SseLive, SseView};
 use crate::state::settings;
-use crate::ui::body_view::{render_header_rows, render_text_lines};
+use crate::ui::body_view::{render_header_rows, render_sse_events, render_text_lines};
 use crate::ui::text::{
     cert_warning_label, content_kind_label, error_detail, error_kind, tier_notice,
 };
@@ -105,21 +105,23 @@ impl RequestTab {
     ) -> impl IntoElement {
         // 只取用得上的两样（一个 bool、一个 Copy 枚举），不整份 clone 证书——
         // 那是八个 String，每帧重绘都要重新分配一遍
-        let (is_done, has_pretty, headers_count, has_certificate, banner) = match &self.response {
-            ResponseState::Done { view, .. } => {
-                let cert = view.meta.certificate.as_deref();
-                (
-                    true,
-                    view.has_pretty(),
-                    view.header_rows.len(),
-                    cert.is_some(),
-                    // 证书没问题时不打扰，只有体检出结果才挂横幅
-                    cert.filter(|info| !info.is_trustworthy())
-                        .and_then(|info| info.warnings.first().copied()),
-                )
-            }
-            _ => (false, false, 0, false, None),
-        };
+        let (is_done, has_pretty, sse_done, headers_count, has_certificate, banner) =
+            match &self.response {
+                ResponseState::Done { view, .. } => {
+                    let cert = view.meta.certificate.as_deref();
+                    (
+                        true,
+                        view.has_pretty(),
+                        view.sse.is_some(),
+                        view.header_rows.len(),
+                        cert.is_some(),
+                        // 证书没问题时不打扰，只有体检出结果才挂横幅
+                        cert.filter(|info| !info.is_trustworthy())
+                            .and_then(|info| info.warnings.first().copied()),
+                    )
+                }
+                _ => (false, false, false, 0, false, None),
+            };
         let section = self.response_section;
         // 页签随响应变：http 请求没有证书，那一页就不该出现
         let sections = ResponseSection::visible(has_certificate);
@@ -254,7 +256,8 @@ impl RequestTab {
                                 }
                             })),
                     )
-                    // 只有存在美化文本时才提供 Pretty/Raw 切换
+                    // 只有存在美化文本时才提供 Pretty/Raw 切换（SSE 响应没有 Pretty，
+                    // 段控换成 文本 / 事件流 / 原始 三视图）
                     .when(has_pretty, |h| {
                         h.child(
                             TabBar::new("pretty-raw")
@@ -266,6 +269,18 @@ impl RequestTab {
                                 }))
                                 .child("Pretty")
                                 .child("Raw"),
+                        )
+                    })
+                    .when(sse_done, |h| {
+                        h.child(
+                            TabBar::new("sse-mode")
+                                .segmented()
+                                .xsmall()
+                                .selected_index(self.sse_mode.index())
+                                .on_click(cx.listener(|this, ix: &usize, window, cx| {
+                                    this.set_sse_mode(SseBodyMode::from_index(*ix), window, cx)
+                                }))
+                                .children(SseBodyMode::ALL.iter().map(|m| m.label())),
                         )
                     }),
             )
@@ -343,8 +358,15 @@ impl RequestTab {
                     .into_any_element()
             }
             ResponseState::InFlight {
-                received, total, ..
+                received,
+                total,
+                live,
+                ..
             } => {
+                // SSE：收到就展示。拼出的文本（或原始流）随 Chunk 事件实时增长。
+                if let Some(live) = live {
+                    return self.render_sse_live(live, cx);
+                }
                 let text = match total {
                     Some(t) => tr!(
                         "response.in_flight",
@@ -408,6 +430,118 @@ impl RequestTab {
         }
     }
 
+    /// SSE 在途的实时视图：顶部一行接收状态，正文是逐 chunk 增长的拼装文本 / 原始流。
+    fn render_sse_live(&self, live: &SseLive, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .px_3()
+                    .py_1()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr!("response.sse_streaming", events = live.event_count)),
+            )
+            .child(
+                div()
+                    .id("sse-live-body")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_3()
+                    .role(Role::Group)
+                    .aria_label(tr!("response.sse_live_aria"))
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_size(cx.theme().mono_font_size)
+                    .child(live.display_text()),
+            )
+            .into_any_element()
+    }
+
+    /// SSE 响应完成后的 Body 区：统计条 + 按 `sse_mode` 分派的三视图。
+    fn render_sse_body(
+        &self,
+        view: &ResponseView,
+        sse: &SseView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let content = match self.effective_sse_mode(sse) {
+            SseBodyMode::Events => {
+                render_sse_events(sse.events.clone(), &self.body_scroll, cx).into_any_element()
+            }
+            // Text / Raw：与普通响应一样按档位分派（current_doc 已按模式选好文档）
+            _ => match self.current_doc(view) {
+                Some(doc) if doc.doc.line_count() > 0 => match doc.tier {
+                    ViewTier::Editor => {
+                        Editor::new(self.response_editor_for(view.kind.editor_language()))
+                            .aria_label(tr!("response.body_aria"))
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_size(cx.theme().mono_font_size)
+                            .readonly(true)
+                            .size_full()
+                            .into_any_element()
+                    }
+                    ViewTier::Virtual | ViewTier::Preview => {
+                        render_text_lines("response-lines", doc.doc.clone(), &self.body_scroll, cx)
+                            .into_any_element()
+                    }
+                },
+                _ => empty_state(tr!("response.empty_body"), cx),
+            },
+        };
+        v_flex()
+            .size_full()
+            .child(self.render_sse_stats(view, sse, cx))
+            .child(div().flex_1().min_h_0().child(content))
+            .into_any_element()
+    }
+
+    /// SSE 统计条：TTFT、事件数、token 用量与生成速率。
+    ///
+    /// TTFT 优先取首个内容 delta 的时刻（在途解析记录），拼不出 delta 的流退回
+    /// 首字节时刻（TTFB）。tok/s 按 output_tokens / (总耗时 − TTFT) 计。
+    fn render_sse_stats(
+        &self,
+        view: &ResponseView,
+        sse: &SseView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ttft = sse.first_delta.or(view.meta.ttfb);
+        let rate = match (sse.usage.output_tokens, ttft) {
+            (Some(tokens), Some(t)) if view.meta.duration > t => {
+                let secs = (view.meta.duration - t).as_secs_f64();
+                (secs > 0.).then(|| format!("{:.1}", tokens as f64 / secs))
+            }
+            _ => None,
+        };
+        h_flex()
+            .flex_wrap()
+            .items_center()
+            .gap_x_3()
+            .px_3()
+            .py_1()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .when_some(ttft, |h, t| {
+                h.child(tr!("response.sse_stats_ttft", value = format_duration(t)))
+            })
+            .child(tr!("response.sse_stats_events", count = sse.events.len()))
+            .when_some(sse.usage.input_tokens, |h, n| {
+                h.child(tr!("response.sse_stats_input_tokens", count = n))
+            })
+            .when_some(sse.usage.output_tokens, |h, n| {
+                h.child(tr!("response.sse_stats_output_tokens", count = n))
+            })
+            .when_some(rate, |h, r| {
+                h.child(tr!("response.sse_stats_rate", rate = r))
+            })
+            .into_any_element()
+    }
+
     /// 按档位分派：A 档只读 Editor；B 档 uniform_list 行视图；C 档摘要 + 前 1 MiB 行视图；二进制只有摘要。
     fn render_body_view(
         &self,
@@ -415,6 +549,10 @@ impl RequestTab {
         view: &ResponseView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // SSE 响应整块换成 统计条 + 三视图
+        if let Some(sse) = &view.sse {
+            return self.render_sse_body(view, sse, cx);
+        }
         let Some(doc) = view.doc(self.pretty) else {
             return v_flex()
                 .size_full()

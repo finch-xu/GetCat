@@ -281,6 +281,22 @@ ROUTES_DOC = [
         "examples": ["/empty"],
     },
     {
+        "path": "/llm",
+        "name": "大模型流式回答",
+        "desc": "模拟 OpenAI Chat Completions 或 Anthropic Messages 的 SSE 事件流："
+                "text/event-stream + chunked，逐事件间隔写出，末尾带 usage（token 统计）。"
+                "配 GetCat 的流式模板测「收到就展示」、delta 拼装与 TTFT/token 统计。",
+        "params": [
+            ("provider", "openai", "事件格式：openai / anthropic"),
+            ("interval", "0.15", "事件之间的间隔秒数，0 – 60"),
+            ("tokens", "16", "生成多少个 token（词），1 – 10000"),
+        ],
+        "examples": [
+            "/llm", "/llm?provider=anthropic",
+            "/llm?interval=0.5&tokens=40", "/llm?interval=0&tokens=1000",
+        ],
+    },
+    {
         "path": "/mcp",
         "name": "MCP 服务器",
         "desc": "最小 MCP（Model Context Protocol）端点，配 GetCat 侧栏的 MCP 模板，"
@@ -478,6 +494,7 @@ class TestHandler(BaseHTTPRequestHandler):
             "/headers": self.ep_headers,
             "/empty": self.ep_empty,
             "/mcp": self.ep_mcp,
+            "/llm": self.ep_llm,
         }.get(path)
 
     def _drain_request_body(self):
@@ -628,6 +645,61 @@ class TestHandler(BaseHTTPRequestHandler):
             if chunk_size > len(label):
                 label += _filler(chunk_size - len(label) - 1) + "\n"
             yield label.encode("ascii")[:chunk_size]
+
+    def ep_llm(self):
+        """模拟大模型的 SSE 流式回答：OpenAI Chat Completions 或 Anthropic Messages 的
+        事件序列，逐事件 flush，末尾带 usage。配 GetCat 的流式模板与 SSE 视图手测。"""
+        provider = (self.query.get("provider") or "openai").lower()
+        if provider not in ("openai", "anthropic"):
+            raise BadParam("provider 只支持 openai / anthropic，收到 %r" % provider)
+        interval = parse_float(self.query.get("interval"), 0.15, 0.0, 60.0, "interval")
+        words = ("HTTP 429 means the client sent too many requests "
+                 "and should slow down before retrying .").split(" ")
+        tokens = parse_int(self.query.get("tokens"), len(words), 1, 10000, "tokens")
+        # token 数可大于词表：循环取词，模拟任意长度的生成
+        pieces = [words[i % len(words)] + " " for i in range(tokens)]
+
+        def sse(event, payload):
+            data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            if event:
+                return ("event: %s\ndata: %s\n\n" % (event, data)).encode("utf-8")
+            return ("data: %s\n\n" % data).encode("utf-8")
+
+        def openai_events():
+            for piece in pieces:
+                yield sse(None, {"choices": [{"delta": {"content": piece}}]})
+            yield sse(None, {"choices": [],
+                             "usage": {"prompt_tokens": 12, "completion_tokens": tokens}})
+            yield b"data: [DONE]\n\n"
+
+        def anthropic_events():
+            yield sse("message_start",
+                      {"type": "message_start",
+                       "message": {"usage": {"input_tokens": 12, "output_tokens": 1}}})
+            yield sse("content_block_start",
+                      {"type": "content_block_start", "index": 0,
+                       "content_block": {"type": "text", "text": ""}})
+            for piece in pieces:
+                yield sse("content_block_delta",
+                          {"type": "content_block_delta", "index": 0,
+                           "delta": {"type": "text_delta", "text": piece}})
+            yield sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+            yield sse("message_delta",
+                      {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                       "usage": {"output_tokens": tokens}})
+            yield sse("message_stop", {"type": "message_stop"})
+
+        def drip(events):
+            for i, event in enumerate(events):
+                if i and interval:
+                    time.sleep(interval)
+                yield event
+
+        events = openai_events() if provider == "openai" else anthropic_events()
+        self.start(200, "text/event-stream; charset=utf-8", chunked=True,
+                   extra=[("Cache-Control", "no-store"),
+                          ("X-GetCat-Provider", provider)])
+        self.write_chunked(drip(events))
 
     def ep_status(self):
         raw = urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]

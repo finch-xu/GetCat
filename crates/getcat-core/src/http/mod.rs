@@ -259,6 +259,21 @@ pub struct Progress {
     pub elapsed: Duration,
 }
 
+/// 发送期间回流给 UI 的事件。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamEvent {
+    /// 响应头已到达。UI 据 `content_type` 决定是否进入流式展示（SSE）。
+    Head {
+        status: u16,
+        content_type: Option<String>,
+    },
+    /// 字节进度：节流到 ≤ 30 Hz、`try_send` 可丢。
+    Progress(Progress),
+    /// SSE 响应的 body 分片：逐块转发、不节流不丢弃（丢块会破坏事件解析）。
+    /// 非 SSE 响应不发送此事件——大响应逐块过通道只是白拷贝。
+    Chunk(bytes::Bytes),
+}
+
 /// 默认设置的 client（测试与启动兜底）。
 pub fn build_client() -> Client {
     build_client_with(&RequestSettings::default())
@@ -499,7 +514,7 @@ fn to_reqwest_method(m: Method) -> reqwest::Method {
 pub async fn execute(
     client: &Client,
     req: HttpRequest,
-    progress: Option<mpsc::Sender<Progress>>,
+    progress: Option<mpsc::Sender<StreamEvent>>,
 ) -> Result<HttpResponse, RequestError> {
     execute_with_threshold(client, req, progress, MAX_BODY_BYTES).await
 }
@@ -508,7 +523,7 @@ pub async fn execute(
 pub(crate) async fn execute_with_threshold(
     client: &Client,
     req: HttpRequest,
-    progress: Option<mpsc::Sender<Progress>>,
+    progress: Option<mpsc::Sender<StreamEvent>>,
     spill_threshold: u64,
 ) -> Result<HttpResponse, RequestError> {
     let started = Instant::now();
@@ -625,30 +640,48 @@ pub(crate) async fn execute_with_threshold(
         .and_then(|der| tls::inspect(der, resp.url().host_str().unwrap_or("")))
         .map(Box::new);
 
+    if let Some(tx) = &progress {
+        let _ = tx
+            .send(StreamEvent::Head {
+                status: status.as_u16(),
+                content_type: content_type.clone(),
+            })
+            .await;
+    }
+    // SSE 逐块转发给 UI 边收边展示；用 send().await 而不是 try_send——事件流不能丢块，
+    // 而 SSE 分片小且到达频率低，背压到通道上限（接收端在主线程上很快排空）可以接受。
+    let forward_chunks = crate::sse::is_sse(content_type.as_deref());
+
     let mut sink = Sink::with_capacity(total, spill_threshold);
     let mut stream = resp.bytes_stream();
     let mut last_report = Instant::now();
+    let mut ttfb = None;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
+        ttfb.get_or_insert_with(|| started.elapsed());
         sink.push(&chunk, spill_threshold).await?;
-        if let Some(tx) = &progress
-            && last_report.elapsed() >= PROGRESS_INTERVAL
-        {
-            let _ = tx.try_send(Progress {
-                received: sink.len(),
-                total,
-                elapsed: started.elapsed(),
-            });
-            last_report = Instant::now();
+        if let Some(tx) = &progress {
+            if forward_chunks {
+                // 接收端被 drop（取消 / 重发）时发送失败：继续收完即可，错误不致命
+                let _ = tx.send(StreamEvent::Chunk(chunk)).await;
+            }
+            if last_report.elapsed() >= PROGRESS_INTERVAL {
+                let _ = tx.try_send(StreamEvent::Progress(Progress {
+                    received: sink.len(),
+                    total,
+                    elapsed: started.elapsed(),
+                }));
+                last_report = Instant::now();
+            }
         }
     }
     let duration = started.elapsed();
     if let Some(tx) = &progress {
-        let _ = tx.try_send(Progress {
+        let _ = tx.try_send(StreamEvent::Progress(Progress {
             received: sink.len(),
             total,
             elapsed: duration,
-        });
+        }));
     }
 
     let body = sink.finish().await?;
@@ -658,6 +691,7 @@ pub(crate) async fn execute_with_threshold(
             status_text: status.canonical_reason().unwrap_or("").to_string(),
             headers,
             duration,
+            ttfb,
             body_len: body.len(),
             content_type,
             http_version,
@@ -994,12 +1028,63 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(resp.body.len(), size as u64);
+        let mut head = None;
         let mut last = None;
-        while let Ok(p) = rx.try_recv() {
-            last = Some(p);
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                StreamEvent::Head { status, .. } => head = Some(status),
+                StreamEvent::Progress(p) => last = Some(p),
+                StreamEvent::Chunk(_) => panic!("non-SSE responses must not forward chunks"),
+            }
         }
+        assert_eq!(head, Some(200), "head event arrives before progress");
         let last = last.expect("at least one progress event");
         assert_eq!(last.received, size as u64);
+        assert!(resp.meta.ttfb.is_some());
+        assert!(resp.meta.ttfb.unwrap() <= resp.meta.duration);
+    }
+
+    /// SSE 响应逐块转发 body 分片，且分片按序拼回完整响应体。
+    #[tokio::test]
+    async fn sse_responses_forward_chunks() {
+        let server = MockServer::start().await;
+        let body = "data: hello\n\ndata: [DONE]\n\n";
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_bytes(body.as_bytes().to_vec()),
+            )
+            .mount(&server)
+            .await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        let client = build_client();
+        let resp = execute(
+            &client,
+            prepare(&draft(Method::Get, server.uri())).unwrap(),
+            Some(tx),
+        )
+        .await
+        .unwrap();
+        let mut chunks: Vec<u8> = Vec::new();
+        let mut saw_head = false;
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                StreamEvent::Head {
+                    status,
+                    content_type,
+                } => {
+                    saw_head = true;
+                    assert_eq!(status, 200);
+                    assert!(crate::sse::is_sse(content_type.as_deref()));
+                }
+                StreamEvent::Chunk(c) => chunks.extend_from_slice(&c),
+                StreamEvent::Progress(_) => {}
+            }
+        }
+        assert!(saw_head);
+        assert_eq!(chunks, body.as_bytes(), "chunks must reassemble the body");
+        assert_eq!(resp.body.memory().unwrap(), body.as_bytes());
     }
 
     async fn run_with_threshold(d: &RequestDraft, threshold: u64) -> HttpResponse {
@@ -1115,8 +1200,10 @@ mod tests {
         .unwrap();
         assert!(resp.body.is_spilled());
         let mut last = None;
-        while let Ok(p) = rx.try_recv() {
-            last = Some(p);
+        while let Ok(ev) = rx.try_recv() {
+            if let StreamEvent::Progress(p) = ev {
+                last = Some(p);
+            }
         }
         assert_eq!(last.expect("progress").received, 8192);
     }

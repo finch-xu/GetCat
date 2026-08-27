@@ -28,6 +28,7 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 - **Native and fast**: a GPU-rendered native window — not Electron, Tauri, or a WebView. One interface across macOS, Linux, and Windows.
 - **Large responses stay smooth**: streamed reception, live progress, cancel at any time. Up to 5 MB opens in the highlighted editor, up to 64 MB is line-virtualized, and anything larger spills to disk with a preview and one-click save — a few hundred MB won't lock up the UI.
 - **Complete request building**: GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS; path parameters (`{name}` in the URL), query, and headers; bodies as form-data (text and file fields, files streamed with a known length), x-www-form-urlencoded, raw JSON / Text / XML, or a whole binary file.
+- **LLM streaming debugging**: SSE (text/event-stream) responses render as they arrive — no waiting for the stream to finish. The stream formats of OpenAI Chat Completions / Responses and Anthropic Messages are recognized automatically, with three views (event list / assembled text / raw) plus TTFT, event count, token usage, and generation-rate stats. The sidebar ships request templates for all three APIs (plain text / with image / streaming), and for both MCP protocol eras.
 - **Commands in and out**: the right-hand rail turns the current request into a cURL / Python snippet, and takes one back — paste a curl command (a browser's "Copy as cURL" works as-is) and it becomes a new tab, with anything that couldn't be carried over listed explicitly.
 - **Your data is yours**: no history, no stored responses, nothing uploaded anywhere. Saved requests, drafts, and settings are pretty-printed JSON files you can hand-edit and track in Git.
 - **Theme follows the system**, or pin it to light / dark. The title bar is custom-drawn, so all three platforms look the same.
@@ -170,7 +171,7 @@ cargo run -p getcat-app --features inspector    # element inspector: ⌘⌥I / C
 GETCAT_UPDATE_CHECK=1 cargo run -p getcat-app   # make dev builds check for updates at startup too (check only, no install)
 ```
 
-Local test endpoints: `tools/testserver/server.py` is a dependency-free (Python standard library only) server that deliberately misbehaves — slow responses, huge bodies (1 / 5 / 10 / 20 / 50 MB), chunked dripping, arbitrary status codes, mid-transfer disconnects, and floods of oversized response headers. Use it to exercise large-response tiering, streaming progress, and cancellation by hand. Its home page lists every endpoint with its parameters, and each example copies a full URL straight into GetCat.
+Local test endpoints: `tools/testserver/server.py` is a dependency-free (Python standard library only) server that deliberately misbehaves — slow responses, huge bodies (1 / 5 / 10 / 20 / 50 MB), chunked dripping, LLM SSE streams (both OpenAI and Anthropic event formats, usage included), a minimal MCP endpoint, arbitrary status codes, mid-transfer disconnects, and floods of oversized response headers. Use it to exercise large-response tiering, streaming progress, and cancellation by hand. Its home page lists every endpoint with its parameters, and each example copies a full URL straight into GetCat.
 
 ```bash
 python3 tools/testserver/server.py                             # 127.0.0.1:8765, home page = endpoint list

@@ -198,6 +198,9 @@ sidebar:
     variant_vision:
       en: With image
       zh-CN: 含图片
+    variant_stream:
+      en: Streaming (SSE)
+      zh-CN: 流式（SSE）
     variant_mcp_stateless:
       en: 2026-07-28 · stateless
       zh-CN: 2026-07-28 · 无状态
@@ -459,6 +462,43 @@ response:
     preview:
       en: "Response exceeds %{size}; written to a temp file, previewing the first %{head}"
       zh-CN: "响应超过 %{size}，已写入临时文件，仅预览前 %{head}"
+  # SSE（text/event-stream）响应：Body 区的三视图段控与统计条
+  sse_mode_text:
+    en: Text
+    zh-CN: 文本
+  sse_mode_events:
+    en: Events
+    zh-CN: 事件流
+  sse_mode_raw:
+    en: Raw
+    zh-CN: 原始
+  sse_streaming:
+    en: "Streaming… %{events} events"
+    zh-CN: "流式接收中… %{events} 个事件"
+  sse_stats_ttft:
+    en: "TTFT %{value}"
+    zh-CN: "TTFT %{value}"
+  sse_stats_events:
+    en: "%{count} events"
+    zh-CN: "%{count} 个事件"
+  sse_stats_input_tokens:
+    en: "%{count} tokens in"
+    zh-CN: "输入 %{count} tokens"
+  sse_stats_output_tokens:
+    en: "%{count} tokens out"
+    zh-CN: "输出 %{count} tokens"
+  sse_stats_rate:
+    en: "%{rate} tok/s"
+    zh-CN: "%{rate} tok/s"
+  sse_default_event:
+    en: message
+    zh-CN: message
+  sse_events_aria:
+    en: SSE event list
+    zh-CN: SSE 事件列表
+  sse_live_aria:
+    en: Live streaming response
+    zh-CN: 流式响应实时内容
   section_certificate:
     en: Certificate
     zh-CN: 证书
@@ -519,6 +559,10 @@ notice:
   virtual_search:
     en: Search isn’t available in plain text view; save to a file and search in an editor
     zh-CN: 纯文本视图暂不支持搜索：可「保存到文件…」后用编辑器查找
+  sse_events_search:
+    en: Search isn’t available in the event list; switch to the Text or Raw view
+    zh-CN: 事件列表视图不支持搜索：请切换到「文本」或「原始」视图再搜
+
   no_response:
     en: No response to search
     zh-CN: 没有可搜索的响应

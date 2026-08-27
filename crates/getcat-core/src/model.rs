@@ -532,6 +532,8 @@ pub struct ResponseMeta {
     pub status_text: String,
     pub headers: Vec<(String, String)>,
     pub duration: Duration,
+    /// 首个 body 字节到达的耗时（TTFB）。空 body 的响应为 None。
+    pub ttfb: Option<Duration>,
     pub body_len: u64,
     pub content_type: Option<String>,
     /// 实际协商到的版本（"HTTP/1.1" / "HTTP/2"）。选了 Auto 时这是唯一能知道

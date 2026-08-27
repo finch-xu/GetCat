@@ -31,7 +31,7 @@ use tokio::sync::mpsc;
 
 use crate::bridge;
 use crate::i18n::{Locale, tr};
-use crate::state::response::{CancelFlag, ResponseState, ResponseView, prepare_guarded};
+use crate::state::response::{CancelFlag, ResponseState, ResponseView, SseLive, prepare_guarded};
 use crate::state::settings;
 use crate::state::store::store;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
@@ -73,6 +73,37 @@ impl ResponseSection {
             sections.push(ResponseSection::Certificate);
         }
         sections
+    }
+}
+
+/// SSE 响应 Body 区的三种视图；`ALL` 的顺序就是段控顺序。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SseBodyMode {
+    /// 大模型流的 delta 拼装文本（默认；拼不出文本时回落到 Events）。
+    Text,
+    /// 逐事件列表（event 名 + data）。
+    Events,
+    /// 原始 text/event-stream 文本。
+    Raw,
+}
+
+impl SseBodyMode {
+    pub const ALL: [SseBodyMode; 3] = [SseBodyMode::Text, SseBodyMode::Events, SseBodyMode::Raw];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|m| *m == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(SseBodyMode::Text)
+    }
+
+    pub fn label(self) -> SharedString {
+        match self {
+            SseBodyMode::Text => tr!("response.sse_mode_text"),
+            SseBodyMode::Events => tr!("response.sse_mode_events"),
+            SseBodyMode::Raw => tr!("response.sse_mode_raw"),
+        }
     }
 }
 
@@ -144,6 +175,8 @@ impl BodyHint {
 pub enum Notice {
     /// ⌘F 在 B / C 档（没有编辑器）。
     VirtualSearch,
+    /// ⌘F 在 SSE 的事件列表视图（uniform_list，没有编辑器）。
+    SseEventsSearch,
     NoResponse,
     BinarySearch,
     /// A 档但正文为空：`render_body_view` 这时画的是「响应体为空」占位而不是编辑器，
@@ -157,6 +190,7 @@ impl Notice {
     pub fn text(&self) -> SharedString {
         match self {
             Notice::VirtualSearch => tr!("notice.virtual_search"),
+            Notice::SseEventsSearch => tr!("notice.sse_events_search"),
             Notice::NoResponse => tr!("notice.no_response"),
             Notice::BinarySearch => tr!("notice.binary_search"),
             Notice::EmptyBodySearch => tr!("notice.empty_body_search"),
@@ -226,6 +260,8 @@ pub struct RequestTab {
     pub request_section: RequestSection,
     pub response_section: ResponseSection,
     pub pretty: bool,
+    /// SSE 响应 Body 区当前的视图；跨请求保持（会话内的用户偏好）。
+    pub sse_mode: SseBodyMode,
     /// 请求 / 响应分栏方向；由 Workspace 统一设置（工作区级设置，随 workspace.json 持久化）。
     pub split: SplitDirection,
     /// B/C 档行视图与 Headers 列表的滚动位置；新响应到达时回到顶部。
@@ -348,6 +384,7 @@ impl RequestTab {
             request_section: RequestSection::Params,
             response_section: ResponseSection::Body,
             pretty: true,
+            sse_mode: SseBodyMode::Text,
             split: SplitDirection::Vertical,
             body_scroll: UniformListScrollHandle::new(),
             headers_scroll: UniformListScrollHandle::new(),
@@ -542,8 +579,47 @@ impl RequestTab {
             return;
         }
         self.pretty = pretty;
+        self.sync_response_editor(window, cx);
+    }
+
+    /// 切换 SSE Body 区的视图（文本 / 事件流 / 原始）。
+    pub fn set_sse_mode(&mut self, mode: SseBodyMode, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sse_mode == mode {
+            return;
+        }
+        self.sse_mode = mode;
+        self.sync_response_editor(window, cx);
+    }
+
+    /// 当前应生效的 SSE 视图：选了"文本"但流里拼不出文本时回落到"事件流"。
+    pub fn effective_sse_mode(&self, sse: &crate::state::response::SseView) -> SseBodyMode {
+        if self.sse_mode == SseBodyMode::Text && sse.text.is_none() {
+            SseBodyMode::Events
+        } else {
+            self.sse_mode
+        }
+    }
+
+    /// Body 区当前应显示的文档：SSE 响应按 `sse_mode` 选（Events 是列表、没有文档），
+    /// 普通响应按 Pretty/Raw 选。
+    pub fn current_doc<'a>(
+        &self,
+        view: &'a ResponseView,
+    ) -> Option<&'a crate::state::response::PreparedDoc> {
+        match &view.sse {
+            Some(sse) => match self.effective_sse_mode(sse) {
+                SseBodyMode::Text => sse.text.as_ref(),
+                SseBodyMode::Raw => view.raw.as_ref(),
+                SseBodyMode::Events => None,
+            },
+            None => view.doc(self.pretty),
+        }
+    }
+
+    /// Pretty/Raw 或 SSE 视图切换后，把新选中的文档写回只读编辑器（仅 A 档需要）。
+    fn sync_response_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let ResponseState::Done { view, .. } = &self.response
-            && let Some(doc) = view.doc(pretty)
+            && let Some(doc) = self.current_doc(view)
             && doc.tier == ViewTier::Editor
         {
             let text = doc.shared_text();
@@ -717,24 +793,46 @@ impl RequestTab {
         self.generation += 1;
         let generation = self.generation;
 
-        let (tx, mut rx) = mpsc::channel::<http::Progress>(64);
+        let (tx, mut rx) = mpsc::channel::<http::StreamEvent>(64);
         let request_task = bridge::send(cx, req, self.http_version, tx);
 
-        // 进度任务：把 tokio 侧的进度事件写回 Entity（已节流到 ≤ 30 Hz）。
+        // 进度任务：把 tokio 侧的流事件写回 Entity。进度已节流到 ≤ 30 Hz；
+        // SSE 的 body 分片逐块到达，在这里增量解析——这就是"收到就展示"的入口。
         let progress_task = cx.spawn_in(window, async move |this, cx| {
-            while let Some(p) = rx.recv().await {
+            while let Some(ev) = rx.recv().await {
                 let keep_going = this
                     .update(cx, |this, cx| {
                         if this.generation != generation {
                             return false;
                         }
-                        if let ResponseState::InFlight {
-                            received, total, ..
+                        let ResponseState::InFlight {
+                            started,
+                            received,
+                            total,
+                            live,
+                            ..
                         } = &mut this.response
-                        {
-                            *received = p.received;
-                            *total = p.total;
-                            cx.notify();
+                        else {
+                            return true;
+                        };
+                        match ev {
+                            http::StreamEvent::Head { content_type, .. } => {
+                                if getcat_core::sse::is_sse(content_type.as_deref()) {
+                                    *live = Some(SseLive::default());
+                                }
+                            }
+                            http::StreamEvent::Chunk(chunk) => {
+                                if let Some(live) = live {
+                                    let elapsed = started.elapsed();
+                                    live.push(&chunk, elapsed);
+                                    cx.notify();
+                                }
+                            }
+                            http::StreamEvent::Progress(p) => {
+                                *received = p.received;
+                                *total = p.total;
+                                cx.notify();
+                            }
                         }
                         true
                     })
@@ -799,6 +897,7 @@ impl RequestTab {
             started: Instant::now(),
             received: 0,
             total: None,
+            live: None,
             _tasks: vec![progress_task, tick_task, completion_task],
             _cancel: cancel,
         };
@@ -818,9 +917,18 @@ impl RequestTab {
             return;
         }
         match outcome {
-            Ok((body, view)) => {
+            Ok((body, mut view)) => {
+                // TTFT（首个内容 delta 的时刻）只有在途解析才知道：从被替换掉的
+                // InFlight 状态里合并进 Done 视图。
+                if let Some(sse) = view.sse.as_mut()
+                    && let ResponseState::InFlight {
+                        live: Some(live), ..
+                    } = &self.response
+                {
+                    sse.first_delta = live.first_delta;
+                }
                 // A 档：整段文本写入对应语言的只读编辑器；B/C 档由虚拟列表直接切片，不经过编辑器
-                if let Some(doc) = view.doc(self.pretty)
+                if let Some(doc) = self.current_doc(&view)
                     && doc.tier == ViewTier::Editor
                 {
                     let editor = self
@@ -883,7 +991,13 @@ impl RequestTab {
             cx.notify();
             return;
         };
-        let Some(doc) = view.doc(self.pretty) else {
+        // SSE 的事件列表视图与 B/C 档一样没有编辑器可搜
+        if view.sse.is_some() && self.current_doc(view).is_none() {
+            self.notice = Some(Notice::SseEventsSearch);
+            cx.notify();
+            return;
+        }
+        let Some(doc) = self.current_doc(view) else {
             self.notice = Some(Notice::BinarySearch);
             cx.notify();
             return;
@@ -1018,8 +1132,8 @@ impl RequestTab {
     /// B/C 档走 `uniform_list`，它要求所有行等高，换行会直接打破这个前提。
     pub fn response_wrap_available(&self) -> bool {
         match &self.response {
-            ResponseState::Done { view, .. } => view
-                .doc(self.pretty)
+            ResponseState::Done { view, .. } => self
+                .current_doc(view)
                 .is_some_and(|d| d.tier == ViewTier::Editor),
             _ => false,
         }

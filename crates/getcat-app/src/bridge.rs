@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 use getcat_core::http::{
-    self, BodyStore, HttpClients, HttpRequest, HttpResponse, Progress, RequestError,
+    self, BodyStore, HttpClients, HttpRequest, HttpResponse, RequestError, StreamEvent,
 };
 use getcat_core::model::{HttpVersionPref, RequestSettings};
 use getcat_core::store::{copy_atomic_user, write_atomic_user};
@@ -29,7 +29,7 @@ pub fn send(
     cx: &App,
     req: HttpRequest,
     version: HttpVersionPref,
-    progress: mpsc::Sender<Progress>,
+    progress: mpsc::Sender<StreamEvent>,
 ) -> Task<anyhow::Result<Result<HttpResponse, RequestError>>> {
     let client = cx.global::<HttpClient>().0.get(version).clone();
     Tokio::spawn_result(cx, async move {

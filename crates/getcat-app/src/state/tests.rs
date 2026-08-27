@@ -34,6 +34,7 @@ use tempfile::TempDir;
 use crate::i18n::Locale;
 use crate::state::request_tab::{
     BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestTab, ResponseSection,
+    SseBodyMode,
 };
 use crate::state::response::{ResponseState, ResponseView};
 use crate::state::saved_filter::SavedFilter;
@@ -189,6 +190,43 @@ pub(crate) fn hanging_server() -> String {
     format!("http://{addr}/")
 }
 
+/// 分两段滴流的 SSE 服务：先发 `first`，收到信号后再发 `rest` 并结束。
+/// 两段之间连接保持打开，让测试能在"在途"状态下断言实时视图。
+pub(crate) fn sse_drip_server(
+    first: &'static str,
+    rest: &'static str,
+) -> (String, std::sync::mpsc::Sender<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let chunk = |s: &str| format!("{:x}\r\n{s}\r\n", s.len());
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let mut got = Vec::new();
+            while let Ok(n) = stream.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&buf[..n]);
+                if got.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(chunk(first).as_bytes());
+            let _ = stream.flush();
+            // 客户端断开（取消 / 测试失败）时 recv 出错，直接收尾
+            let _ = gate.recv();
+            let _ = stream.write_all(chunk(rest).as_bytes());
+            let _ = stream.write_all(b"0\r\n\r\n");
+            let _ = stream.flush();
+        }
+    });
+    (format!("http://{addr}/"), release)
+}
+
 pub(crate) fn refused_url() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -261,6 +299,85 @@ fn send_to_json_server_ends_in_done(cx: &mut TestAppContext) {
         assert_eq!(
             tab.response_editor_for("json").read(app).value().as_ref(),
             "{\n  \"a\": 1\n}"
+        );
+    });
+}
+
+/// SSE 端到端：请求在途时拼装文本就已可见（"收到就展示"），完成后
+/// Done 视图带事件列表、拼装文本、usage 与 TTFT，编辑器写入的是拼装文本。
+#[gpui::test]
+fn sse_stream_displays_incrementally_and_builds_view(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let first = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n";
+    let rest = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (url, release) = sse_drip_server(first, rest);
+    set_url_and_send(&tab, &url, cx);
+
+    // 第一段送达后：仍在途，但实时视图已经拼出文本
+    wait_until(cx, |cx| {
+        cx.read(|app| match &tab.read(app).response {
+            ResponseState::InFlight { live: Some(l), .. } => l.stream.has_text(),
+            _ => false,
+        })
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        let ResponseState::InFlight { live: Some(l), .. } = &t.response else {
+            panic!("expected live SSE state");
+        };
+        assert_eq!(l.display_text().as_ref(), "Hel");
+        assert_eq!(l.event_count, 1);
+        assert!(l.first_delta.is_some(), "TTFT 在第一个 delta 时就该定格");
+    });
+    // 真实渲染一帧：实时视图（render_sse_live）panic / 布局错会当场暴露
+    draw_tab(&tab, cx);
+
+    // 放行剩余事件并等待完成
+    release.send(()).unwrap();
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        let ResponseState::Done { view, .. } = &t.response else {
+            panic!("expected Done, got error {:?}", t.response.error());
+        };
+        let sse = view.sse.as_ref().expect("SSE 响应必须有事件视图");
+        assert_eq!(sse.events.len(), 4);
+        assert_eq!(sse.text.as_ref().unwrap().doc.text(), "Hello");
+        assert_eq!(sse.usage.input_tokens, Some(3));
+        assert_eq!(sse.usage.output_tokens, Some(2));
+        assert!(sse.first_delta.is_some(), "TTFT 必须从在途状态合并进来");
+        // 默认视图是拼装文本：编辑器里是 "Hello" 而不是原始事件流
+        assert_eq!(t.sse_mode, SseBodyMode::Text);
+        assert_eq!(
+            t.response_editor_for("text").read(app).value().as_ref(),
+            "Hello"
+        );
+    });
+
+    // 三种视图各真实渲染一帧：统计条 + 文本编辑器 / 事件列表 / 原始文本
+    draw_tab(&tab, cx);
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.set_sse_mode(SseBodyMode::Events, window, cx)));
+    draw_tab(&tab, cx);
+
+    // 切到"原始"视图：编辑器换成完整事件流原文
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.set_sse_mode(SseBodyMode::Raw, window, cx)));
+    draw_tab(&tab, cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(
+            t.response_editor_for("text")
+                .read(app)
+                .value()
+                .starts_with("data: {\"choices\""),
+            "原始视图应显示 SSE 原文"
         );
     });
 }
@@ -353,6 +470,7 @@ fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
         status_text: "OK".into(),
         headers: vec![("content-type".into(), "text/plain".into())],
         duration: Duration::from_millis(1),
+        ttfb: None,
         body_len: text.len() as u64,
         content_type: Some("text/plain".into()),
         http_version: None,
@@ -442,6 +560,7 @@ pub(crate) fn meta(content_type: &str, body_len: u64) -> ResponseMeta {
         status_text: "OK".into(),
         headers: vec![],
         duration: Duration::from_millis(3),
+        ttfb: None,
         body_len,
         content_type: Some(content_type.into()),
         http_version: None,
