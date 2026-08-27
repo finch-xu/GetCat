@@ -17,9 +17,9 @@ use getcat_core::url::extract_path_params;
 // 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use gpui::{
-    App, AppContext, Context, Entity, Global, IntoElement, ParentElement, PathPromptOptions,
-    Render, ScrollStrategy, SharedString, Styled, Subscription, Task, UniformListScrollHandle,
-    Window, div, px,
+    App, AppContext, Context, Entity, Global, IntoElement, ListAlignment, ListState, ParentElement,
+    PathPromptOptions, Render, ScrollStrategy, SharedString, Styled, Subscription, Task,
+    UniformListScrollHandle, Window, div, px,
 };
 use gpui_component::IndexPath;
 use gpui_component::input::{EditorState, InputEvent, InputState, Search};
@@ -264,9 +264,11 @@ pub struct RequestTab {
     pub sse_mode: SseBodyMode,
     /// 请求 / 响应分栏方向；由 Workspace 统一设置（工作区级设置，随 workspace.json 持久化）。
     pub split: SplitDirection,
-    /// B/C 档行视图与 Headers 列表的滚动位置；新响应到达时回到顶部。
+    /// B/C 档行视图的滚动位置；新响应到达时回到顶部。
     pub body_scroll: UniformListScrollHandle,
-    pub headers_scroll: UniformListScrollHandle,
+    /// Headers 列表的状态（gpui `list`：值可换行、行高不等）；
+    /// 行数随响应变，新响应到达 / 清空时必须 `reset`（顺带回到顶部）。
+    pub headers_list: ListState,
     pub response: ResponseState,
     /// 工具栏右侧的一行提示（保存结果、搜索不可用等）；重新发送时清空。
     pub notice: Option<Notice>,
@@ -387,7 +389,8 @@ impl RequestTab {
             sse_mode: SseBodyMode::Text,
             split: SplitDirection::Vertical,
             body_scroll: UniformListScrollHandle::new(),
-            headers_scroll: UniformListScrollHandle::new(),
+            // 行数在响应到达时 reset；overdraw 预渲染视口外一小段，滚动不闪
+            headers_list: ListState::new(0, ListAlignment::Top, px(256.)),
             response: ResponseState::Idle,
             notice: None,
             generation: 0,
@@ -937,7 +940,8 @@ impl RequestTab {
                     editor.update(cx, |e, cx| e.set_value(doc.shared_text(), window, cx));
                 }
                 self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
-                self.headers_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                // reset 让列表按新响应的行数重建，滚动位置一并回到顶部
+                self.headers_list.reset(view.header_rows.len());
                 self.response = ResponseState::Done { body, view };
                 self.response_section = ResponseSection::Body;
             }
@@ -980,7 +984,7 @@ impl RequestTab {
         // 「证书」页签在 Idle 下不再出现，停在那一页会落到空态分支
         self.response_section = ResponseSection::Body;
         self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
-        self.headers_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.headers_list.reset(0);
         cx.notify();
     }
 

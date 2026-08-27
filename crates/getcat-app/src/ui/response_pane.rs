@@ -418,7 +418,7 @@ impl RequestTab {
             ResponseState::Done { body, view } => match section {
                 ResponseSection::Body => self.render_body_view(body, view, cx),
                 ResponseSection::Headers => {
-                    render_header_rows(view.header_rows.clone(), &self.headers_scroll, cx)
+                    render_header_rows(view.header_rows.clone(), &self.headers_list, cx)
                         .into_any_element()
                 }
                 ResponseSection::Certificate => match &view.meta.certificate {

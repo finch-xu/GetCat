@@ -537,13 +537,123 @@ fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
             px(LINE_HEIGHT_PX * (EDITOR_MAX_LINES + 1) as f32)
         );
         assert!(body.item.height < body.contents.height / 100.);
-        let headers = t
-            .headers_scroll
+        // Headers 列表（gpui `list`，变高虚拟化）按响应行数 reset 过：
+        // 该响应只有一个 content-type 头
+        assert_eq!(t.headers_list.item_count(), 1);
+    });
+}
+
+/// SSE 事件列表的长 data 不截断在视口内：内容宽度按最长事件测量，
+/// 超出视口时可横向滚动（与 B/C 档行视图同一套机制）。
+#[gpui::test]
+fn sse_events_view_scrolls_horizontally(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let body = format!(
+        "data: {{\"note\":\"{}\"}}\n\ndata: short\n\n",
+        "x".repeat(500)
+    )
+    .into_bytes();
+    let view = ResponseView::prepare(
+        meta("text/event-stream", body.len() as u64),
+        &BodyStore::in_memory(body.clone()),
+    );
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let g = t.generation;
+            t.apply_outcome(g, Ok((BodyStore::in_memory(body), view)), window, cx);
+            // 该流拼不出 delta：Text 模式自动回落到事件列表
+            assert_eq!(t.sse_mode, SseBodyMode::Text);
+        })
+    });
+    draw_tab(&tab, cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        let laid_out = t
+            .body_scroll
             .0
             .borrow()
             .last_item_size
-            .expect("headers list was laid out");
-        assert_eq!(headers.contents.height, px(24.));
+            .expect("events list was laid out");
+        assert!(
+            laid_out.contents.width > laid_out.item.width,
+            "长事件应超出视口宽度、可横向滚动：contents={:?} viewport={:?}",
+            laid_out.contents.width,
+            laid_out.item.width
+        );
+    });
+}
+
+/// Headers 的长值折行展示（不截断、不横滚）：变高列表布局后，
+/// 长值行的实际高度必须远高于短值行。
+#[gpui::test]
+fn long_header_values_wrap_instead_of_truncating(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let mut m = meta("text/plain", 2);
+    m.headers = vec![
+        ("x-short".into(), "1".into()),
+        // 带空格的长值：按词折行
+        ("x-words".into(), "word ".repeat(400)),
+        // 2000 个无空格字符（base64 场景）：只有字符级硬断才装得下
+        ("x-solid".into(), "x".repeat(2000)),
+    ];
+    let view = ResponseView::prepare(m, &BodyStore::in_memory(b"ok".to_vec()));
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let g = t.generation;
+            t.apply_outcome(
+                g,
+                Ok((BodyStore::in_memory(b"ok".to_vec()), view)),
+                window,
+                cx,
+            );
+            t.response_section = ResponseSection::Headers;
+            cx.notify();
+        })
+    });
+    draw_tab(&tab, cx);
+    let short = cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.headers_list.item_count(), 3);
+        let short = t
+            .headers_list
+            .bounds_for_item(0)
+            .expect("short row laid out")
+            .size
+            .height;
+        let words = t
+            .headers_list
+            .bounds_for_item(1)
+            .expect("words row laid out")
+            .size
+            .height;
+        assert!(
+            words > short * 3.,
+            "带空格长值应折成多行：short={short:?} words={words:?}"
+        );
+        short
+    });
+    // 行 1 折行后很高，行 2 在首帧视口 + overdraw 之外没被测量：滚过去再绘一帧
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.headers_list.scroll_to_reveal_item(2);
+            cx.notify();
+        })
+    });
+    draw_tab(&tab, cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        let solid = t
+            .headers_list
+            .bounds_for_item(2)
+            .expect("solid row laid out")
+            .size
+            .height;
+        assert!(
+            solid > short * 3.,
+            "无空格长值应按字符硬断折行：short={short:?} solid={solid:?}"
+        );
     });
 }
 
