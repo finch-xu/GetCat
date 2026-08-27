@@ -811,8 +811,8 @@ settings:
     en: Verify TLS certificates
     zh-CN: 校验 TLS 证书
   verify_tls_desc:
-    en: Off by default so local self-signed endpoints work. Certificate problems are still detected and shown in the response's Certificate tab. Turn it on and a bad certificate aborts the handshake instead.
-    zh-CN: 默认关闭，本地自签名接口才连得上。关闭后依然会检测证书问题并在响应的「证书」页签里展示。打开后遇到坏证书会直接握手失败。
+    en: On by default — a bad certificate aborts the handshake. Turn it off to debug local self-signed endpoints; certificate problems are still detected and shown in the response's Certificate tab.
+    zh-CN: 默认打开，遇到坏证书直接握手失败。调试本地自签名接口时可关闭；关闭后依然会检测证书问题并在响应的「证书」页签里展示。
   storage:
     en: Storage
     zh-CN: 存储位置

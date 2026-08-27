@@ -387,10 +387,10 @@ pub struct RequestSettings {
     /// 跟随跳转的最大次数（仅 follow_redirects 为真时有效）。
     #[serde(default = "default_max_redirects")]
     pub max_redirects: u32,
-    /// 校验 HTTPS 证书。默认**关闭**：本地调试大量对着自签名接口发请求，
-    /// 开着的话握手直接失败、连证书都拿不到。关掉后仍会解析对端证书并在
-    /// 有问题时提示（见 [`crate::tls`]），不是「不管了」。
-    #[serde(default)]
+    /// 校验 HTTPS 证书。默认**打开**（安全默认，与 curl / Postman / Insomnia 一致）：
+    /// 坏证书直接握手失败。调试本地自签名接口时可在设置里关闭——关掉后仍会
+    /// 解析对端证书并在有问题时提示（见 [`crate::tls`]），不是「不管了」。
+    #[serde(default = "default_true")]
     pub verify_tls: bool,
     /// 被用户关掉的默认请求头（小写 key，取值见 [`crate::http::DEFAULT_HEADERS`]）。
     /// 空表示全部启用。
@@ -419,7 +419,7 @@ impl Default for RequestSettings {
             timeout_secs: default_timeout_secs(),
             follow_redirects: true,
             max_redirects: default_max_redirects(),
-            verify_tls: false,
+            verify_tls: true,
             disabled_default_headers: Vec::new(),
         }
     }
@@ -708,8 +708,8 @@ mod tests {
         assert_eq!(s.request.timeout_secs, 0);
         assert!(s.request.follow_redirects);
         assert_eq!(s.request.max_redirects, 10);
-        // 默认关闭：本地调试大量对着自签名接口，开着的话连握手都过不去
-        assert!(!s.request.verify_tls);
+        // 默认打开（安全默认）：坏证书直接握手失败；调自签接口在设置里显式关
+        assert!(s.request.verify_tls);
         // 空清单 = 默认头全启用；老 settings.json 没有这个字段时就落到这里
         assert!(s.request.disabled_default_headers.is_empty());
         assert_eq!(s.editor_font_size, 13);
@@ -718,12 +718,12 @@ mod tests {
         assert!(s.wrap_request_body);
         assert!(!s.wrap_response_body);
 
-        // 老配置里显式写着 true 的必须原样保留：改默认值不该动用户已经做过的选择
+        // 老配置里显式关过的必须原样保留：改默认值不该动用户已经做过的选择
         let partial: AppSettings = serde_json::from_str(
-            r#"{"request":{"verify_tls":true},"editor_font_size":16,"check_updates_on_launch":false}"#,
+            r#"{"request":{"verify_tls":false},"editor_font_size":16,"check_updates_on_launch":false}"#,
         )
         .unwrap();
-        assert!(partial.request.verify_tls);
+        assert!(!partial.request.verify_tls);
         assert_eq!(partial.request.timeout_secs, 0);
         assert!(partial.request.disabled_default_headers.is_empty());
 

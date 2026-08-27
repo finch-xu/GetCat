@@ -317,6 +317,10 @@ fn build_client_tuned(
         .brotli(decompress)
         .zstd(decompress)
         .redirect(redirect)
+        // verify_tls 默认打开（安全默认）；关闭是设置里的显式选项，服务于本地
+        // 自签名接口调试——这是 HTTP 调试工具的刚需，与 curl -k / Postman 的
+        // 对应开关同类。CodeQL 的 rust/disabled-certificate-check 会指到这一行，
+        // 属于对该功能本身的告警，不是默认值配置错误。
         .danger_accept_invalid_certs(!settings.verify_tls)
         // 把对端证书塞进响应的 extensions；不开的话 TlsInfo 根本不会被记录，
         // 「证书」页签也就无从谈起
