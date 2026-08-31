@@ -53,6 +53,11 @@ fn supported(tag: &str) -> Option<&'static str> {
     }
 }
 
+/// 当前生效的界面 locale；[`Locale`] 全局未安装（测试）时按英文处理。
+pub fn current(cx: &App) -> &'static str {
+    cx.try_global::<Locale>().map(|l| l.0).unwrap_or(EN)
+}
+
 /// 系统首选语言列表（macOS 读「语言与地区」的顺序；Linux 读 LANG / LC_ALL）。
 ///
 /// 测试里返回空列表：`settings::install` 会按它解析语言，测试断言不能依赖宿主机的系统语言

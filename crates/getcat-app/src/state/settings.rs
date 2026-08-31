@@ -8,6 +8,7 @@ use gpui_component::Theme;
 use crate::bridge;
 use crate::i18n;
 use crate::state::store::store;
+use crate::state::update;
 
 pub struct SettingsHandle {
     settings: AppSettings,
@@ -51,10 +52,17 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut AppSettings)) {
     if next.language != before.language {
         i18n::apply(next.language, cx);
     }
+    // 语言影响「自动」更新源的解析结果，所以语言变了也要重算；
+    // 必须在 set_global 之后调，sync_source 要读到新设置。
+    let source_inputs_changed =
+        next.update_source != before.update_source || next.language != before.language;
     if let Some(store) = store(cx) {
         store.write_settings(next.clone());
     }
     cx.set_global(SettingsHandle { settings: next });
+    if source_inputs_changed {
+        update::sync_source(cx);
+    }
 }
 
 /// 恢复默认并落盘（设置对话框的"恢复默认"）。

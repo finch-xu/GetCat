@@ -7,7 +7,7 @@ use getcat_core::body::spill::HEAD_BYTES;
 use getcat_core::body::tier::{EDITOR_MAX_BYTES, EDITOR_MAX_LINES, ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{MAX_BODY_BYTES, RequestError};
-use getcat_core::model::{LanguagePref, ThemePref};
+use getcat_core::model::{LanguagePref, ThemePref, UpdateSourcePref};
 use getcat_core::tls::CertWarning;
 use gpui::SharedString;
 
@@ -116,6 +116,14 @@ pub fn language_label(pref: LanguagePref) -> SharedString {
         LanguagePref::System => tr!("language.system"),
         LanguagePref::English => tr!("language.english"),
         LanguagePref::Chinese => tr!("language.chinese"),
+    }
+}
+
+pub fn update_source_label(pref: UpdateSourcePref) -> SharedString {
+    match pref {
+        UpdateSourcePref::Auto => tr!("update_source.auto"),
+        UpdateSourcePref::Global => tr!("update_source.global"),
+        UpdateSourcePref::ChinaMirror => tr!("update_source.china_mirror"),
     }
 }
 

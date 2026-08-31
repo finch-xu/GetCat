@@ -14,13 +14,14 @@ concurrency:
 
 # 发布流水线总览：
 #   verify-version ─ create-draft ─┬─ build-macos (arm64 / x64 矩阵)   ─┐
-#                                  ├─ build-linux (x64 / arm64 矩阵)   ─┼─ sign ─ publish
+#                                  ├─ build-linux (x64 / arm64 矩阵)   ─┼─ sign ─ publish ─ mirror-to-oss
 #                                  └─ build-windows (x64 / arm64 矩阵) ─┘
 #
 # 构建 job 与 sign job 绑定 GitHub 环境 `prod`，secrets 在 Settings > Environments > prod 里配置：
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY   （macOS 签名，p12 base64）
 #   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID                                 （macOS 公证，app-specific password）
 #   MINISIGN_SECRET_KEY                                                       （更新包签名；`minisign -G -W` 生成的无密码私钥文件全文）
+#   OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET                                 （阿里云 OSS 镜像上传，mirror-to-oss job）
 #
 # 资产命名固定为 GetCat-<os>-<arch>.<ext>（不带版本号，版本以 tag 为准），应用内更新器
 # （crates/getcat-app/src/state/update.rs 的 asset_pattern）按 "<os>-<arch>.<ext>" 子串选资产，改名时两边同步。
@@ -382,3 +383,82 @@ jobs:
               make_latest: prerelease ? 'false' : 'true',
             });
             core.info(`Published ${prerelease ? 'pre-' : ''}release ${tag} (id=${release.id})`);
+
+  # 镜像到阿里云 OSS——应用内更新器的「中国大陆」源（crates/getcat-app/src/state/update.rs
+  # 的 MIRROR_MANIFEST_URL）。把已发布 release 的全部资产原样搬到 oss://pidan-github-mirror/GetCat/
+  # （扁平覆盖布局：文件名不带版本号，每次发版原地覆盖，桶里只保留最新版），并生成
+  # StaticManifestSource 读的 latest.json（scripts/ci/gen-oss-manifest.py，含 sha256 回验自检）。
+  # 两条约定：
+  #   - latest.json 必须最后上传——正在检查更新的客户端不能拿到指向还没传完的文件的 manifest；
+  #   - prerelease（tag 含 "-"）整个跳过，镜像上永远只有正式版。
+  # 镜像失败不影响已发布的 GitHub release，但要修：latest.json 停在旧版，大陆用户收不到更新。
+  mirror-to-oss:
+    name: Mirror to Aliyun OSS
+    needs: [publish]
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      # ossutil v2 直接从这两个环境变量读凭证，不需要 -i / -k
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      OSS_ENDPOINT: oss-cn-shanghai.aliyuncs.com
+      OSS_REGION: cn-shanghai
+      OSS_DEST: oss://pidan-github-mirror/GetCat
+      # 桶绑定的自定义域名；latest.json 里的下载链接以它开头，改域名要连
+      # crates/getcat-app/src/state/update.rs 的 MIRROR_MANIFEST_URL 一起改。
+      MIRROR_BASE: https://d.mirror.catonthe.top/GetCat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify OSS secrets are present
+        shell: bash
+        run: |
+          missing=0
+          for var in OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::$var secret 为空 — 无法上传镜像。到 Settings > Environments > prod 配置。"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: Install ossutil
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="2.2.2"
+          curl -fsSL "https://gosspublic.alicdn.com/ossutil/v2/${version}/ossutil-${version}-linux-amd64.zip" -o /tmp/ossutil.zip
+          unzip -q /tmp/ossutil.zip -d /tmp/
+          sudo mv "/tmp/ossutil-${version}-linux-amd64/ossutil" /usr/local/bin/ossutil
+          sudo chmod +x /usr/local/bin/ossutil
+          ossutil version
+
+      - name: Download release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --dir assets \
+            --pattern 'GetCat-*' --pattern 'SHA256SUMS*'
+          ls -la assets
+
+      # 生成到 assets/ 之外：下面按目录批量传资产，manifest 单独最后传
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          python3 scripts/ci/gen-oss-manifest.py \
+            --tag "$RELEASE_TAG" --assets-dir assets \
+            --base-url "$MIRROR_BASE" --out latest.json
+          cat latest.json
+
+      - name: Upload to OSS (manifest last)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in assets/*; do
+            ossutil cp -f "$f" "$OSS_DEST/$(basename "$f")"
+          done
+          ossutil cp -f latest.json "$OSS_DEST/latest.json"
+          echo "镜像完成：$MIRROR_BASE/latest.json"

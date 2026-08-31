@@ -3,7 +3,7 @@
 //! 设置值的读写都走 [`crate::state::settings`]（请求段改了重建 HTTP client、字号直接套到主题），
 //! 主题偏好仍记在 [`Workspace`]（它属于布局状态，写进 `workspace.json`）。
 
-use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, LanguagePref, ThemePref};
+use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, LanguagePref, ThemePref, UpdateSourcePref};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
@@ -32,7 +32,7 @@ use crate::state::settings;
 use crate::state::store::store;
 use crate::state::update::{self, InstallKind};
 use crate::state::workspace::Workspace;
-use crate::ui::text::{language_label, theme_label};
+use crate::ui::text::{language_label, theme_label, update_source_label};
 
 // 对话框尺寸按像素定：Dialog 的 `w()` 只收 Pixels，内容高度要和它配套，
 // 这是设计指南允许的「与外部表面匹配的几何」例外。
@@ -371,6 +371,28 @@ fn updates_page() -> SettingPage {
                     )
                     .description(tr!("settings.check_on_launch_desc")),
                 )
+                .item(
+                    SettingItem::new(
+                        tr!("settings.update_source"),
+                        SettingField::dropdown(
+                            UpdateSourcePref::ALL
+                                .iter()
+                                .map(|p| (update_source_key(*p), update_source_label(*p)))
+                                .collect(),
+                            |cx| update_source_key(settings::settings(cx).update_source),
+                            |value, cx| {
+                                let pref = UpdateSourcePref::ALL
+                                    .iter()
+                                    .copied()
+                                    .find(|p| update_source_key(*p) == value)
+                                    .unwrap_or_default();
+                                settings::update(cx, |s| s.update_source = pref);
+                            },
+                        )
+                        .default_value(update_source_key(UpdateSourcePref::Auto)),
+                    )
+                    .description(tr!("settings.update_source_desc")),
+                )
                 .item(SettingItem::render(|_, _, cx| render_update_row(cx))),
         )
 }
@@ -583,6 +605,14 @@ fn language_key(pref: LanguagePref) -> SharedString {
     }
 }
 
+fn update_source_key(pref: UpdateSourcePref) -> SharedString {
+    match pref {
+        UpdateSourcePref::Auto => "auto".into(),
+        UpdateSourcePref::Global => "global".into(),
+        UpdateSourcePref::ChinaMirror => "china_mirror".into(),
+    }
+}
+
 fn theme_key(pref: ThemePref) -> SharedString {
     match pref {
         ThemePref::System => "system".into(),
@@ -612,5 +642,25 @@ mod tests {
     fn updates_page_is_reachable_from_the_status_bar_hint() {
         assert!(PAGE_ORDER.contains(&SettingsPage::Updates));
         assert!(PAGE_ORDER.contains(&SettingsPage::About));
+    }
+
+    /// 更新源下拉的 key 一一对应且能回读；label 两种语言都有文案（缺 key 时 rust-i18n
+    /// 会原样返回 key，据此兜住漏配翻译）。
+    #[test]
+    fn update_source_keys_round_trip_and_labels_are_translated() {
+        let _locale = crate::i18n::locale_test_lock();
+        for pref in UpdateSourcePref::ALL {
+            let key = update_source_key(pref);
+            let back = UpdateSourcePref::ALL
+                .iter()
+                .copied()
+                .find(|p| update_source_key(*p) == key);
+            assert_eq!(back, Some(pref));
+            let label = crate::ui::text::update_source_label(pref);
+            assert!(
+                !label.contains("update_source"),
+                "{pref:?} 的 label 疑似缺翻译：{label}"
+            );
+        }
     }
 }

@@ -52,6 +52,18 @@ language:
     en: 中文
     zh-CN: 中文
 
+# 更新源（设置 > 检查更新）
+update_source:
+  auto:
+    en: Auto (follow UI language)
+    zh-CN: 自动（跟随界面语言）
+  global:
+    en: Global (GitHub)
+    zh-CN: 全球（GitHub）
+  china_mirror:
+    en: China mainland (mirror)
+    zh-CN: 中国大陆（镜像）
+
 # 右侧图标栏与它弹出的抽屉
 tools:
   rail_aria:
@@ -853,8 +865,14 @@ settings:
     en: Check for updates on launch
     zh-CN: 启动时检查更新
   check_on_launch_desc:
-    en: Queries GitHub Releases once, 5 s after launch; never downloads automatically
-    zh-CN: 启动 5 秒后向 GitHub Releases 查询一次，不会自动下载
+    en: Queries the update source once, 5 s after launch; never downloads automatically
+    zh-CN: 启动 5 秒后向更新源查询一次，不会自动下载
+  update_source:
+    en: Update source
+    zh-CN: 更新源
+  update_source_desc:
+    en: Auto picks the China mainland mirror when the UI language is Chinese, otherwise GitHub Releases; both serve identical signed builds
+    zh-CN: 自动模式下界面语言为中文时走中国大陆镜像，否则走 GitHub Releases；两个源的安装包与签名完全一致
   update_unsupported:
     en: No automatic updates on this platform; download from the releases page
     zh-CN: 此平台暂无自动更新，请前往发布页下载

@@ -343,6 +343,28 @@ impl LanguagePref {
     ];
 }
 
+/// 更新源偏好：自动（按界面语言挑）、GitHub Releases（全球）、或阿里云 OSS 镜像（中国大陆）。
+///
+/// 自动的解析规则在 app 层（`state/update.rs::resolve_source`）：界面语言是中文走大陆镜像，
+/// 其余一律走 GitHub。两个源的产物、校验和与 minisign 签名完全同源（CI 的 mirror 任务
+/// 从 GitHub Release 原样搬运），安全性没有差别，差别只在链路快慢。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateSourcePref {
+    #[default]
+    Auto,
+    Global,
+    ChinaMirror,
+}
+
+impl UpdateSourcePref {
+    pub const ALL: [UpdateSourcePref; 3] = [
+        UpdateSourcePref::Auto,
+        UpdateSourcePref::Global,
+        UpdateSourcePref::ChinaMirror,
+    ];
+}
+
 /// 这次请求走哪个 HTTP 版本。只活在当前 Tab 的这次会话里，不进 [`RequestDraft`]、不落盘。
 ///
 /// 版本是 ALPN 协商的结果，只能在 client 级别定死（`http1_only` /
@@ -439,6 +461,9 @@ pub struct AppSettings {
     /// 界面语言；旧版 settings.json 没有这个字段时按跟随系统处理。
     #[serde(default)]
     pub language: LanguagePref,
+    /// 更新源；旧版 settings.json 没有这个字段时按自动（跟随界面语言）处理。
+    #[serde(default)]
+    pub update_source: UpdateSourcePref,
     /// 请求体编辑器自动换行。**默认开**：请求体是自己写的，横向找不到行尾比多几行更烦。
     #[serde(default = "default_true")]
     pub wrap_request_body: bool,
@@ -461,6 +486,7 @@ impl Default for AppSettings {
             editor_font_size: default_editor_font_size(),
             check_updates_on_launch: true,
             language: LanguagePref::System,
+            update_source: UpdateSourcePref::Auto,
             wrap_request_body: true,
             wrap_response_body: false,
         }
@@ -774,6 +800,28 @@ mod tests {
         assert_eq!(legacy.editor_font_size, 14);
         assert!(legacy.wrap_request_body);
         assert!(!legacy.wrap_response_body);
+    }
+
+    /// 更新源偏好序列化 snake_case；旧 settings.json 没有 update_source 字段时回落到自动。
+    #[test]
+    fn update_source_pref_serializes_snake_case_and_defaults_to_auto() {
+        assert_eq!(
+            serde_json::to_string(&UpdateSourcePref::ChinaMirror).unwrap(),
+            "\"china_mirror\""
+        );
+        assert_eq!(
+            serde_json::from_str::<UpdateSourcePref>("\"global\"").unwrap(),
+            UpdateSourcePref::Global
+        );
+        assert_eq!(
+            serde_json::from_str::<UpdateSourcePref>("\"auto\"").unwrap(),
+            UpdateSourcePref::Auto
+        );
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.update_source, UpdateSourcePref::Auto);
+        let back: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
+        assert_eq!(back.update_source, UpdateSourcePref::Auto);
     }
 
     #[test]

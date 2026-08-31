@@ -2760,6 +2760,52 @@ fn settings_update_persists_and_applies_font_size(cx: &mut TestAppContext) {
     cx.read(|app| assert_eq!(settings::settings(app), AppSettings::default()));
 }
 
+/// 更新源跟随设置即时切换：自动模式随界面语言变，显式选择压过语言；全程不重建 Updater 实体。
+/// 末尾切回英文：locale 是进程级全局，不能把别的测试留在中文里。
+#[gpui::test]
+fn update_source_follows_settings_and_language(cx: &mut TestAppContext) {
+    use crate::state::update::ResolvedSource;
+    use getcat_core::model::UpdateSourcePref;
+
+    let _locale = crate::i18n::locale_test_lock();
+    let cx = init(cx);
+    cx.update(|_, cx| {
+        settings::install(cx, None);
+        update::install(cx);
+    });
+    let updater_before = cx.read(|app| update::updater(app).expect("平台有产物，更新器已安装"));
+    // 测试环境的系统语言列表为空 → 界面语言英文 → 自动模式落在全球源
+    cx.read(|app| assert_eq!(update::resolved_source(app), Some(ResolvedSource::Global)));
+
+    // 界面切中文：自动模式跟着换到大陆镜像
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::Chinese));
+    cx.read(|app| {
+        assert_eq!(
+            update::resolved_source(app),
+            Some(ResolvedSource::ChinaMirror)
+        )
+    });
+
+    // 显式选全球源：语言仍是中文，但显式选择压过自动
+    cx.update(|_, cx| settings::update(cx, |s| s.update_source = UpdateSourcePref::Global));
+    cx.read(|app| assert_eq!(update::resolved_source(app), Some(ResolvedSource::Global)));
+
+    // 显式选大陆镜像后切回英文界面：显式选择不受语言影响
+    cx.update(|_, cx| settings::update(cx, |s| s.update_source = UpdateSourcePref::ChinaMirror));
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::English));
+    cx.read(|app| {
+        assert_eq!(
+            update::resolved_source(app),
+            Some(ResolvedSource::ChinaMirror)
+        );
+        // Updater 实体没被重建，Workspace 的订阅不会失联
+        assert_eq!(
+            update::updater(app).expect("更新器仍在").entity_id(),
+            updater_before.entity_id()
+        );
+    });
+}
+
 /// 设置里切换语言：rust-i18n 的 locale、`Locale` 全局与驻留在 InputState 里的占位符都立即更新，
 /// 不需要重启。末尾切回英文：locale 是进程级全局，不能把别的测试留在中文里。
 #[gpui::test]

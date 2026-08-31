@@ -1,4 +1,12 @@
-//! 应用内更新：用 `gpui-updater` 从 GitHub Releases 检查、下载、校验（SHA-256 + minisign）并就地安装新版本。
+//! 应用内更新：用 `gpui-updater` 检查、下载、校验（SHA-256 + minisign）并就地安装新版本。
+//!
+//! 更新源有两个，安全保证一致（同一把 minisign 私钥签名、客户端同一个内置公钥验签）：
+//! - 全球：GitHub Releases（`GitHubSource`）；
+//! - 中国大陆：阿里云 OSS 镜像（`StaticManifestSource` 读 [`MIRROR_MANIFEST_URL`]），
+//!   由 release.yml 的 mirror-to-oss job 从 GitHub Release 原样搬运并生成 manifest。
+//!
+//! 选哪个由设置里的 [`UpdateSourcePref`] 决定，默认自动（界面语言中文 → 大陆镜像）；
+//! 运行时切换靠 [`SwitchableSource`] 的共享状态，见 [`sync_source`]。
 //!
 //! 全局只有一个 [`Updater`] 实体（[`UpdaterHandle`]），启动时由 `main` 安装；`Workspace` 观察它来刷新
 //! 状态栏提示与「关于」页。所有网络与文件操作都在 gpui 的后台执行器上跑，这里只做状态读写与纯函数。
@@ -13,12 +21,14 @@
 // 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 的 `test` 属性宏
 // 与标准库 `#[test]` 冲突（见 workspace.rs 顶部说明）。
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use getcat_core::model::AppSettings;
+use getcat_core::model::{AppSettings, UpdateSourcePref};
 use gpui::{App, AppContext, Entity, Global, SharedString};
 use gpui_updater::{
-    EngineConfig, GitHubSource, UpdateSource, UpdateStatus, Updater, Verification, Version,
+    EngineConfig, GitHubSource, StaticManifestSource, UpdateSource, UpdateStatus, Updater,
+    Verification, Version,
 };
 
 use crate::i18n::tr;
@@ -28,6 +38,9 @@ pub const REPO_OWNER: &str = "finch-xu";
 pub const REPO_NAME: &str = "GetCat";
 /// 发布页：自动更新不可用（开发构建、未支持的平台、安装失败）时给用户的退路。
 pub const RELEASES_URL: &str = "https://github.com/finch-xu/GetCat/releases";
+/// 中国大陆镜像的静态 manifest（阿里云 OSS，release.yml 的 mirror-to-oss job 生成并上传）。
+/// 桶里是扁平覆盖布局：产物直接躺在 `GetCat/` 下，每次发版原地覆盖，只保留最新版。
+pub const MIRROR_MANIFEST_URL: &str = "https://d.mirror.catonthe.top/GetCat/latest.json";
 /// 启动后多久做第一次检查：先让首帧与数据加载完成，再去碰网络。
 pub const LAUNCH_CHECK_DELAY: Duration = Duration::from_secs(5);
 
@@ -49,9 +62,92 @@ pub enum InstallKind {
 pub struct UpdaterHandle {
     updater: Option<Entity<Updater>>,
     kind: InstallKind,
+    /// [`SwitchableSource`] 的共享状态；设置里改更新源只改这里，不重建 Updater 实体
+    /// （`Workspace` 构造时订阅了实体，重建会让状态栏的更新提示失联）。
+    source_switch: Option<Arc<Mutex<ResolvedSource>>>,
 }
 
 impl Global for UpdaterHandle {}
+
+// ---------------------------------------------------------------------------
+// 更新源的解析与切换
+// ---------------------------------------------------------------------------
+
+/// [`UpdateSourcePref::Auto`] 落定之后只剩两种真实源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedSource {
+    /// GitHub Releases（全球默认）。
+    Global,
+    /// 阿里云 OSS 镜像（中国大陆），走 [`MIRROR_MANIFEST_URL`]。
+    ChinaMirror,
+}
+
+/// 把更新源偏好解析成真实源：自动模式看界面语言（中文 → 大陆镜像），显式选择直接生效。
+pub fn resolve_source(pref: UpdateSourcePref, ui_locale: &str) -> ResolvedSource {
+    match pref {
+        UpdateSourcePref::Global => ResolvedSource::Global,
+        UpdateSourcePref::ChinaMirror => ResolvedSource::ChinaMirror,
+        UpdateSourcePref::Auto => {
+            if ui_locale == crate::i18n::ZH_CN {
+                ResolvedSource::ChinaMirror
+            } else {
+                ResolvedSource::Global
+            }
+        }
+    }
+}
+
+/// 运行时可切换的更新源：`fetch_latest` 每次现读共享状态，设置变更立即对下一次检查生效。
+/// 泛型只为了测试能注入假源；生产装配在 [`install`]。
+struct SwitchableSource<G, M> {
+    current: Arc<Mutex<ResolvedSource>>,
+    global: G,
+    mirror: M,
+}
+
+impl<G: UpdateSource, M: UpdateSource> UpdateSource for SwitchableSource<G, M> {
+    fn fetch_latest(&self) -> gpui_updater::Result<gpui_updater::Release> {
+        // 锁中毒说明写入方（主线程的 sync_source）panic 过；值是 Copy 的、不会写坏，取出继续用
+        let current = *self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match current {
+            ResolvedSource::Global => self.global.fetch_latest(),
+            ResolvedSource::ChinaMirror => self.mirror.fetch_latest(),
+        }
+    }
+}
+
+/// 当前生效的真实更新源；更新器未安装（不支持的平台 / 注入假源的测试）时为 `None`。
+/// 目前只有测试断言用；界面要展示生效源时去掉 cfg 即可。
+#[cfg(test)]
+pub fn resolved_source(cx: &App) -> Option<ResolvedSource> {
+    let switch = cx.try_global::<UpdaterHandle>()?.source_switch.as_ref()?;
+    Some(
+        *switch
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    )
+}
+
+/// 按当前设置与界面语言重算更新源。`settings::update` 在 `update_source` 或 `language`
+/// （影响自动模式）变化后调用；下一次检查即走新源。
+pub fn sync_source(cx: &mut App) {
+    let Some(switch) = cx
+        .try_global::<UpdaterHandle>()
+        .and_then(|h| h.source_switch.clone())
+    else {
+        return;
+    };
+    let resolved = resolve_source(
+        settings::settings(cx).update_source,
+        crate::i18n::current(cx),
+    );
+    *switch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = resolved;
+}
 
 // ---------------------------------------------------------------------------
 // 平台与安装态
@@ -173,10 +269,11 @@ pub fn install(cx: &mut App) {
         cx.set_global(UpdaterHandle {
             updater: None,
             kind,
+            source_switch: None,
         });
         return;
     };
-    let source = GitHubSource::new(REPO_OWNER, REPO_NAME)
+    let github = GitHubSource::new(REPO_OWNER, REPO_NAME)
         // 必须是 asset_patterns（整体替换）而不是 asset_contains（追加）：GitHubSource::new
         // 预置了一个按 OS 猜的扩展名，Windows 上是 ".exe"。追加的话 MSI 用户的匹配条件会变成
         // 「同时含 .exe 和 windows-x64.msi」，永远匹配不上，客户端只会显示「已是最新版」。
@@ -184,9 +281,26 @@ pub fn install(cx: &mut App) {
         .asset_patterns(vec![pattern.to_string()])
         .with_checksums("SHA256SUMS")
         .with_minisig()
-        // 演练用：含 "-" 的 tag 发成 prerelease，正式用户看不到；开发者设这个变量才会收到
+        // 演练用：含 "-" 的 tag 发成 prerelease，正式用户看不到；开发者设这个变量才会收到。
+        // 只对 GitHub 源有意义：mirror-to-oss job 会跳过 prerelease，镜像上永远只有正式版。
         .include_prereleases(std::env::var_os("GETCAT_UPDATE_PRERELEASE").is_some());
+    // 镜像 manifest 的 sha256 / signature_url 内嵌在资产条目里，engine_config 的 Strict
+    // 校验与 minisign 公钥两个源共用，安全保证一致。StaticManifestSource::new 同样预置了
+    // 按 OS 猜的扩展名，理由同上用 asset_patterns 整体替换。
+    let mirror =
+        StaticManifestSource::new(MIRROR_MANIFEST_URL).asset_patterns(vec![pattern.to_string()]);
+    let resolved = resolve_source(
+        settings::settings(cx).update_source,
+        crate::i18n::current(cx),
+    );
+    let switch = Arc::new(Mutex::new(resolved));
+    let source = SwitchableSource {
+        current: switch.clone(),
+        global: github,
+        mirror,
+    };
     install_with_source(cx, source, engine_config(), kind);
+    cx.global_mut::<UpdaterHandle>().source_switch = Some(switch);
 }
 
 /// 用指定的源安装更新器；测试用它注入假源。
@@ -200,6 +314,7 @@ pub fn install_with_source(
     cx.set_global(UpdaterHandle {
         updater: Some(updater),
         kind,
+        source_switch: None,
     });
 }
 
@@ -439,6 +554,78 @@ mod tests {
                 "内容 {content:?} 不该判定为 MSI"
             );
         }
+    }
+
+    /// 自动模式跟着界面语言走：中文界面用大陆镜像，其余用 GitHub；显式选择无视语言。
+    #[test]
+    fn auto_source_follows_ui_language_and_explicit_choice_wins() {
+        use getcat_core::model::UpdateSourcePref::{Auto, ChinaMirror, Global};
+
+        assert_eq!(
+            resolve_source(Auto, crate::i18n::ZH_CN),
+            ResolvedSource::ChinaMirror
+        );
+        assert_eq!(
+            resolve_source(Auto, crate::i18n::EN),
+            ResolvedSource::Global
+        );
+        assert_eq!(
+            resolve_source(Global, crate::i18n::ZH_CN),
+            ResolvedSource::Global
+        );
+        assert_eq!(
+            resolve_source(ChinaMirror, crate::i18n::EN),
+            ResolvedSource::ChinaMirror
+        );
+    }
+
+    /// 切换共享状态后，同一个源实例的下一次 fetch 就走另一边——不需要重建 Updater 实体。
+    #[test]
+    fn switchable_source_delegates_to_the_currently_selected_side() {
+        use std::sync::{Arc, Mutex};
+
+        struct Fake(&'static str);
+        impl UpdateSource for Fake {
+            fn fetch_latest(&self) -> gpui_updater::Result<gpui_updater::Release> {
+                Ok(gpui_updater::Release {
+                    version: Version::new(9, 9, 9),
+                    notes: Some(self.0.to_string()),
+                    asset: gpui_updater::Asset {
+                        name: "GetCat-test".into(),
+                        url: format!("https://{}/GetCat-test", self.0),
+                        size: 0,
+                    },
+                    signature: None,
+                    signature_url: None,
+                    sha256: None,
+                })
+            }
+        }
+
+        let current = Arc::new(Mutex::new(ResolvedSource::Global));
+        let source = SwitchableSource {
+            current: current.clone(),
+            global: Fake("github"),
+            mirror: Fake("mirror"),
+        };
+        assert_eq!(
+            source.fetch_latest().unwrap().notes.as_deref(),
+            Some("github")
+        );
+        *current.lock().unwrap() = ResolvedSource::ChinaMirror;
+        assert_eq!(
+            source.fetch_latest().unwrap().notes.as_deref(),
+            Some("mirror")
+        );
+    }
+
+    /// 镜像 manifest 的地址与 CI（release.yml 的 mirror-to-oss job）约定一致。
+    #[test]
+    fn mirror_manifest_url_is_pinned_to_the_oss_domain() {
+        assert_eq!(
+            MIRROR_MANIFEST_URL,
+            "https://d.mirror.catonthe.top/GetCat/latest.json"
+        );
     }
 
     #[test]
