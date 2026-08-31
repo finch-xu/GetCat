@@ -94,13 +94,17 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 # 于是 cargo test 挂在 "Failed to initialize Tokio: Too many open files"，且每次被判死刑
 # 的测试都不一样。硬限制是 unlimited，脚本可以自己抬高软限制，只影响本进程与其子进程。
 #
-# 实测：ulimit -n 256 → 3 个测试失败；512 → 152 个全过。
-#
-# TODO：在这里把 fd 上限处理掉。要定的三件事——
-#   · 无条件抬高，还是先读 ulimit -n、只在低于阈值时才动（并说一声）？
-#   · 抬到多少：512 是实测下限，别贴着下限走；也别贴 kern.maxfilesperproc 的 92160。
-#   · 抬不上去时是 die 还是警告后继续？倒在这里发不了版，但静默放过去会让下一个人
-#     对着同一个 EMFILE 再懵一次。
+# 实测：ulimit -n 256 → 二十来个测试失败；512 → 全过。取 4096：不贴实测下限
+# （测试数量还会涨），也远离 kern.maxfilesperproc 的 92160。只在低于阈值时才动，
+# 抬不上去（硬限制被管过的机器）就 die——与其让 cargo test 死在随机测试的 EMFILE，
+# 不如在这里给出明确指引。
+min_fds=4096
+soft_fds="$(ulimit -n)"
+if [ "$soft_fds" != "unlimited" ] && [ "$soft_fds" -lt "$min_fds" ]; then
+  log "文件描述符软限制 $soft_fds 不够 gpui 测试并行跑，抬到 $min_fds"
+  ulimit -n "$min_fds" ||
+    die "抬不上去（硬限制 $(ulimit -Hn)）。手动跑 ulimit -n $min_fds 或调整 launchctl limit maxfiles 后重试"
+fi
 
 log "cargo test --workspace --locked"
 cargo test --workspace --locked
