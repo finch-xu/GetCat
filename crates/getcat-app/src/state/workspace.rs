@@ -1,6 +1,6 @@
 //! 顶层工作区：Tab 列表、侧栏、主题、全局动作；负责从磁盘恢复，并把布局变化写回。
 
-// 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入
+// 显式导入而非 `use gpui_kit::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入
 // gpui 重导出的 `#[proc_macro_attribute] test`，与标准库 `#[test]` 同名冲突，
 // 导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use std::cell::Cell;
@@ -11,13 +11,7 @@ use getcat_core::model::{
     WorkspaceState, now_ms,
 };
 use getcat_core::store::Loaded;
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, UniformListScrollHandle, WeakEntity, Window, div, point, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, IconName, IndexPath, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar,
     WindowExt,
     alert::Alert,
@@ -29,6 +23,12 @@ use gpui_component::{
     select::{Select, SelectState},
     status_bar::StatusBar,
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, UniformListScrollHandle, WeakEntity, Window, div, point, px,
 };
 
 use gpui_updater::UpdateStatus;
@@ -880,7 +880,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// 删除前确认（需要窗口根视图是 gpui_component::Root；测试不走这里）。
+    /// 删除前确认（需要窗口根视图是 gpui_kit::component::Root；测试不走这里）。
     pub(crate) fn confirm_delete_saved(
         &mut self,
         id: Ulid,
@@ -1150,7 +1150,7 @@ impl Workspace {
     }
 
     /// 名字对话框：默认名取 Tab 标题；确定后 `finish_save`。
-    /// 需要窗口根视图是 gpui_component::Root（测试窗口没有，测试不走这里）。
+    /// 需要窗口根视图是 gpui_kit::component::Root（测试窗口没有，测试不走这里）。
     fn prompt_save_name(
         &mut self,
         tab: Entity<RequestTab>,
@@ -1383,8 +1383,8 @@ impl Workspace {
     /// 收起当前抽屉。
     ///
     /// 用 `open_tool` 而不是 `window.has_active_sheet` 判断有没有抽屉开着：后者内部走
-    /// `Root::read`，窗口根不是 `gpui_component::Root` 时直接 unwrap 一个 None
-    /// （`#[gpui::test]` 的测试窗口就是这样）。`open_tool` 本来就完整记录了这件事。
+    /// `Root::read`，窗口根不是 `gpui_kit::component::Root` 时直接 unwrap 一个 None
+    /// （`#[gpui_kit::test]` 的测试窗口就是这样）。`open_tool` 本来就完整记录了这件事。
     fn close_tool_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.open_tool.take().is_some() {
             window.close_sheet(cx);

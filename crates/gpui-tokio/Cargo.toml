@@ -1,0 +1,17 @@
+[package]
+name = "gpui-tokio"
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+publish = false
+description = "tokio ⇄ gpui 桥接（移植自 zed 仓库的 gpui_tokio crate）"
+
+[lib]
+name = "gpui_tokio"
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+# 只用到 gpui 本体；feature 在 workspace 内本来就会统一，这里不另关默认 feature
+gpui-kit.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }

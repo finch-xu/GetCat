@@ -1,8 +1,6 @@
 //! URL 栏：方法下拉 + URL 输入 + 发送/取消按钮 + 校验提示。
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, IconName, Sizable as _,
     button::{Button, ButtonVariants},
     h_flex,
@@ -11,6 +9,8 @@ use gpui_component::{
     select::Select,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use getcat_core::model::HttpVersionPref;
 

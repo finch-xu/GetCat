@@ -18,7 +18,7 @@ use getcat_core::detect::{ContentKind, SNIFF_LEN, detect};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::ResponseMeta;
 use getcat_core::sse::{self, LlmStream, SseParser, Usage};
-use gpui::{SharedString, Task};
+use gpui_kit::{SharedString, Task};
 
 /// 一份可渲染的文本：A 档交给 Editor（整段文本），B/C 档交给虚拟列表（按行切片）。
 /// 通过 `Arc<TextDoc>` 与渲染闭包共享，每帧只 clone Arc。

@@ -1,0 +1,54 @@
+[package]
+name = "gpui-updater"
+version = "0.0.7"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AprilNEA/gpui-updater"
+authors = ["AprilNEA <dev@aprilnea.me>"]
+description = "A cross-platform updater for the GPUI desktop GUI toolkit"
+readme = "README.md"
+keywords = ["gpui", "updater", "auto-update", "self-update", "desktop"]
+categories = ["gui", "development-tools"]
+
+[lib]
+name = "gpui_updater"
+
+[features]
+default = []
+# Opt-in GPUI integration: an observable `Entity<Updater>` (see
+# src/gpui_integration.rs) that drives the engine on the app's executors. Off by
+# default so the core builds and tests without a Metal/GPU toolchain.
+gpui = ["dep:gpui"]
+
+[dependencies]
+minisign-verify = "0.2.5"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tracing = "0.1"
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "json"] }
+
+# GetCat vendor 改动（唯一一处）：上游依赖 zed git 的 gpui，这里改为 crates.io 的
+# `gpui-pre`（GPUI Kit 0.6 锁定的 gpui 发行快照），否则与应用里的 gpui 是两个不同的类型。
+# 版本要求与 gpui-kit 的声明保持同一个 semver 区间，Cargo 才会解析成同一份。
+gpui = { package = "gpui-pre", version = "0.3.1", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+missing_errors_doc = "allow"
+module_name_repetitions = "allow"
+# Noisy pedantic lints: flagging every value-returning fn / public-method
+# argument adds churn without catching real bugs here.
+must_use_candidate = "allow"
+needless_pass_by_value = "allow"

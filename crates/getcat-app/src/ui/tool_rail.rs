@@ -7,12 +7,12 @@
 //! 图标不做选中高亮：抽屉是覆盖式的（`Sheet` 绝对定位在 `right_0`），打开时正好压住
 //! 这条 48 px 的栏，高亮了也看不见。
 
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName,
     button::{Button, ButtonVariants},
     v_flex,
 };
+use gpui_kit::*;
 
 use crate::assets::ICON_FILE_INPUT;
 use crate::i18n::tr;

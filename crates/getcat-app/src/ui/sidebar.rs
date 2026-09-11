@@ -11,9 +11,7 @@
 
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
@@ -22,6 +20,8 @@ use gpui_component::{
     scroll::Scrollbar,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use getcat_core::model::ThemePref;
 
@@ -94,7 +94,7 @@ impl Workspace {
                     .items_center()
                     .justify_center()
                     .tooltip(|window, cx| {
-                        gpui_component::tooltip::Tooltip::new(APP_NAME).build(window, cx)
+                        gpui_kit::component::tooltip::Tooltip::new(APP_NAME).build(window, cx)
                     })
                     // 26 px 是位图本身的尺寸：设计指南允许的像素例外
                     .child(img(LOGO_PATH).size(px(26.)).flex_none()),
@@ -406,7 +406,8 @@ impl Workspace {
                 // （M3-d）；只有真分类（用户输入的名字）可能超长，才需要悬停看全名。
                 let tooltip_label = label.clone();
                 let row = row.tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(tooltip_label.clone()).build(window, cx)
+                    gpui_kit::component::tooltip::Tooltip::new(tooltip_label.clone())
+                        .build(window, cx)
                 });
                 let name = label.to_string();
                 let menu_ws = weak.clone();

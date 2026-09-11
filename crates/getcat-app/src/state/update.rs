@@ -18,14 +18,14 @@
 //! MSI，否则裸 exe 被原地替换，而「应用和功能」里记的版本停在初装那一版，之后 MSI 的修复或
 //! 重装会把旧二进制还原回去。区分靠安装目录里的 `install-source.txt`，见 [`windows_package`]。
 
-// 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 的 `test` 属性宏
+// 显式导入而非 `use gpui_kit::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 的 `test` 属性宏
 // 与标准库 `#[test]` 冲突（见 workspace.rs 顶部说明）。
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use getcat_core::model::{AppSettings, UpdateSourcePref};
-use gpui::{App, AppContext, Entity, Global, SharedString};
+use gpui_kit::{App, AppContext, Entity, Global, SharedString};
 use gpui_updater::{
     EngineConfig, GitHubSource, StaticManifestSource, UpdateSource, UpdateStatus, Updater,
     Verification, Version,

@@ -9,7 +9,7 @@
 //! 多模态模板共用一张 Wikimedia 上的公开图片，两家接口都能直接取到。
 
 use getcat_core::model::{BodyKind, KeyValue, Method, RawFormat, RequestDraft};
-use gpui::SharedString;
+use gpui_kit::SharedString;
 
 use crate::i18n::tr;
 

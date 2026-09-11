@@ -6,8 +6,8 @@
 
 use std::borrow::Cow;
 
-use gpui::{AssetSource, Result, SharedString};
-use gpui_component_assets::Assets;
+use gpui_kit::assets::Assets;
+use gpui_kit::{AssetSource, Result, SharedString};
 
 /// Logo 的资源路径（`img(LOGO_PATH)`）。位图走 `img()`：整张栅格化、保留原色；
 /// `svg()` 是单色蒙版，只会被 `text_color` 染成一种颜色，多色 logo 用不了。

@@ -4,15 +4,10 @@ use std::path::PathBuf;
 
 use getcat_core::http::guess_content_type;
 use getcat_core::model::{FormField, FormValue, KeyValue};
-use gpui::prelude::FluentBuilder as _;
-// 显式导入而非 `use gpui::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
+use gpui_kit::prelude::FluentBuilder as _;
+// 显式导入而非 `use gpui_kit::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
 // `#[test]` 属性宏并与标准库同名冲突。编译器报"找不到 X"时把 X 加进这里，不要改回通配符。
-use gpui::{
-    AnyElement, App, AppContext, Context, CursorStyle, DragMoveEvent, Entity, EventEmitter,
-    FontWeight, InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, Role,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px, relative,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Sizable, Size,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
@@ -20,6 +15,11 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     tooltip::Tooltip,
     v_flex,
+};
+use gpui_kit::{
+    AnyElement, App, AppContext, Context, CursorStyle, DragMoveEvent, Entity, EventEmitter,
+    FontWeight, InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, Role,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px, relative,
 };
 
 use crate::i18n::{Locale, tr};
@@ -611,7 +611,7 @@ impl KvTable {
     }
 
     /// 一个表格单元：按比例占宽；除最后一列外右侧画分隔线。
-    fn cell(&self, col: usize, cx: &App) -> gpui::Div {
+    fn cell(&self, col: usize, cx: &App) -> gpui_kit::Div {
         div()
             // 顺序有讲究：flex_none() 会把 flex-basis 一并重置成 auto，必须先调它再给 basis
             .flex_none()

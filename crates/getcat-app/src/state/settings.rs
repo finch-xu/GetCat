@@ -2,8 +2,8 @@
 //! 重建 HTTP client（请求段改了才重建）、把编辑器字号套到主题上、切换界面语言。
 
 use getcat_core::model::{AppSettings, EDITOR_FONT_SIZE_RANGE};
-use gpui::{App, Global, px};
-use gpui_component::Theme;
+use gpui_kit::component::Theme;
+use gpui_kit::{App, Global, px};
 
 use crate::bridge;
 use crate::i18n;

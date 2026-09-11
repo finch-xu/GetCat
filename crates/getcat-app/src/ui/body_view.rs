@@ -4,15 +4,15 @@
 use std::sync::Arc;
 
 use getcat_core::body::text::{TextDoc, clip_line};
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
+use gpui_kit::component::{
+    ActiveTheme, h_flex,
+    scroll::{Scrollbar, ScrollbarAxis},
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
     App, InteractiveElement, IntoElement, ListHorizontalSizingBehavior, ListState, ParentElement,
     Role, SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle, div, list, px,
     uniform_list,
-};
-use gpui_component::{
-    ActiveTheme, h_flex,
-    scroll::{Scrollbar, ScrollbarAxis},
 };
 
 use crate::i18n::tr;

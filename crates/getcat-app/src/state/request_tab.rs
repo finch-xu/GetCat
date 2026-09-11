@@ -13,19 +13,19 @@ use getcat_core::model::{
     Ulid,
 };
 use getcat_core::url::extract_path_params;
-// 显式导入而非 `use gpui::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
-// 若通过通配符引入 `gpui::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
+// 显式导入而非 `use gpui_kit::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
+// 若通过通配符引入 `gpui_kit::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
-use gpui::{
+use gpui_kit::component::IndexPath;
+use gpui_kit::component::input::{EditorState, InputEvent, InputState, Search};
+use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
+use gpui_kit::component::select::{SelectEvent, SelectState};
+use gpui_kit::component::v_flex;
+use gpui_kit::{
     App, AppContext, Context, Entity, Global, IntoElement, ListAlignment, ListState, ParentElement,
     PathPromptOptions, Render, ScrollStrategy, SharedString, Styled, Subscription, Task,
     UniformListScrollHandle, Window, div, px,
 };
-use gpui_component::IndexPath;
-use gpui_component::input::{EditorState, InputEvent, InputState, Search};
-use gpui_component::resizable::{h_resizable, resizable_panel, v_resizable};
-use gpui_component::select::{SelectEvent, SelectState};
-use gpui_component::v_flex;
 
 use tokio::sync::mpsc;
 

@@ -1,7 +1,7 @@
 //! 持久化句柄（全局）。Store 不可用时所有写入都是 no-op，UI 只显示横幅（spec §9.4 / §11）。
 
 use getcat_core::store::{Store, StoreError};
-use gpui::{App, Entity, Global};
+use gpui_kit::{App, Entity, Global};
 
 use crate::i18n::tr;
 use crate::state::workspace::Workspace;

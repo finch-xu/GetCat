@@ -153,7 +153,7 @@ crates/
 └─ getcat-app    # GPUI 界面：Workspace / RequestTab 状态、设置对话框、应用内更新
 ```
 
-- UI 框架是 Zed 的 [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) + [gpui-component](https://github.com/longbridge/gpui-component) 组件库，两者都走 git 依赖、由 `Cargo.lock` 锁定（升级方式见 `Cargo.toml` 注释）。
+- UI 框架是 Zed 的 [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) + [GPUI Kit](https://github.com/longbridge/gpui-kit)（gpui-component 组件库），按 Kit 0.6 官方形态只依赖 crates.io 的 `gpui-kit` 一个包，由它锁定配套的 gpui 版本。
 - 网络在 tokio 运行时里跑，结果通过 channel 回到 GPUI 主线程；后台处理（美化 / 建索引）被 `catch_unwind` 包裹，panic 只会显示为"后台处理异常"。
 - 持久化没有数据库：`getcat-core/src/store` 负责读写，写入走独立线程并做 500 ms 合并。
 

@@ -17,9 +17,6 @@ from collections import defaultdict
 
 # 需要在清单中额外加注说明的依赖
 NOTES = {
-    "zlog": "⚠️ 强 copyleft，见文首「已知许可证问题」",
-    "ztracing": "⚠️ 强 copyleft，见文首「已知许可证问题」",
-    "ztracing_macro": "⚠️ 强 copyleft，见文首「已知许可证问题」",
     "option-ext": "弱 copyleft（文件级），未修改其源码",
     "dwrote": "弱 copyleft（文件级），仅 Windows",
     "cbindgen": "弱 copyleft（文件级），仅构建期使用，不进入产物",
@@ -38,31 +35,6 @@ Linux、Windows 三个平台的依赖并集，已排除仅测试期使用的 dev
 
 """
 
-GPL_SECTION = """
-## 已知许可证问题
-
-`zlog`、`ztracing`、`ztracing_macro` 由 Zed 上游声明为 **GPL-3.0-or-later**。
-三者均为**传递依赖**，本项目 `Cargo.toml` 未直接引用，而是经 `gpui` 与
-`sum_tree` 传入：
-
-```
-getcat-app -> gpui (Apache-2.0)             -> ztracing -> zlog
-getcat-app -> gpui -> sum_tree (Apache-2.0) -> ztracing
-```
-
-来源是 Zed 在这两个 crate 中加的 13 处性能剖析埋点。
-
-**GPL 代码不会进入分发产物。** `ztracing/build.rs` 仅在环境变量 `ZTRACING`
-存在时才启用埋点，本项目从未设置该变量；默认构建下 `#[instrument]` 退化为
-恒等宏，span 宏退化为空结构体，`zlog` 的调用点位于 `#[cfg(ztracing)]` 与
-`#[cfg(test)]` 内，均不参与编译。实测 release 二进制中 `gpui` 符号 15077 个，
-`zlog` 与 `ztracing` 符号各 0 个。
-
-因此这是**元数据层面**而非产物层面的问题：依赖图会被自动化合规扫描标记为
-含 GPL，且这份「干净」依赖于上游 cfg 默认关闭这一实现细节，并不稳固。
-处置方案与进展记录在 `deny.toml` 中。
-
-"""
 
 
 def git_sources() -> dict:
@@ -109,7 +81,6 @@ def main() -> int:
     lines = [HEADER]
     total = sum(len(v) for v in by_license.values())
     lines.append(f"共 **{total}** 个第三方依赖，分属 **{len(by_license)}** 种许可证声明。\n")
-    lines.append(GPL_SECTION)
     lines.append("## 依赖清单\n")
 
     for license_name in sorted(by_license, key=lambda k: (-len(by_license[k]), k)):

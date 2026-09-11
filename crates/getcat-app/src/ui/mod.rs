@@ -16,8 +16,8 @@ pub mod url_bar;
 use std::time::Duration;
 
 use getcat_core::model::Method;
-use gpui::{App, Hsla};
-use gpui_component::ActiveTheme;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::{App, Hsla};
 
 use crate::theme::palette;
 
@@ -61,22 +61,22 @@ pub fn status_color(status: u16, cx: &App) -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::TestAppContext;
-    use gpui_component::{Theme, ThemeMode};
+    use gpui_kit::TestAppContext;
+    use gpui_kit::component::{Theme, ThemeMode};
     use std::time::Duration;
 
     fn hex(color: Hsla) -> u32 {
-        let rgba = gpui::Rgba::from(color);
+        let rgba = gpui_kit::Rgba::from(color);
         let to8 = |v: f32| (v * 255.0).round() as u32;
         (to8(rgba.r) << 16) | (to8(rgba.g) << 8) | to8(rgba.b)
     }
 
     /// 方法名在侧栏是 11px 粗体，直接复用语义色只有 2.9–4.2:1；
     /// 这组值在浅色的白 / 面板 / 侧栏 / 选中行四种底色上都 ≥ 4.8:1。
-    #[gpui::test]
+    #[gpui_kit::test]
     fn method_colors_use_the_dedicated_light_palette(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             Theme::change(ThemeMode::Light, None, cx);
 
             assert_eq!(hex(method_color(Method::Get, cx)), 0x007762);
@@ -89,10 +89,10 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn method_colors_use_the_dedicated_dark_palette(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
 
             assert_eq!(hex(method_color(Method::Get, cx)), 0x4bb39a);
@@ -105,10 +105,10 @@ mod tests {
     }
 
     /// 状态码 chip 的文字压在同色 16% 底上，比方法色还需要再深一档。
-    #[gpui::test]
+    #[gpui_kit::test]
     fn status_colors_are_readable_on_their_own_tint(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
 
             Theme::change(ThemeMode::Light, None, cx);
             assert_eq!(hex(status_color(200, cx)), 0x007460);
@@ -126,10 +126,10 @@ mod tests {
     }
 
     /// 范围外的状态码（如 HTTP/0.9 或异常值）不给语义色。
-    #[gpui::test]
+    #[gpui_kit::test]
     fn status_color_outside_known_ranges_falls_back_to_muted(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             Theme::change(ThemeMode::Light, None, cx);
             assert_eq!(status_color(100, cx), cx.theme().muted_foreground);
             assert_eq!(status_color(600, cx), cx.theme().muted_foreground);
@@ -138,7 +138,7 @@ mod tests {
 
     /// WCAG 2.1 相对亮度。
     fn relative_luminance(color: Hsla) -> f32 {
-        let rgba = gpui::Rgba::from(color);
+        let rgba = gpui_kit::Rgba::from(color);
         let channel = |v: f32| {
             if v <= 0.03928 {
                 v / 12.92
@@ -157,10 +157,10 @@ mod tests {
     /// 选中标签的底色从「纯白 / 纯背景色」换成了淡主题色——原来它与标签栏底色只差
     /// 1.02:1，扫一眼根本认不出当前是哪个标签。方法角标压在这层新底色上，可读性
     /// 必须一并钉住：调色时任何一支方法色跌破 4.8:1，这条就会红。
-    #[gpui::test]
+    #[gpui_kit::test]
     fn method_colors_stay_readable_on_the_active_tab(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             crate::theme::install(cx);
 
             for (label, mode) in [("浅色", ThemeMode::Light), ("深色", ThemeMode::Dark)] {
@@ -185,10 +185,10 @@ mod tests {
     }
 
     /// PUT 与 PATCH 过去分别取 info 与 primary，在同一支蓝上撞色。
-    #[gpui::test]
+    #[gpui_kit::test]
     fn put_and_patch_no_longer_share_a_hue(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             for mode in [ThemeMode::Light, ThemeMode::Dark] {
                 Theme::change(mode, None, cx);
                 assert_ne!(

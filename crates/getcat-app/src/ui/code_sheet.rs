@@ -19,8 +19,7 @@
 //!
 //! 同理，代码只在「装载草稿」与「切换目标」这两个离散事件里生成，绝不在渲染期算。
 
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Sizable,
     clipboard::Clipboard,
     h_flex,
@@ -28,6 +27,7 @@ use gpui_component::{
     tab::{Tab, TabBar},
     v_flex,
 };
+use gpui_kit::*;
 
 use getcat_core::codegen::{self, CodeTarget};
 use getcat_core::http::RequestError;

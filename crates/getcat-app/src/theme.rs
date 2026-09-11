@@ -10,8 +10,8 @@
 //! gpui-component 的默认灰。
 
 use getcat_core::model::Method;
-use gpui::{App, Hsla, rgb};
-use gpui_component::{ActiveTheme, Theme, ThemeRegistry, scroll::ScrollbarMode};
+use gpui_kit::component::{ActiveTheme, Theme, ThemeRegistry, scroll::ScrollbarMode};
+use gpui_kit::{App, Hsla, rgb};
 
 const THEME_JSON: &str = include_str!("theme.json");
 const LIGHT: &str = "GetCat Light";
@@ -102,7 +102,7 @@ pub fn palette(cx: &App) -> &'static Palette {
 
 /// 把 GetCat 的浅色 / 深色配色装成当前主题。
 ///
-/// 必须在 `gpui_component::init` 之后调用。任何一步失败都只记日志：
+/// 必须在 `gpui_kit::component::init` 之后调用。任何一步失败都只记日志：
 /// 配色装不上时界面退回 gpui-component 的默认主题，功能不受影响。
 pub fn install(cx: &mut App) {
     if let Err(err) = ThemeRegistry::global_mut(cx).load_themes_from_str(THEME_JSON) {
@@ -139,20 +139,20 @@ pub fn install(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Hsla, TestAppContext};
-    use gpui_component::{ActiveTheme, ThemeMode};
+    use gpui_kit::component::{ActiveTheme, ThemeMode};
+    use gpui_kit::{Hsla, TestAppContext};
 
     fn hex(color: Hsla) -> u32 {
-        let rgba = gpui::Rgba::from(color);
+        let rgba = gpui_kit::Rgba::from(color);
         let to8 = |v: f32| (v * 255.0).round() as u32;
         (to8(rgba.r) << 16) | (to8(rgba.g) << 8) | to8(rgba.b)
     }
 
     /// 滚动条常驻，且切换明暗后不退回上游默认的「滚动时才画」。
-    #[gpui::test]
+    #[gpui_kit::test]
     fn install_pins_the_scrollbar_to_always_visible(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             install(cx);
             assert_eq!(Theme::global(cx).scrollbar_mode, ScrollbarMode::Always);
 
@@ -169,10 +169,10 @@ mod tests {
 
     /// 配色取自 BucketCat 的 src/index.css；muted_foreground 是唯一一处
     /// 相对它的调整（原值 #8794a1 在白底上只有 2.99:1）。
-    #[gpui::test]
+    #[gpui_kit::test]
     fn install_replaces_the_default_palette(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             install(cx);
 
             Theme::change(ThemeMode::Light, None, cx);

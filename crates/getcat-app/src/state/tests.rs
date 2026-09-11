@@ -25,10 +25,10 @@ use getcat_core::model::{
 };
 use getcat_core::store::{Store, codec::decode};
 use getcat_core::tls::{CertWarning, CertificateInfo};
-use gpui::{
+use gpui_kit::component::{ActiveTheme, input::InputEvent};
+use gpui_kit::{
     AppContext, Entity, Focusable, IntoElement, TestAppContext, VisualTestContext, point, px, size,
 };
-use gpui_component::{ActiveTheme, input::InputEvent};
 use tempfile::TempDir;
 
 use crate::i18n::Locale;
@@ -53,7 +53,7 @@ use getcat_core::model::{LanguagePref, MAX_TAB_ROWS};
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         crate::theme::install(cx);
         crate::bridge::init(cx);
     });
@@ -234,7 +234,7 @@ pub(crate) fn refused_url() -> String {
     format!("http://127.0.0.1:{port}/")
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn workspace_tabs_add_close_activate(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -261,7 +261,7 @@ fn workspace_tabs_add_close_activate(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn send_to_refused_port_ends_in_failed(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -283,7 +283,7 @@ fn send_to_refused_port_ends_in_failed(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn send_to_json_server_ends_in_done(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -305,7 +305,7 @@ fn send_to_json_server_ends_in_done(cx: &mut TestAppContext) {
 
 /// SSE 端到端：请求在途时拼装文本就已可见（"收到就展示"），完成后
 /// Done 视图带事件列表、拼装文本、usage 与 TTFT，编辑器写入的是拼装文本。
-#[gpui::test]
+#[gpui_kit::test]
 fn sse_stream_displays_incrementally_and_builds_view(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -382,7 +382,7 @@ fn sse_stream_displays_incrementally_and_builds_view(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn cancel_marks_cancelled_and_bumps_generation(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -414,7 +414,7 @@ fn cancel_marks_cancelled_and_bumps_generation(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn stale_generation_outcome_is_discarded(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -429,7 +429,7 @@ fn stale_generation_outcome_is_discarded(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn elapsed_ticker_notifies_while_in_flight_and_stops_after_cancel(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -456,7 +456,7 @@ fn elapsed_ticker_notifies_while_in_flight_and_stops_after_cancel(cx: &mut TestA
 
 /// B 档端到端（无 GUI）：超过 EDITOR_MAX_LINES 的 text/plain 响应不写编辑器、没有 Pretty 切换，
 /// 并且行视图与 Headers 列表都能真正绘制一帧（uniform_list + Scrollbar 的运行时路径）。
-#[gpui::test]
+#[gpui_kit::test]
 fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -545,7 +545,7 @@ fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
 
 /// SSE 事件列表的长 data 不截断在视口内：内容宽度按最长事件测量，
 /// 超出视口时可横向滚动（与 B/C 档行视图同一套机制）。
-#[gpui::test]
+#[gpui_kit::test]
 fn sse_events_view_scrolls_horizontally(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -586,7 +586,7 @@ fn sse_events_view_scrolls_horizontally(cx: &mut TestAppContext) {
 
 /// Headers 的长值折行展示（不截断、不横滚）：变高列表布局后，
 /// 长值行的实际高度必须远高于短值行。
-#[gpui::test]
+#[gpui_kit::test]
 fn long_header_values_wrap_instead_of_truncating(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -715,7 +715,7 @@ pub(crate) fn install_done_with(
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn save_body_writes_memory_body_to_chosen_path(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -738,7 +738,7 @@ fn save_body_writes_memory_body_to_chosen_path(cx: &mut TestAppContext) {
     let _ = std::fs::remove_file(&dest);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn save_body_copies_spilled_file(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -771,7 +771,7 @@ fn save_body_copies_spilled_file(cx: &mut TestAppContext) {
     let _ = std::fs::remove_file(&dest);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn cancelled_save_dialog_leaves_no_notice(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -782,7 +782,7 @@ fn cancelled_save_dialog_leaves_no_notice(cx: &mut TestAppContext) {
     cx.read(|app| assert!(tab.read(app).notice.is_none()));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn save_body_does_nothing_when_not_done(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -790,7 +790,7 @@ fn save_body_does_nothing_when_not_done(cx: &mut TestAppContext) {
     assert!(!cx.did_prompt_for_new_path());
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn save_body_is_atomic_and_remembers_the_directory(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let cx = init(cx);
@@ -848,7 +848,7 @@ fn save_body_is_atomic_and_remembers_the_directory(cx: &mut TestAppContext) {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn choose_file_sets_file_body_and_clear_resets_it(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -892,7 +892,7 @@ fn choose_file_sets_file_body_and_clear_resets_it(cx: &mut TestAppContext) {
     let _ = std::fs::remove_file(&path);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn cancelled_file_dialog_keeps_previous_state(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -906,7 +906,7 @@ fn cancelled_file_dialog_keeps_previous_state(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn oversized_raw_body_shows_file_hint(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -928,7 +928,7 @@ fn oversized_raw_body_shows_file_hint(cx: &mut TestAppContext) {
 
 /// P2-3：切换 raw_format / body_mode 必须重新计算提示，否则会残留上一个编辑器的提示，
 /// 或者漏掉一个只通过 `set_value`（不发 Change 事件）灌入内容的编辑器。
-#[gpui::test]
+#[gpui_kit::test]
 fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -962,7 +962,7 @@ fn switching_raw_format_or_body_mode_recomputes_hint(cx: &mut TestAppContext) {
 
 /// 格式化必须保住字段顺序：这正是用 core 的单遍美化器、而不是 serde 的
 /// `to_string_pretty`（默认 BTreeMap，会按字母序重排 key）的理由，值得钉死。
-#[gpui::test]
+#[gpui_kit::test]
 fn format_body_reindents_without_reordering_keys(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1004,7 +1004,7 @@ fn format_body_reindents_without_reordering_keys(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn format_body_rejects_invalid_json(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1031,7 +1031,7 @@ fn format_body_rejects_invalid_json(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn format_body_is_idempotent_and_scoped_to_json(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1074,7 +1074,7 @@ fn format_body_is_idempotent_and_scoped_to_json(cx: &mut TestAppContext) {
 
 /// F1：draft() 的 Raw 分支直接从编辑器的 Rope 拷贝一次文本，不经过 `value()`（SharedString）
 /// 这道额外的中间拷贝；这里只断言最终结果，实现细节由 request_tab.rs 里的调用决定。
-#[gpui::test]
+#[gpui_kit::test]
 fn raw_body_draft_reads_editor_text_directly(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1095,7 +1095,7 @@ fn raw_body_draft_reads_editor_text_directly(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
     let cx = init(cx);
     let table = cx.update(|window, cx| cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx)));
@@ -1138,7 +1138,7 @@ fn kv_table_set_values_roundtrip(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn kv_table_sync_keys_keeps_description(cx: &mut TestAppContext) {
     let cx = init(cx);
     let table = cx.update(|window, cx| {
@@ -1169,7 +1169,7 @@ fn kv_table_sync_keys_keeps_description(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1240,7 +1240,7 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn form_data_mode_warns_when_user_sets_content_type(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1279,7 +1279,7 @@ fn form_data_mode_warns_when_user_sets_content_type(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn form_data_and_urlencoded_tables_are_independent(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1308,7 +1308,7 @@ fn form_data_and_urlencoded_tables_are_independent(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn edits_mark_tab_dirty_and_title_prefers_saved_name(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -1326,7 +1326,7 @@ fn edits_mark_tab_dirty_and_title_prefers_saved_name(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn draft_autosaves_after_debounce(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let tab = new_tab(cx);
@@ -1349,7 +1349,7 @@ fn draft_autosaves_after_debounce(cx: &mut TestAppContext) {
     assert_eq!(store.write_count(), 1);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn new_tab_writes_draft_and_close_deletes_it(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1377,7 +1377,7 @@ fn new_tab_writes_draft_and_close_deletes_it(cx: &mut TestAppContext) {
     assert!(read_draft(&store, third).is_some());
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn without_store_edits_are_harmless(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1389,7 +1389,7 @@ fn without_store_edits_are_harmless(cx: &mut TestAppContext) {
     cx.read(|app| assert_eq!(ws.read(app).tab_count(), 1));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ids: Vec<Ulid> = (0..3).map(|_| Ulid::generate()).collect();
@@ -1445,7 +1445,7 @@ fn restore_rebuilds_tabs_from_prepared_root(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn restore_without_files_creates_one_tab(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let loaded = store.load_all();
@@ -1463,7 +1463,7 @@ fn restore_without_files_creates_one_tab(cx: &mut TestAppContext) {
     assert!(read_draft(&store, id).is_some());
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn restore_clears_orphan_saved_id(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let id = Ulid::generate();
@@ -1489,7 +1489,7 @@ fn restore_clears_orphan_saved_id(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn flush_drafts_writes_every_tab_immediately(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1504,7 +1504,7 @@ fn flush_drafts_writes_every_tab_immediately(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn workspace_changes_are_persisted(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1541,7 +1541,7 @@ fn workspace_changes_are_persisted(cx: &mut TestAppContext) {
     assert_eq!(state.active, Some(remaining));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn cycle_theme_walks_system_light_dark(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1562,10 +1562,10 @@ fn cycle_theme_walks_system_light_dark(cx: &mut TestAppContext) {
 
 /// 主题偏好在 System / Light / Dark 之间循环时，每一档都必须还是 GetCat 的配色。
 /// `Theme::change` 会整套重刷 ThemeColor，若配色只是切换后打的补丁就会在这里丢掉。
-#[gpui::test]
+#[gpui_kit::test]
 fn cycling_theme_keeps_the_getcat_palette(cx: &mut TestAppContext) {
-    fn hex(color: gpui::Hsla) -> u32 {
-        let rgba = gpui::Rgba::from(color);
+    fn hex(color: gpui_kit::Hsla) -> u32 {
+        let rgba = gpui_kit::Rgba::from(color);
         let to8 = |v: f32| (v * 255.0).round() as u32;
         (to8(rgba.r) << 16) | (to8(rgba.g) << 8) | to8(rgba.b)
     }
@@ -1592,7 +1592,7 @@ fn cycling_theme_keeps_the_getcat_palette(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1628,7 +1628,7 @@ fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) 
 }
 
 /// 保存时带分类：finish_save 的 group 参数进文件，分类列表随之出现。
-#[gpui::test]
+#[gpui_kit::test]
 fn saving_with_a_group_persists_it(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1654,7 +1654,7 @@ fn saving_with_a_group_persists_it(cx: &mut TestAppContext) {
 
 /// F3：保存对话框在用户关闭 Tab 之后才确认——`finish_save` 必须是 no-op，
 /// 不能凭空写出请求文件，也不能复活已随 close_tab 删除的草稿文件。
-#[gpui::test]
+#[gpui_kit::test]
 fn finish_save_on_closed_tab_is_noop(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1674,7 +1674,7 @@ fn finish_save_on_closed_tab_is_noop(cx: &mut TestAppContext) {
     assert!(read_draft(&store, tab_id).is_none());
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn save_active_overwrites_existing_without_prompt(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1706,7 +1706,7 @@ fn save_active_overwrites_existing_without_prompt(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn empty_name_falls_back_to_tab_title(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1723,7 +1723,7 @@ fn empty_name_falls_back_to_tab_title(cx: &mut TestAppContext) {
     assert_eq!(read_request(&store, id).unwrap().name, "/users/42");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn open_saved_opens_tab_then_focuses_existing(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1771,7 +1771,7 @@ fn open_saved_opens_tab_then_focuses_existing(cx: &mut TestAppContext) {
     cx.read(|app| assert_eq!(ws.read(app).tab_count(), 2));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn open_template_prefills_a_new_tab(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1824,7 +1824,7 @@ fn open_template_prefills_a_new_tab(cx: &mut TestAppContext) {
     cx.read(|app| assert_eq!(ws.read(app).tab_count(), 3));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn duplicate_active_copies_content_next_to_the_source(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1874,7 +1874,7 @@ fn duplicate_active_copies_content_next_to_the_source(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn duplicate_active_on_the_last_tab_appends(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1886,7 +1886,7 @@ fn duplicate_active_on_the_last_tab_appends(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn template_panel_switches_and_draws(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1905,7 +1905,7 @@ fn template_panel_switches_and_draws(cx: &mut TestAppContext) {
 
     // 真正绘制一帧：模板行是手工平铺的，element id 冲突或借用错误只有在布局时才暴露。
     // blur 的原因同 sidebar_lists_newest_first_and_draws_rows。
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         ws_element.into_any_element()
@@ -1922,7 +1922,7 @@ fn template_panel_switches_and_draws(cx: &mut TestAppContext) {
 
 /// 标签多到溢出时，标签栏要多渲染箭头、溢出菜单和末尾占位。这些都只在真实布局
 /// 阶段才组装，`cargo check` 抓不到 element id 冲突之类的问题，所以画一帧。
-#[gpui::test]
+#[gpui_kit::test]
 fn tab_bar_draws_with_many_tabs(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -1936,7 +1936,7 @@ fn tab_bar_draws_with_many_tabs(cx: &mut TestAppContext) {
     });
 
     // blur 的原因同 sidebar_lists_newest_first_and_draws_rows
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
         ws_element.into_any_element()
@@ -1976,7 +1976,7 @@ fn tool_sections_are_indexed_by_discriminant() {
 }
 
 /// 抽屉里的代码来自**当前** Tab：切了 Tab 再打开，看到的必须是新那条请求。
-#[gpui::test]
+#[gpui_kit::test]
 fn code_sheet_generates_from_the_active_tab(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2004,7 +2004,7 @@ fn code_sheet_generates_from_the_active_tab(cx: &mut TestAppContext) {
 }
 
 /// 切换生成目标要重新生成，而不是把旧代码留在编辑器里。
-#[gpui::test]
+#[gpui_kit::test]
 fn switching_the_target_regenerates_the_code(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2036,7 +2036,7 @@ fn switching_the_target_regenerates_the_code(cx: &mut TestAppContext) {
 /// 真实的 `Root` 窗口在测试里建不起来（`Root::new` 要装 macOS hit-test 转发器，
 /// 需要真实 NSView），所以这里钉的是结构：CodeSheet 自己就是 `Render`，
 /// 单独画一帧不碰 Workspace。改回去会直接编译失败。
-#[gpui::test]
+#[gpui_kit::test]
 fn code_sheet_renders_without_touching_the_workspace(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2045,7 +2045,7 @@ fn code_sheet_renders_without_touching_the_workspace(cx: &mut TestAppContext) {
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
 
     let sheet = cx.read(|app| ws.read(app).code_sheet.clone());
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     // Workspace 同时被自己的 render 借着，抽屉照样画得出来——这正是修复的要点
     cx.draw(point(px(0.), px(0.)), size(px(560.), px(700.)), |_, _| {
         sheet.clone().into_any_element()
@@ -2057,7 +2057,7 @@ fn code_sheet_renders_without_touching_the_workspace(cx: &mut TestAppContext) {
 
 /// URL 还没填就打开抽屉：给一段占位骨架，而不是一条红字。
 /// 新建 Tab 本来就是空 URL，报错会让人以为是自己弄坏了什么。
-#[gpui::test]
+#[gpui_kit::test]
 fn an_unfilled_url_shows_a_placeholder_skeleton(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2070,7 +2070,7 @@ fn an_unfilled_url_shows_a_placeholder_skeleton(cx: &mut TestAppContext) {
 }
 
 /// 但真填错了还是要报出来——那不是「还没填」，是需要用户去改。
-#[gpui::test]
+#[gpui_kit::test]
 fn a_malformed_url_still_shows_the_error(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2085,7 +2085,7 @@ fn a_malformed_url_still_shows_the_error(cx: &mut TestAppContext) {
 }
 
 /// 默认请求头的开关是全局设置，抽屉每次生成都现取。
-#[gpui::test]
+#[gpui_kit::test]
 fn disabling_a_default_header_shows_up_in_the_generated_code(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2112,7 +2112,7 @@ fn disabling_a_default_header_shows_up_in_the_generated_code(cx: &mut TestAppCon
     assert!(code.contains("Accept"), "其余默认头还在：{code}");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2145,7 +2145,7 @@ fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.delete_saved(Ulid::generate(), cx)));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2181,7 +2181,7 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
     // 再 blur：聚焦中的 Input 在渲染时会调用 macOS 的 set_text_content_type，
     // 而测试窗口没有真实平台窗口句柄（gpui TestWindow::window_handle 是 unimplemented!）。
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_sidebar(cx)));
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         ws_element.into_any_element()
@@ -2198,7 +2198,7 @@ fn sidebar_lists_newest_first_and_draws_rows(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn clear_response_resets_everything_including_the_editor(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2235,7 +2235,7 @@ fn clear_response_resets_everything_including_the_editor(cx: &mut TestAppContext
 
 /// 已经是空态时再点一次不该白白递增 generation——那会让一个正常在途的请求
 /// 悄悄失效（此路径下 response 是 Idle，但重发刚起步时也短暂如此）。
-#[gpui::test]
+#[gpui_kit::test]
 fn clear_response_on_idle_is_a_no_op(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2248,7 +2248,7 @@ fn clear_response_on_idle_is_a_no_op(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn find_in_response_focuses_the_editor_on_editor_tier(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2271,7 +2271,7 @@ fn find_in_response_focuses_the_editor_on_editor_tier(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn find_in_response_only_notices_on_virtual_tier(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2296,7 +2296,7 @@ fn find_in_response_only_notices_on_virtual_tier(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn find_in_response_without_a_response_notices(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2309,7 +2309,7 @@ fn find_in_response_without_a_response_notices(cx: &mut TestAppContext) {
 }
 
 /// 二进制响应连 raw 文档都不准备（`view.doc()` 是 None）：只提示，不抢焦点、不切回 Body。
-#[gpui::test]
+#[gpui_kit::test]
 fn find_in_response_on_a_binary_body_notices(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2337,7 +2337,7 @@ fn find_in_response_on_a_binary_body_notices(cx: &mut TestAppContext) {
 }
 
 /// 空 Body 虽然被判为 A 档，但画的是「响应体为空」占位而非编辑器：只提示，不抢焦点。
-#[gpui::test]
+#[gpui_kit::test]
 fn find_in_response_on_an_empty_body_notices(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2357,7 +2357,7 @@ fn find_in_response_on_an_empty_body_notices(cx: &mut TestAppContext) {
 }
 
 /// 两段式按钮直接指定方向，而不是翻转：重复点当前那一段不应有任何变化。
-#[gpui::test]
+#[gpui_kit::test]
 fn set_split_is_idempotent_for_the_current_direction(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2383,7 +2383,7 @@ fn set_split_is_idempotent_for_the_current_direction(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn split_direction_applies_to_all_tabs_and_persists(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2420,7 +2420,7 @@ fn split_direction_applies_to_all_tabs_and_persists(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2431,7 +2431,7 @@ fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
     // is_fullscreen / window_controls，这些在测试窗口上都有实现或默认值。
     // 先 blur：聚焦中的 Input 渲染时会去拿真实平台窗口句柄（TestWindow 未实现），与
     // sidebar_lists_newest_first_and_draws_rows 同样的原因。
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         ws_element.into_any_element()
@@ -2444,7 +2444,7 @@ fn workspace_draws_with_title_bar(cx: &mut TestAppContext) {
 
 /// 标签栏上每个标签都带 method 角标；多开几个把它画出来，确认 prefix 与
 /// dirty 圆点合并后仍能布局（prefix 只能设一次，合并写错会丢圆点或 panic）。
-#[gpui::test]
+#[gpui_kit::test]
 fn tab_bar_with_method_badges_draws(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2461,7 +2461,7 @@ fn tab_bar_with_method_badges_draws(cx: &mut TestAppContext) {
     let dirty_tab = cx.read(|app| ws.read(app).tab_at(2));
     cx.update(|_, cx| dirty_tab.update(cx, |t, cx| t.mark_dirty(cx)));
 
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         element.into_any_element()
@@ -2470,7 +2470,7 @@ fn tab_bar_with_method_badges_draws(cx: &mut TestAppContext) {
 
 /// URL 栏：发送按钮在前、保存拆成「保存 + ∨」两半，输入框里还嵌了版本选择器。
 /// 这些都是新加的元素，先确认整行能画出来。
-#[gpui::test]
+#[gpui_kit::test]
 fn url_bar_with_split_save_and_version_picker_draws(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2483,7 +2483,7 @@ fn url_bar_with_split_save_and_version_picker_draws(cx: &mut TestAppContext) {
         })
     });
 
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let element = tab.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         element.into_any_element()
@@ -2491,7 +2491,7 @@ fn url_bar_with_split_save_and_version_picker_draws(cx: &mut TestAppContext) {
 }
 
 /// 证书页签只在拿到证书时出现，且体检有结论时上方挂横幅。
-#[gpui::test]
+#[gpui_kit::test]
 fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
     // 纯函数部分：http 请求不该多出一页
     assert_eq!(
@@ -2525,7 +2525,7 @@ fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
         })
     });
 
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let element = tab.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         element.into_any_element()
@@ -2533,7 +2533,7 @@ fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
 }
 
 /// 上一条响应有证书、下一条没有：页签消失后停在 Certificate 上不能画白板。
-#[gpui::test]
+#[gpui_kit::test]
 fn certificate_section_falls_back_to_body_without_a_certificate(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -2546,7 +2546,7 @@ fn certificate_section_falls_back_to_body_without_a_certificate(cx: &mut TestApp
         })
     });
 
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let element = tab.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         element.into_any_element()
@@ -2559,7 +2559,7 @@ fn temp_form_file(name: &str, bytes: &[u8]) -> PathBuf {
     path
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn kv_table_form_fields_roundtrip_and_refresh_size(cx: &mut TestAppContext) {
     let cx = init(cx);
     let file = temp_form_file("doc.json", b"{}");
@@ -2597,7 +2597,7 @@ fn kv_table_form_fields_roundtrip_and_refresh_size(cx: &mut TestAppContext) {
     let _ = std::fs::remove_file(&file);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn kv_table_choose_row_file_sets_path_and_switching_back_drops_it(cx: &mut TestAppContext) {
     let cx = init(cx);
     let file = temp_form_file("pic.png", b"png!");
@@ -2644,7 +2644,7 @@ fn kv_table_choose_row_file_sets_path_and_switching_back_drops_it(cx: &mut TestA
     let _ = std::fs::remove_file(&file);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn kv_table_cancelled_row_file_dialog_keeps_row(cx: &mut TestAppContext) {
     let cx = init(cx);
     let table = cx.update(|window, cx| {
@@ -2667,7 +2667,7 @@ fn kv_table_cancelled_row_file_dialog_keeps_row(cx: &mut TestAppContext) {
 }
 
 /// 在末尾空行上选文件：该行变成有内容的一行，末尾必须再补一个空行，否则用户没法继续加字段。
-#[gpui::test]
+#[gpui_kit::test]
 fn kv_table_choosing_file_on_trailing_row_appends_empty_row(cx: &mut TestAppContext) {
     let cx = init(cx);
     let file = temp_form_file("trailing.txt", b"hello");
@@ -2694,7 +2694,7 @@ fn kv_table_choosing_file_on_trailing_row_appends_empty_row(cx: &mut TestAppCont
     let _ = std::fs::remove_file(&file);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn rail_click_expands_then_collapses_the_same_section(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2723,7 +2723,7 @@ fn rail_click_expands_then_collapses_the_same_section(cx: &mut TestAppContext) {
     assert!(read_workspace(&store).unwrap().sidebar_collapsed);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn settings_update_persists_and_applies_font_size(cx: &mut TestAppContext) {
     // settings::install / update 会触碰进程级的 locale
     let _locale = crate::i18n::locale_test_lock();
@@ -2762,7 +2762,7 @@ fn settings_update_persists_and_applies_font_size(cx: &mut TestAppContext) {
 
 /// 更新源跟随设置即时切换：自动模式随界面语言变，显式选择压过语言；全程不重建 Updater 实体。
 /// 末尾切回英文：locale 是进程级全局，不能把别的测试留在中文里。
-#[gpui::test]
+#[gpui_kit::test]
 fn update_source_follows_settings_and_language(cx: &mut TestAppContext) {
     use crate::state::update::ResolvedSource;
     use getcat_core::model::UpdateSourcePref;
@@ -2808,7 +2808,7 @@ fn update_source_follows_settings_and_language(cx: &mut TestAppContext) {
 
 /// 设置里切换语言：rust-i18n 的 locale、`Locale` 全局与驻留在 InputState 里的占位符都立即更新，
 /// 不需要重启。末尾切回英文：locale 是进程级全局，不能把别的测试留在中文里。
-#[gpui::test]
+#[gpui_kit::test]
 fn switching_language_updates_placeholders_immediately(cx: &mut TestAppContext) {
     let _locale = crate::i18n::locale_test_lock();
     let cx = init(cx);
@@ -2882,7 +2882,7 @@ fn switching_language_updates_placeholders_immediately(cx: &mut TestAppContext) 
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn settings_dropdown_theme_change_needs_no_window(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -2899,7 +2899,7 @@ fn settings_dropdown_theme_change_needs_no_window(cx: &mut TestAppContext) {
 #[test]
 fn settings_shortcut_keystroke_parses() {
     for ks in ["cmd-,", "ctrl-,"] {
-        assert!(gpui::Keystroke::parse(ks).is_ok(), "{ks}");
+        assert!(gpui_kit::Keystroke::parse(ks).is_ok(), "{ks}");
     }
 }
 
@@ -2951,7 +2951,7 @@ fn v(major: u64) -> gpui_updater::Version {
     gpui_updater::Version::new(major, 0, 0)
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn update_check_surfaces_new_version_in_workspace(cx: &mut TestAppContext) {
     let cx = init(cx);
     install_fake_updater(cx, InstallKind::Installed, || Ok(fake_release(v(99))));
@@ -2975,14 +2975,14 @@ async fn update_check_surfaces_new_version_in_workspace(cx: &mut TestAppContext)
 
     // 状态栏带提示时能画出一帧
     // 聚焦中的 URL 输入框在测试窗口里渲染会碰真实平台句柄（见 sidebar 测试的说明），先 blur
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1000.), px(800.)), |_, _| {
         ws_element.into_any_element()
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn update_check_up_to_date_has_no_hint(cx: &mut TestAppContext) {
     let cx = init(cx);
     install_fake_updater(cx, InstallKind::Installed, || Ok(fake_release(v(0))));
@@ -3000,7 +3000,7 @@ async fn update_check_up_to_date_has_no_hint(cx: &mut TestAppContext) {
     assert!(!cx.update(|_, cx| update::can_install(cx)));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn update_check_error_is_surfaced(cx: &mut TestAppContext) {
     let cx = init(cx);
     install_fake_updater(cx, InstallKind::Installed, || {
@@ -3022,14 +3022,14 @@ async fn update_check_error_is_surfaced(cx: &mut TestAppContext) {
         status
     );
     // 离线启动不能把状态栏搞坏
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1000.), px(800.)), |_, _| {
         ws_element.into_any_element()
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn launch_check_respects_setting(cx: &mut TestAppContext) {
     let _locale = crate::i18n::locale_test_lock();
     let cx = init(cx);
@@ -3071,7 +3071,7 @@ async fn launch_check_respects_setting(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn dev_builds_can_check_but_not_install(cx: &mut TestAppContext) {
     let cx = init(cx);
     install_fake_updater(cx, InstallKind::DevBuild, || Ok(fake_release(v(99))));
@@ -3093,7 +3093,7 @@ async fn dev_builds_can_check_but_not_install(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn unsupported_platform_has_no_updater(cx: &mut TestAppContext) {
     let cx = init(cx);
     assert!(!cx.update(|_, cx| update::supported(cx)));
@@ -3124,12 +3124,12 @@ async fn unsupported_platform_has_no_updater(cx: &mut TestAppContext) {
 /// `size / total` 的比例重分配，把侧栏压窄——用户看到的就是「展开几秒后自己缩了一点」。
 ///
 /// 三帧分别对应：收起态记下「主工作区占满全宽」、展开、容器变窄触发重分配。
-#[gpui::test]
+#[gpui_kit::test]
 fn sidebar_keeps_its_width_when_the_container_resizes(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     // 聚焦中的 Input 渲染时会调 macOS 的 set_text_content_type，测试窗口没有真实句柄
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
 
     let draw = |cx: &mut VisualTestContext, width: f32| {
         let element = ws.clone();
@@ -3167,12 +3167,12 @@ fn sidebar_keeps_its_width_when_the_container_resizes(cx: &mut TestAppContext) {
 /// `flex_none`——一旦是 `Some`，面板就带着 `flex_grow:1 + 默认 flex_shrink:1` 参与
 /// 布局，主区（flex_basis = 容器全宽）在下一次 Workspace 重新 render 时把它压掉
 /// 约 60 px。「过几秒」= 等到下一个触发重绘的事件（启动后的更新检查回调、任意点击）。
-#[gpui::test]
+#[gpui_kit::test]
 fn sidebar_holds_rendered_width_after_first_expand(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     // 聚焦中的 Input 渲染时会调 macOS 的 set_text_content_type，测试窗口没有真实句柄
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
 
     let draw = |cx: &mut VisualTestContext| {
         let element = ws.clone();
@@ -3208,7 +3208,7 @@ fn sidebar_holds_rendered_width_after_first_expand(cx: &mut TestAppContext) {
 /// 「启动即展开」的姊妹洞：第一帧两个 panel 的占位值**都**会被覆写成 `Some`，
 /// 「任一 panel 为 None 就不做比例重分配」的保护随之失效——此后窗口宽度一变，
 /// `adjust_to_container_size` 就按 size/total 把侧栏一起缩放，而不是只伸缩主区。
-#[gpui::test]
+#[gpui_kit::test]
 fn sidebar_holds_width_when_restored_expanded_and_window_resizes(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     store.write_workspace(WorkspaceState {
@@ -3219,7 +3219,7 @@ fn sidebar_holds_width_when_restored_expanded_and_window_resizes(cx: &mut TestAp
     assert!(store.flush());
     let loaded = store.load_all();
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
 
     let draw = |cx: &mut VisualTestContext, width: f32| {
         let element = ws.clone();
@@ -3248,7 +3248,7 @@ fn sidebar_holds_width_when_restored_expanded_and_window_resizes(cx: &mut TestAp
 /// 换行是**全局**偏好而不是每个 Tab 各管各的：在一个 Tab 上按下开关，其余 Tab 的
 /// 编辑器下一帧就得跟上。同步走的是 `render` 里比对缓存——`set_soft_wrap` 需要
 /// `Window`，而 `settings::update` 只拿得到 `App`，没法在改设置的当场推给所有 Tab。
-#[gpui::test]
+#[gpui_kit::test]
 fn wrap_preference_is_global_and_reaches_every_tab(cx: &mut TestAppContext) {
     let cx = init(cx);
     let first = new_tab(cx);
@@ -3277,7 +3277,7 @@ fn wrap_preference_is_global_and_reaches_every_tab(cx: &mut TestAppContext) {
 
 /// 响应体换行只在 A 档（只读 Editor）可用；没有响应、或大响应走按行虚拟化时都不可用。
 /// `uniform_list` 要求所有行等高，换行会直接打破这个前提。
-#[gpui::test]
+#[gpui_kit::test]
 fn response_wrap_is_unavailable_without_an_editor_tier_body(cx: &mut TestAppContext) {
     let cx = init(cx);
     let tab = new_tab(cx);
@@ -3291,7 +3291,7 @@ fn response_wrap_is_unavailable_without_an_editor_tier_body(cx: &mut TestAppCont
 
 /// 标签右键菜单的三个动作。都不弹二次确认——草稿本来就随时落盘，
 /// 「关闭即删草稿」是 `close_tab` 早就定下的语义。
-#[gpui::test]
+#[gpui_kit::test]
 fn tab_menu_actions_duplicate_and_close(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3341,7 +3341,7 @@ fn tab_menu_actions_duplicate_and_close(cx: &mut TestAppContext) {
 }
 
 /// 多行模式：三行为一页，左右按钮翻页，切换行数会写进 workspace.json。
-#[gpui::test]
+#[gpui_kit::test]
 fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3352,7 +3352,7 @@ fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
             }
         })
     });
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
 
     cx.read(|app| assert_eq!(ws.read(app).tab_rows(), 1, "默认单行"));
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_tab_rows(cx)));
@@ -3460,7 +3460,7 @@ fn pump_frames(ws: &Entity<Workspace>, frames: usize, cx: &mut VisualTestContext
 }
 
 /// 重启后激活的标签在靠后的一页：多行模式下画完首帧必须自动翻到它所在那页。
-#[gpui::test]
+#[gpui_kit::test]
 fn restore_reveals_active_tab_page_in_multi_row(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     const ACTIVE: usize = 13;
@@ -3469,7 +3469,7 @@ fn restore_reveals_active_tab_page_in_multi_row(cx: &mut TestAppContext) {
     let loaded = store.load_all();
     assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
 
     // 三帧才够：第一帧出布局，第二帧滚动箭头出现（标签区随之变窄），第三帧偏移才算得准。
     // 多泵一帧留点余量，免得断言钉死在准确的帧数上。
@@ -3489,7 +3489,7 @@ fn restore_reveals_active_tab_page_in_multi_row(cx: &mut TestAppContext) {
 }
 
 /// 同一件事的单行版：重启后横向滚动条要把激活的标签滚进视口。
-#[gpui::test]
+#[gpui_kit::test]
 fn restore_scrolls_active_tab_into_view_in_single_row(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     const ACTIVE: usize = 13;
@@ -3498,7 +3498,7 @@ fn restore_scrolls_active_tab_into_view_in_single_row(cx: &mut TestAppContext) {
     let loaded = store.load_all();
     assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
 
     // 三帧才够：第一帧出布局，第二帧滚动箭头出现（标签区随之变窄），第三帧偏移才算得准。
     // 多泵一帧留点余量，免得断言钉死在准确的帧数上。
@@ -3528,7 +3528,7 @@ fn restore_scrolls_active_tab_into_view_in_single_row(cx: &mut TestAppContext) {
 }
 
 /// 粘一条 curl → 解析 → 导入成新 Tab。整条链路走一遍。
-#[gpui::test]
+#[gpui_kit::test]
 fn importing_a_curl_command_opens_a_new_tab(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3588,7 +3588,7 @@ fn importing_a_curl_command_opens_a_new_tab(cx: &mut TestAppContext) {
 }
 
 /// 解析不出来时不能给出草稿——「导入」按钮就是靠它置灰的。
-#[gpui::test]
+#[gpui_kit::test]
 fn a_command_that_is_not_curl_yields_no_draft(cx: &mut TestAppContext) {
     let cx = init(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3621,7 +3621,7 @@ fn a_command_that_is_not_curl_yields_no_draft(cx: &mut TestAppContext) {
 
 /// 组织操作（移动/重命名/解散分类）批量重写文件但不碰 updated_at（spec §3）：
 /// updated_at 表达「内容何时改过」，组织操作不算，列表排序因此不被搅乱。
-#[gpui::test]
+#[gpui_kit::test]
 fn organizing_saved_requests_rewrites_files_without_touching_updated_at(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3671,7 +3671,7 @@ fn organizing_saved_requests_rewrites_files_without_touching_updated_at(cx: &mut
 }
 
 /// 重命名到已存在的分类名 = 合并（推导模型下同名即同类，spec §3）。
-#[gpui::test]
+#[gpui_kit::test]
 fn renaming_a_group_onto_another_merges_them(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3712,7 +3712,7 @@ fn renaming_a_group_onto_another_merges_them(cx: &mut TestAppContext) {
 }
 
 /// 选中分类的最后一个成员被删 / 移走 / 解散后，过滤器回退「全部」（spec §7）。
-#[gpui::test]
+#[gpui_kit::test]
 fn saved_filter_falls_back_to_all_when_the_group_vanishes(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3753,7 +3753,7 @@ fn saved_filter_falls_back_to_all_when_the_group_vanishes(cx: &mut TestAppContex
 }
 
 /// 两栏面板：分类列画出「全部/未分类/分类」，切换过滤后请求列行数跟着变。
-#[gpui::test]
+#[gpui_kit::test]
 fn saved_panel_draws_two_panes_and_filters_rows(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
@@ -3777,7 +3777,7 @@ fn saved_panel_draws_two_panes_and_filters_rows(cx: &mut TestAppContext) {
             ws.toggle_sidebar(cx);
         })
     });
-    cx.update(|window, _| window.blur());
+    cx.update(|window, cx| window.blur(cx));
 
     let draw = |cx: &mut VisualTestContext| {
         let element = ws.clone();

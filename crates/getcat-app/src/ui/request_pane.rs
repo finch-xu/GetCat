@@ -2,9 +2,7 @@
 
 use getcat_core::http::{DEFAULT_HEADERS, default_header_enabled};
 use getcat_core::model::RawFormat;
-use gpui::prelude::FluentBuilder as _;
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, Selectable, Sizable,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
@@ -14,6 +12,8 @@ use gpui_component::{
     tag::Tag,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use crate::assets::ICON_WRAP_TEXT;
 use crate::i18n::tr;

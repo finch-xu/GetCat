@@ -153,7 +153,7 @@ crates/
 └─ getcat-app    # GPUI interface: Workspace / RequestTab state, settings dialog, in-app updates
 ```
 
-- The UI is built on Zed's [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) plus the [gpui-component](https://github.com/longbridge/gpui-component) library. Both are git dependencies pinned by `Cargo.lock` (see the comments in `Cargo.toml` for how to upgrade).
+- The UI is built on Zed's [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) plus [GPUI Kit](https://github.com/longbridge/gpui-kit) (the gpui-component library). Following the Kit 0.6 convention, the app depends on the single crates.io `gpui-kit` crate, which pins the matching gpui release.
 - Networking runs on the tokio runtime and results come back to the GPUI main thread over a channel; background work (pretty-printing, indexing) is wrapped in `catch_unwind`, so a panic only surfaces as a "background processing error".
 - There is no database: `getcat-core/src/store` handles reads and writes, with writes on a dedicated thread coalesced over 500 ms.
 

@@ -8,7 +8,7 @@
 //!   （输入框占位符等）通过 `cx.observe_global_in::<Locale>` 自己刷新。
 
 use getcat_core::model::LanguagePref;
-use gpui::{App, Global};
+use gpui_kit::{App, Global};
 
 /// 英文（也是兜底语言）。
 pub const EN: &str = "en";
@@ -91,10 +91,10 @@ pub(crate) fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// `t!` 的 [`gpui::SharedString`] 版本：绝大多数 gpui-component 的 API 都接受它。
+/// `t!` 的 [`gpui_kit::SharedString`] 版本：绝大多数 gpui-component 的 API 都接受它。
 macro_rules! tr {
     ($($args:tt)*) => {
-        ::gpui::SharedString::from(::rust_i18n::t!($($args)*).into_owned())
+        ::gpui_kit::SharedString::from(::rust_i18n::t!($($args)*).into_owned())
     };
 }
 pub(crate) use tr;

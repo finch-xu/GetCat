@@ -22,17 +22,17 @@
 //! 多行模式改成给每个标签固定宽度 [`TAB_WIDTH`]，每行个数、页数、当前页全是纯计算：
 //! 确定、可测，翻页按钮的禁用条件也算得准。
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    AnyElement, ClickEvent, Context, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, WeakEntity, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, ElementExt as _, Icon, IconName, Selectable, Sizable, ThemeStyled,
     button::{Button, ButtonVariants},
     h_flex,
     menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    AnyElement, ClickEvent, Context, FontWeight, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, WeakEntity, div, px,
 };
 
 use getcat_core::model::{MAX_TAB_ROWS, Method};

@@ -4,12 +4,7 @@
 //! 主题偏好仍记在 [`Workspace`]（它属于布局状态，写进 `workspace.json`）。
 
 use getcat_core::model::{EDITOR_FONT_SIZE_RANGE, LanguagePref, ThemePref, UpdateSourcePref};
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
-    WeakEntity, Window, div, img, px, rems,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     description_list::DescriptionList,
@@ -22,6 +17,11 @@ use gpui_component::{
         Settings,
     },
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
+    WeakEntity, Window, div, img, px, rems,
 };
 use gpui_updater::UpdateStatus;
 

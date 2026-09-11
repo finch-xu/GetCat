@@ -8,15 +8,15 @@
 //! 先看结果再导入，而不是粘完直接改掉当前 Tab：curl 命令常带一堆浏览器塞的头，
 //! 用户需要先确认「搬过来的是不是我要的」，以及「哪些没搬过来」。
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Editor, EditorState, InputEvent},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use getcat_core::import::curl::{self, CurlParseError, CurlWarning};
 use getcat_core::model::{BodyKind, RequestDraft};

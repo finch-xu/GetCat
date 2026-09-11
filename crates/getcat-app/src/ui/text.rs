@@ -9,7 +9,7 @@ use getcat_core::detect::ContentKind;
 use getcat_core::http::{MAX_BODY_BYTES, RequestError};
 use getcat_core::model::{LanguagePref, ThemePref, UpdateSourcePref};
 use getcat_core::tls::CertWarning;
-use gpui::SharedString;
+use gpui_kit::SharedString;
 
 use crate::i18n::tr;
 use crate::state::response::PREPARE_PANIC_PREFIX;

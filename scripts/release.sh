@@ -11,9 +11,8 @@
 # "cannot update the lock file ... because --locked was passed"。版本号必须同时落到两个文件，
 # 而且要在同一个提交里。
 #
-# 为什么 cargo update 带 --offline：gpui / gpui_platform / gpui_tokio 这几个 git 依赖不写 rev
-# （原因见 Cargo.toml 里的注释），版本锁定完全靠 Cargo.lock。联网跑 cargo update 有把它们滚到
-# 远端最新 HEAD 的风险，--offline 断掉这条路；随后再逐行确认 lock 的改动只有版本号。
+# 为什么 cargo update 带 --offline：发版只想把本仓库 crate 的版本号同步进 Cargo.lock，不想顺手
+# 把依赖滚到新版本；--offline 断掉这条路，随后再逐行确认 lock 的改动只有版本号。
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

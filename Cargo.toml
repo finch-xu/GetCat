@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/getcat-core", "crates/getcat-app"]
+members = ["crates/getcat-core", "crates/getcat-app", "crates/gpui-tokio"]
+# vendor 的第三方 crate 只作为依赖编译，不参与 --workspace 的 fmt / clippy / test（它有自己的 lint 与 doctest）
+exclude = ["vendor/gpui-updater"]
 
 [workspace.package]
 version = "0.7.1"
@@ -11,15 +13,16 @@ rust-version = "1.97"
 [workspace.dependencies]
 getcat-core = { path = "crates/getcat-core" }
 
-# GPUI 生态：不写 rev，与 gpui-component 的声明保持一致，版本由 Cargo.lock 锁定
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "runtime_shaders"] }
-gpui_tokio = { git = "https://github.com/zed-industries/zed" }
-gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f", features = ["tree-sitter", "tree-sitter-html", "tree-sitter-bash", "tree-sitter-python"] }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "e5b8a3f496e4c812b1548229dc043ac1f72cee1f" }
-# 应用内更新（GitHub Releases + SHA-256 + minisign）。它的 gpui 依赖同样不写 rev，会统一到上面锁定的 commit。
-# 不在 crates.io 发布（带 git 依赖的 crate 发不上去），只能走 git tag。
-gpui-updater = { git = "https://github.com/AprilNEA/gpui-updater", tag = "v0.0.7", features = ["gpui"] }
+# GPUI 生态：按 GPUI Kit 0.6 的官方形态，应用只依赖 gpui-kit 这一个包（crates.io）。
+# 它替我们锁定配套的 gpui（以 `gpui-pre` 系列发布的 zed 快照）、gpui-base、gpui-component 与默认图标。
+# 代码里 `use gpui_kit::*` 就是 gpui，组件在 `gpui_kit::component`，平台层在 `gpui_kit::platform`，
+# 图标在 `gpui_kit::assets`。tree-sitter 语言与 inspector 等 feature 名与 gpui-component 一致。
+gpui-kit = { version = "0.6.1", features = ["tree-sitter", "tree-sitter-html", "tree-sitter-bash", "tree-sitter-python"] }
+# tokio ⇄ gpui 桥接：Kit 没有对应的包（全线 smol），移植自 zed 的 gpui_tokio，见 crates/gpui-tokio
+gpui-tokio = { path = "crates/gpui-tokio" }
+# 应用内更新（GitHub Releases + SHA-256 + minisign）。上游的 gpui 走 zed git 源，与 gpui-pre 不是
+# 同一个 crate，所以 vendor 一份只改 Cargo.toml 那一行；来源与差异见 vendor/gpui-updater/VENDOR.md。
+gpui-updater = { path = "vendor/gpui-updater", features = ["gpui"] }
 
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "charset", "system-proxy", "stream", "gzip", "brotli", "zstd", "json", "multipart"] }
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
@@ -58,10 +61,16 @@ arrayref = { path = "vendor/arrayref" }
 [profile.dev]
 debug = "limited"
 
+# 开发构建里只给渲染 / 文本 / 组件这一层开优化（官方 installation 文档的推荐清单 + 我们额外的 tree-sitter / ropey）
 [profile.dev.package]
-gpui = { opt-level = 3 }
-gpui_platform = { opt-level = 3 }
-gpui_macros = { opt-level = 3 }
+gpui-pre = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-pre-macros = { opt-level = 3 }
+gpui-pre-sum-tree = { opt-level = 3 }
+gpui-kit = { opt-level = 3 }
+gpui-kit-assets = { opt-level = 3 }
+gpui-component = { opt-level = 3 }
+gpui-base = { opt-level = 3 }
 tree-sitter = { opt-level = 3 }
 ropey = { opt-level = 3 }
 resvg = { opt-level = 3 }
@@ -69,7 +78,6 @@ rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }
 smol = { opt-level = 3 }
-sum_tree = { opt-level = 3 }
 
 [profile.release]
 lto = "thin"

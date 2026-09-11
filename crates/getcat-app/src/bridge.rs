@@ -6,7 +6,7 @@ use getcat_core::http::{
 };
 use getcat_core::model::{HttpVersionPref, RequestSettings};
 use getcat_core::store::{copy_atomic_user, write_atomic_user};
-use gpui::{App, Global, Task};
+use gpui_kit::{App, Global, Task};
 use gpui_tokio::Tokio;
 use tokio::sync::mpsc;
 

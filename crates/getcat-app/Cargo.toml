@@ -13,15 +13,12 @@ path = "src/main.rs"
 
 [features]
 # 开发期元素检查器：cargo run -p getcat-app --features inspector，应用内 ⌘⌥I（macOS）/ Ctrl+Shift+I 打开
-inspector = ["gpui-component/inspector"]
+inspector = ["gpui-kit/inspector"]
 
 [dependencies]
 getcat-core.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui_tokio.workspace = true
-gpui-component.workspace = true
-gpui-component-assets.workspace = true
+gpui-kit.workspace = true
+gpui-tokio.workspace = true
 gpui-updater.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
@@ -31,8 +28,8 @@ rust-i18n.workspace = true
 sys-locale.workspace = true
 
 [dev-dependencies]
-# gpui 的 TestAppContext / #[gpui::test] 需要 test-support；只在测试构建启用（与 gpui-component 自身测试的写法一致）
-gpui = { workspace = true, features = ["test-support"] }
+# TestAppContext / #[gpui_kit::test] 需要 test-support；只在测试构建启用（官方 test 文档的写法）
+gpui-kit = { workspace = true, features = ["test-support"] }
 # 每个持久化测试一个独立临时数据目录
 tempfile.workspace = true
 # 校验内置模板的请求体确实是合法 JSON
@@ -41,6 +38,3 @@ serde_json.workspace = true
 [target.'cfg(target_os = "windows")'.build-dependencies]
 # build.rs 把生成的 .rc（图标 + VERSIONINFO）编进 exe 资源段；Zed 用的也是它
 embed-resource = "3"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["x11", "wayland"] }

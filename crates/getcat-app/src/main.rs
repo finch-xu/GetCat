@@ -19,8 +19,8 @@ mod ui;
 rust_i18n::i18n!("locales", fallback = "en");
 
 use getcat_core::store::{Layout, Loaded, Store, StoreError, load_all};
-use gpui::*;
-use gpui_component::{Root, TitleBar};
+use gpui_kit::component::{Root, TitleBar};
+use gpui_kit::*;
 
 use crate::assets::AppAssets;
 use crate::state::settings;
@@ -58,10 +58,10 @@ fn main() {
         )
         .init();
 
-    gpui_platform::application()
+    gpui_kit::platform::application()
         .with_assets(AppAssets)
         .run(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             theme::install(cx);
             bridge::init(cx);
 

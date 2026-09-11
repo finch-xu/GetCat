@@ -4,9 +4,7 @@ use getcat_core::body::tier::ViewTier;
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::HttpVersionPref;
 use getcat_core::tls::CertificateInfo;
-use gpui::prelude::FluentBuilder as _;
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable,
     alert::Alert,
     button::{Button, ButtonVariants},
@@ -18,6 +16,8 @@ use gpui_component::{
     tag::Tag,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use crate::assets::ICON_WRAP_TEXT;
 use crate::i18n::tr;
