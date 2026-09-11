@@ -26,7 +26,7 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 ## 亮点
 
 - **原生且轻快**：GPU 渲染的原生窗口，不是 Electron / Tauri / WebView；macOS、Linux、Windows 三平台同一套界面。
-- **大响应不卡**：流式接收、实时进度、随时取消；≤ 5 MB 用高亮编辑器，≤ 64 MB 按行虚拟化，更大的落盘预览 + 一键保存，百 MB 响应也不会拖住界面。
+- **大响应不卡**：流式接收、实时进度、随时取消；≤ 5 MB 用高亮编辑器，≤ 64 MB 按行虚拟化（照样能拖选、⌘C 复制），更大的落盘预览 + 一键保存，百 MB 响应也不会拖住界面。响应体与响应头都有一键复制。
 - **完整的请求构造**：GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS；Path 参数（URL 中 `{name}`）、Query、Headers；Body 支持 form-data（文本 / 文件字段，文件定长流式上传）、x-www-form-urlencoded、raw JSON / Text / XML、binary 整文件上传。
 - **大模型流式调试**：SSE（text/event-stream）响应边收边显示，不必等流结束；自动识别 OpenAI Chat Completions / Responses 与 Anthropic Messages 的流格式，提供事件流 / 拼装文本 / 原始三种视图，附 TTFT、事件数、token 用量与生成速率统计。侧栏自带三家接口的请求模板（纯文本 / 含图片 / 流式），以及 MCP 两个协议时代的模板。
 - **命令进出自如**：右侧栏可把当前请求转成 cURL / Python 示例，也能反过来粘一条 curl 命令导进来——浏览器「以 cURL 格式复制」的输出直接可用，没搬过来的选项会如实列出。

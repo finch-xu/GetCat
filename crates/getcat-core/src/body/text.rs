@@ -6,6 +6,16 @@ use crate::body::line_index::LineIndex;
 /// 单行最多显示的字符数；更长的行截断并提示剩余字符数。
 pub const MAX_LINE_CHARS: usize = 2000;
 
+/// 文档内的一个位置：行号 + 行内字节偏移（相对该行文本起点，不含行尾换行）。
+///
+/// 选择复制时由渲染层从像素坐标换算而来；`col` 可能落在多字节字符中间或超过行长，
+/// [`TextDoc::slice`] 会自行收口，调用方不必先规整。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LinePos {
+    pub line: usize,
+    pub col: usize,
+}
+
 #[derive(Debug)]
 pub struct TextDoc {
     text: String,
@@ -77,6 +87,37 @@ impl TextDoc {
         let s = s.strip_suffix('\n').unwrap_or(s);
         s.strip_suffix('\r').unwrap_or(s)
     }
+
+    /// 把一个位置规整成全文字节偏移：行号越界按最后一行行尾，列超出行长按行尾（不含换行），
+    /// 落在字符中间则退到前一个字符边界。空文档恒为 0。
+    fn offset_of(&self, pos: LinePos) -> usize {
+        let last = match self.lines.len().checked_sub(1) {
+            Some(last) => last,
+            None => return 0,
+        };
+        if pos.line > last {
+            let start = self.lines.span(last).start;
+            return start + self.line(last).len();
+        }
+        let start = self.lines.span(pos.line).start;
+        let line = self.line(pos.line);
+        let mut col = pos.col.min(line.len());
+        while !line.is_char_boundary(col) {
+            col -= 1;
+        }
+        start + col
+    }
+
+    /// 两个位置之间的原文，顺序无关，保留中间原有的行尾（`\n` / `\r\n`）。
+    pub fn slice(&self, a: LinePos, b: LinePos) -> &str {
+        let (start, end) = (self.offset_of(a), self.offset_of(b));
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
+        &self.text[start..end]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +173,56 @@ mod tests {
         assert_eq!(doc.line(2), "ccc");
         assert_eq!(doc.longest_line(), Some(2));
         assert_eq!(doc.len_bytes(), 9);
+    }
+
+    #[test]
+    fn slice_within_one_line_is_ordered_and_clamped() {
+        let doc = TextDoc::new("hello world\nsecond".to_string());
+        let a = LinePos { line: 0, col: 6 };
+        let b = LinePos { line: 0, col: 11 };
+        assert_eq!(doc.slice(a, b), "world");
+        // 顺序无关
+        assert_eq!(doc.slice(b, a), "world");
+        // 列超过行长按行尾（不含换行）截断
+        assert_eq!(doc.slice(a, LinePos { line: 0, col: 99 }), "world");
+        // 同一位置 → 空
+        assert_eq!(doc.slice(a, a), "");
+    }
+
+    #[test]
+    fn slice_across_lines_keeps_original_line_endings() {
+        let doc = TextDoc::new("ab\r\ncd\nef".to_string());
+        let a = LinePos { line: 0, col: 1 };
+        let b = LinePos { line: 2, col: 1 };
+        assert_eq!(doc.slice(a, b), "b\r\ncd\ne");
+        // 行号越界按最后一行行尾处理
+        assert_eq!(
+            doc.slice(LinePos { line: 1, col: 0 }, LinePos { line: 9, col: 0 }),
+            "cd\nef"
+        );
+    }
+
+    #[test]
+    fn slice_snaps_columns_to_char_boundaries() {
+        // "名" 占 3 字节：col=1 落在字符中间，向前退到字符边界
+        let doc = TextDoc::new("名字".to_string());
+        assert_eq!(
+            doc.slice(LinePos { line: 0, col: 1 }, LinePos { line: 0, col: 6 }),
+            "名字"
+        );
+        assert_eq!(
+            doc.slice(LinePos { line: 0, col: 0 }, LinePos { line: 0, col: 4 }),
+            "名"
+        );
+    }
+
+    #[test]
+    fn slice_of_empty_doc_is_empty() {
+        let doc = TextDoc::new(String::new());
+        assert_eq!(
+            doc.slice(LinePos { line: 0, col: 0 }, LinePos { line: 3, col: 5 }),
+            ""
+        );
     }
 
     #[test]

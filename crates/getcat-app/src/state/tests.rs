@@ -5,7 +5,7 @@
 //! gpui 测试时钟是虚拟的：只有 `advance_clock` 会推进，`wait_until` 每轮推进 10 ms 让计时器也能触发。
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     io::{Read, Write},
     net::TcpListener,
     path::PathBuf,
@@ -25,9 +25,11 @@ use getcat_core::model::{
 };
 use getcat_core::store::{Store, codec::decode};
 use getcat_core::tls::{CertWarning, CertificateInfo};
-use gpui_kit::component::{ActiveTheme, input::InputEvent};
+use gpui_kit::base::TextSelection;
+use gpui_kit::component::{ActiveTheme, Root, input::InputEvent};
 use gpui_kit::{
-    AppContext, Entity, Focusable, IntoElement, TestAppContext, VisualTestContext, point, px, size,
+    AppContext, Entity, Focusable, IntoElement, Modifiers, MouseButton, TestAppContext,
+    VisualTestContext, point, px, size,
 };
 use tempfile::TempDir;
 
@@ -45,19 +47,149 @@ use crate::state::workspace::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarSection, ToolSection,
     Workspace,
 };
-use crate::ui::body_view::LINE_HEIGHT_PX;
+use crate::ui::body_view::{LINE_HEIGHT_PX, gutter_px};
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 use crate::ui::tab_strip::{page_count, tabs_per_page};
 use getcat_core::model::{LanguagePref, MAX_TAB_ROWS};
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
+    init_globals(cx);
+    cx.add_empty_window()
+}
+
+/// 只装全局（组件库、主题、bridge），窗口由调用方决定怎么开。
+pub(crate) fn init_globals(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         crate::theme::install(cx);
         crate::bridge::init(cx);
     });
-    cx.add_empty_window()
+}
+
+/// 把一个 Tab 装进带 `Root` 的窗口并画一帧：`Root` 挂着窗口级文本选择层，
+/// 鼠标拖选 / 复制这类 UI 集成测试要在这样的窗口里跑。返回 Tab 与它所在窗口的上下文。
+pub(crate) fn tab_in_root_window(
+    cx: &mut TestAppContext,
+) -> (Entity<RequestTab>, &mut VisualTestContext) {
+    init_globals(cx);
+    let slot: Rc<RefCell<Option<Entity<RequestTab>>>> = Rc::new(RefCell::new(None));
+    let slot_for_root = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let tab = cx.new(|cx| RequestTab::new(Ulid::generate(), window, cx));
+        *slot_for_root.borrow_mut() = Some(tab.clone());
+        Root::new(tab, window, cx)
+    });
+    let tab = slot
+        .borrow_mut()
+        .take()
+        .expect("tab created inside the root view");
+    (tab, cx)
+}
+
+/// B 档纯文本响应：20 万零 1 行 `line <i>`。
+fn virtual_tier_lines() -> String {
+    (0..EDITOR_MAX_LINES + 1)
+        .map(|i| format!("line {i}\n"))
+        .collect()
+}
+
+#[gpui_kit::test]
+fn dragging_across_virtual_rows_selects_their_text(cx: &mut TestAppContext) {
+    let (tab, cx) = tab_in_root_window(cx);
+    let text = virtual_tier_lines();
+    install_done_with(
+        &tab,
+        "text/plain",
+        BodyStore::in_memory(text.into_bytes()),
+        cx,
+    );
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    let bounds = tab
+        .read_with(cx, |t, _| t.lines_selection.bounds())
+        .expect("the lines region was painted");
+    // 行文本从行号栏之后开始；从第 0 行文字左侧一点按下，拖到第 1 行行尾之外抬起
+    let gutter = px(gutter_px(EDITOR_MAX_LINES + 1));
+    let start = point(
+        bounds.left() + gutter - px(2.),
+        bounds.top() + px(LINE_HEIGHT_PX / 2.),
+    );
+    let end = point(
+        bounds.left() + gutter + px(300.),
+        bounds.top() + px(LINE_HEIGHT_PX * 1.5),
+    );
+    cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+    cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+        assert_eq!(
+            TextSelection::selected_text(window, cx),
+            "line 0\nline 1",
+            "两行被整行选中，复制文本按原文行尾拼接"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn copy_target_follows_the_response_section(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.read(|app| {
+        assert!(
+            tab.read(app).copy_target_text().is_none(),
+            "没有响应就没东西可复制"
+        )
+    });
+
+    let body = BodyStore::in_memory(br#"{"a":1}"#.to_vec());
+    let mut meta = meta("application/json", body.len());
+    meta.headers = vec![
+        ("content-type".into(), "application/json".into()),
+        ("x-trace".into(), "abc".into()),
+    ];
+    let view = ResponseView::prepare(meta, &body);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let g = t.generation;
+            t.apply_outcome(g, Ok((body, view)), window, cx);
+            // Body：跟随 Pretty / Raw
+            assert_eq!(t.copy_target_text().as_deref(), Some("{\n  \"a\": 1\n}"));
+            t.set_pretty(false, window, cx);
+            assert_eq!(t.copy_target_text().as_deref(), Some(r#"{"a":1}"#));
+            // Headers：一行一个 `Name: value`
+            t.response_section = ResponseSection::Headers;
+            assert_eq!(
+                t.copy_target_text().as_deref(),
+                Some("content-type: application/json\nx-trace: abc")
+            );
+            // 证书页没有可复制的文本
+            t.response_section = ResponseSection::Certificate;
+            assert!(t.copy_target_text().is_none());
+        })
+    });
+}
+
+#[gpui_kit::test]
+fn select_all_on_the_lines_region_copies_the_whole_body(cx: &mut TestAppContext) {
+    let (tab, cx) = tab_in_root_window(cx);
+    let text = virtual_tier_lines();
+    install_done_with(
+        &tab,
+        "text/plain",
+        BodyStore::in_memory(text.clone().into_bytes()),
+        cx,
+    );
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+        tab.update(cx, |t, cx| t.select_all_response_lines(window, cx));
+        let selected = TextSelection::selected_text(window, cx);
+        // 20 万行的全文，断言失败时别把整篇打出来
+        assert_eq!(selected.len(), text.len());
+        assert!(selected == text, "全选后复制的必须是整份原文");
+    });
 }
 
 pub(crate) fn new_tab(cx: &mut VisualTestContext) -> Entity<RequestTab> {

@@ -8,9 +8,10 @@ use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable,
     alert::Alert,
     button::{Button, ButtonVariants},
+    clipboard::Clipboard,
     description_list::DescriptionList,
     h_flex,
-    input::Editor,
+    input::{Editor, SelectAll},
     kbd::Kbd,
     tab::{Tab, TabBar},
     tag::Tag,
@@ -134,6 +135,8 @@ impl RequestTab {
         );
         let wrap_response = settings::settings(cx).wrap_response_body;
         let wrap_available = self.response_wrap_available();
+        let copy_target = self.copy_target();
+        let tab = cx.entity();
 
         v_flex()
             .size_full()
@@ -162,7 +165,22 @@ impl RequestTab {
                             .gap_1()
                             .items_center()
                             // Button 没有 aria_label（只实现 InteractiveElement），
-                            // tooltip 就是这三个图标按钮对外的可读名字，一个都不能省
+                            // tooltip 就是这几个图标按钮对外的可读名字，一个都不能省
+                            // 复制当前页：Body 页整份正文、Headers 页全部响应头。文本在点击时才拼，
+                            // 渲染期只看有没有目标（响应体可能几十 MB）。
+                            .when_some(copy_target, |h, target| {
+                                let tab = tab.clone();
+                                h.child(
+                                    Clipboard::new("copy-response")
+                                        .value_fn(move |_, cx| {
+                                            tab.read(cx)
+                                                .copy_target_text()
+                                                .unwrap_or_default()
+                                                .into()
+                                        })
+                                        .tooltip(target.tooltip()),
+                                )
+                            })
                             .when(is_done, |h| {
                                 h.child(
                                     Button::new("find-in-response")
@@ -483,10 +501,17 @@ impl RequestTab {
                             .size_full()
                             .into_any_element()
                     }
-                    ViewTier::Virtual | ViewTier::Preview => {
-                        render_text_lines("response-lines", doc.doc.clone(), &self.body_scroll, cx)
-                            .into_any_element()
-                    }
+                    ViewTier::Virtual | ViewTier::Preview => render_text_lines(
+                        "response-lines",
+                        doc.doc.clone(),
+                        &self.body_scroll,
+                        &self.lines_selection,
+                        cx.listener(|this, _: &SelectAll, window, cx| {
+                            this.select_all_response_lines(window, cx)
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
                 },
                 _ => empty_state(tr!("response.empty_body"), cx),
             },
@@ -573,10 +598,17 @@ impl RequestTab {
                         .size_full()
                         .into_any_element()
                 }
-                ViewTier::Virtual | ViewTier::Preview => {
-                    render_text_lines("response-lines", doc.doc.clone(), &self.body_scroll, cx)
-                        .into_any_element()
-                }
+                ViewTier::Virtual | ViewTier::Preview => render_text_lines(
+                    "response-lines",
+                    doc.doc.clone(),
+                    &self.body_scroll,
+                    &self.lines_selection,
+                    cx.listener(|this, _: &SelectAll, window, cx| {
+                        this.select_all_response_lines(window, cx)
+                    }),
+                    cx,
+                )
+                .into_any_element(),
             }
         };
         v_flex()

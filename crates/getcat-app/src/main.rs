@@ -92,6 +92,12 @@ fn main() {
                 KeyBinding::new(&primary("s"), SaveRequest, None),
                 KeyBinding::new(&primary("f"), FindInResponse, None),
                 KeyBinding::new(&primary(","), OpenSettings, None),
+                // B/C 档行视图：⌘A 全选响应体（⌘C 由 gpui-component 的 Root 统一处理窗口选区）
+                KeyBinding::new(
+                    &primary("a"),
+                    gpui_kit::component::input::SelectAll,
+                    Some(ui::body_view::LINES_KEY_CONTEXT),
+                ),
             ]);
 
             // 客户端自绘标题栏（spec §7.2）：TitleBar::window_options() 提供透明 titlebar、红绿灯位置与

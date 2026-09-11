@@ -4,19 +4,24 @@
 use std::sync::Arc;
 
 use getcat_core::body::text::{TextDoc, clip_line};
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::{
-    ActiveTheme, h_flex,
+    ActiveTheme,
+    clipboard::Clipboard,
+    h_flex,
+    input::SelectAll,
     scroll::{Scrollbar, ScrollbarAxis},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, InteractiveElement, IntoElement, ListHorizontalSizingBehavior, ListState, ParentElement,
-    Role, SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle, div, list, px,
-    uniform_list,
+    Role, SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle, Window, div,
+    list, px, uniform_list,
 };
 
 use crate::i18n::tr;
 use crate::ui::format_bytes;
+use crate::ui::selectable_lines::{LinesSelection, participant_layer};
 
 /// 每行固定高度（uniform_list 要求等高；按第一项测量，所有行都用同一个 h()）。
 pub const LINE_HEIGHT_PX: f32 = 20.;
@@ -25,19 +30,31 @@ fn digits(n: usize) -> usize {
     n.max(1).ilog10() as usize + 1
 }
 
+/// 行号栏宽度（px）：行文本从这个 x 偏移开始。选择引擎把鼠标 x 换算成列时也用它。
+pub fn gutter_px(line_count: usize) -> f32 {
+    16. + 8. * digits(line_count) as f32
+}
+
 /// 按行虚拟化渲染整份文档：行号 + 文本；超过 MAX_LINE_CHARS 的行截断并标注。
 /// `doc` 被 move 进渲染闭包，闭包每帧只对可见区间切片并分配对应数量的 SharedString。
+/// 行视图的按键上下文：main.rs 在它上面绑 ⌘A → `SelectAll`。
+pub const LINES_KEY_CONTEXT: &str = "ResponseLines";
+
 pub fn render_text_lines(
     id: &'static str,
     doc: Arc<TextDoc>,
     handle: &UniformListScrollHandle,
+    selection: &LinesSelection,
+    on_select_all: impl Fn(&SelectAll, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let line_count = doc.line_count();
     let longest = doc.longest_line();
-    let gutter = px(16. + 8. * digits(line_count) as f32);
+    let gutter = px(gutter_px(line_count));
     let muted = cx.theme().muted_foreground;
     let warning = cx.theme().warning;
+    let selection_color = cx.theme().selection;
+    let lines = selection.clone_for_rows();
 
     let list = uniform_list(id, line_count, move |range, _window, _cx| {
         range
@@ -56,7 +73,11 @@ pub fn render_text_lines(
                             .text_color(muted)
                             .child(SharedString::from((ix + 1).to_string())),
                     )
-                    .child(div().child(SharedString::from(clipped.text.to_string())))
+                    .child(lines.line_text(
+                        ix,
+                        SharedString::from(clipped.text.to_string()),
+                        selection_color,
+                    ))
                     .when(clipped.hidden_bytes > 0, |h| {
                         h.child(div().ml_2().text_color(warning).child(tr!(
                             "response.line_truncated",
@@ -74,13 +95,19 @@ pub fn render_text_lines(
     .font_family(cx.theme().mono_font_family.clone())
     .text_size(cx.theme().mono_font_size);
 
-    // uniform_list 只实现 InteractiveElement（没有 role）；外层组让屏幕阅读器知道这里是响应正文
+    // uniform_list 只实现 InteractiveElement（没有 role）；外层组让屏幕阅读器知道这里是响应正文。
+    // overflow_hidden 让参与者的内容遮罩就是这块视口：拖选到边缘时引擎合成的滚轮事件会落在列表上。
     div()
         .id("response-lines-region")
         .role(Role::Group)
         .aria_label(tr!("response.lines_aria"))
+        .key_context(LINES_KEY_CONTEXT)
+        .track_focus(&selection.focus)
+        .on_action(on_select_all)
         .relative()
+        .overflow_hidden()
         .size_full()
+        .child(participant_layer(selection, handle))
         .child(list)
         .child(Scrollbar::new(handle).axis(ScrollbarAxis::Both))
 }
@@ -168,6 +195,8 @@ pub fn render_sse_events(
 /// Headers 名称列的宽度与列间距（px）。值列的左缩进 = 两者之和。
 const HEADER_NAME_WIDTH: f32 = 256.;
 const HEADER_COL_GAP: f32 = 12.;
+/// 行内悬浮复制按钮靠 group hover 显示；gpui 的 group 边界按名字入栈，同名跨行也只匹配当前行
+const HEADER_ROW_GROUP: &str = "response-header-row";
 
 /// 响应头列表：每行一个 Header，名称列定宽，值列自然换行。
 ///
@@ -190,8 +219,11 @@ pub fn render_header_rows(
             // reset 与新 rows 之间隔了一帧时的防御：宁可空一行也不 panic
             return div().into_any_element();
         };
+        // 名称与值都是窗口级选择的参与者（gpui-base 的 SelectableText）：能拖选、⌘C 复制；
+        // document_order 让跨行拖选按 名称 → 值 → 下一行 的阅读顺序拼接
         div()
             .relative()
+            .group(HEADER_ROW_GROUP)
             .px_3()
             .py_1()
             .text_sm()
@@ -204,14 +236,35 @@ pub fn render_header_rows(
                     .w(px(HEADER_NAME_WIDTH))
                     .text_color(muted)
                     .truncate()
-                    .child(name.clone()),
+                    .child(
+                        SelectableText::new(("header-name", ix), name.clone())
+                            .document_order(2 * ix as u64),
+                    ),
             )
-            // 值列：block 流内用左 margin 让出名称列；min_h 兜住空值行的高度
+            // 值列：block 流内用左 margin 让出名称列，右侧给悬浮复制按钮留位；min_h 兜住空值行的高度
             .child(
                 div()
                     .ml(px(HEADER_NAME_WIDTH + HEADER_COL_GAP))
+                    .pr_8()
                     .min_h_5()
-                    .child(value.clone()),
+                    .child(
+                        SelectableText::new(("header-value", ix), value.clone())
+                            .document_order(2 * ix as u64 + 1),
+                    ),
+            )
+            // 悬浮才出现的单行复制：`Name: value`
+            .child(
+                div()
+                    .absolute()
+                    .right_1()
+                    .top_0()
+                    .invisible()
+                    .group_hover(HEADER_ROW_GROUP, |s| s.visible())
+                    .child(
+                        Clipboard::new(("copy-header", ix))
+                            .value(format!("{name}: {value}"))
+                            .tooltip(tr!("response.copy_header")),
+                    ),
             )
             .into_any_element()
     })

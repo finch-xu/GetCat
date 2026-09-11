@@ -421,6 +421,18 @@ response:
   find:
     en: Find in response
     zh-CN: 在响应中查找
+  copy_body:
+    en: Copy body
+    zh-CN: 复制响应体
+  copy_body_preview:
+    en: Copy the previewed part
+    zh-CN: 复制预览部分
+  copy_headers:
+    en: Copy all headers
+    zh-CN: 复制全部响应头
+  copy_header:
+    en: Copy this header
+    zh-CN: 复制这一行
   save_to_file:
     en: Save to file…
     zh-CN: 保存到文件…

@@ -35,6 +35,7 @@ use crate::state::response::{CancelFlag, ResponseState, ResponseView, SseLive, p
 use crate::state::settings;
 use crate::state::store::store;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
+use crate::ui::selectable_lines::LinesSelection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestSection {
@@ -170,6 +171,25 @@ impl BodyHint {
     }
 }
 
+/// 顶栏"复制"按钮的目标；tooltip 按它翻译。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyTarget {
+    Body,
+    /// 落盘响应：内存里只有前面的预览部分
+    BodyPreview,
+    Headers,
+}
+
+impl CopyTarget {
+    pub fn tooltip(self) -> SharedString {
+        match self {
+            CopyTarget::Body => tr!("response.copy_body"),
+            CopyTarget::BodyPreview => tr!("response.copy_body_preview"),
+            CopyTarget::Headers => tr!("response.copy_headers"),
+        }
+    }
+}
+
 /// 工具栏右侧的一行提示。同样存枚举，渲染时翻译。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
@@ -269,6 +289,8 @@ pub struct RequestTab {
     /// Headers 列表的状态（gpui `list`：值可换行、行高不等）；
     /// 行数随响应变，新响应到达 / 清空时必须 `reset`（顺带回到顶部）。
     pub headers_list: ListState,
+    /// B/C 档行视图的文本选择参与者（窗口级选择引擎的稳定句柄）
+    pub lines_selection: LinesSelection,
     pub response: ResponseState,
     /// 工具栏右侧的一行提示（保存结果、搜索不可用等）；重新发送时清空。
     pub notice: Option<Notice>,
@@ -391,6 +413,7 @@ impl RequestTab {
             body_scroll: UniformListScrollHandle::new(),
             // 行数在响应到达时 reset；overdraw 预渲染视口外一小段，滚动不闪
             headers_list: ListState::new(0, ListAlignment::Top, px(256.)),
+            lines_selection: LinesSelection::new(window, cx),
             response: ResponseState::Idle,
             notice: None,
             generation: 0,
@@ -583,6 +606,7 @@ impl RequestTab {
         }
         self.pretty = pretty;
         self.sync_response_editor(window, cx);
+        self.sync_lines_selection(window, cx);
     }
 
     /// 切换 SSE Body 区的视图（文本 / 事件流 / 原始）。
@@ -592,6 +616,7 @@ impl RequestTab {
         }
         self.sse_mode = mode;
         self.sync_response_editor(window, cx);
+        self.sync_lines_selection(window, cx);
     }
 
     /// 当前应生效的 SSE 视图：选了"文本"但流里拼不出文本时回落到"事件流"。
@@ -944,6 +969,7 @@ impl RequestTab {
                 self.headers_list.reset(view.header_rows.len());
                 self.response = ResponseState::Done { body, view };
                 self.response_section = ResponseSection::Body;
+                self.sync_lines_selection(window, cx);
             }
             Err(error) => self.response = ResponseState::Failed { error },
         }
@@ -968,6 +994,7 @@ impl RequestTab {
     /// 掉 `SpillFile`、把临时文件删干净。也正因如此这一步不可逆，但响应重发即可拿回，
     /// 所以不弹确认框。
     pub fn clear_response(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.lines_selection.set_doc(None, window, cx);
         if matches!(self.response, ResponseState::Idle) {
             return;
         }
@@ -1127,6 +1154,62 @@ impl RequestTab {
 
     /// 响应体「自动换行」开关。只对 A 档（只读 Editor）有意义，B/C 档按行虚拟化，
     /// 调用点负责在那两档下禁用按钮。
+    /// 顶栏"复制"按钮当前会复制什么（渲染时只判断有无，不真拼文本——响应体可能有几十 MB）。
+    pub fn copy_target(&self) -> Option<CopyTarget> {
+        let ResponseState::Done { view, .. } = &self.response else {
+            return None;
+        };
+        match self.response_section {
+            ResponseSection::Body => self.current_doc(view).map(|d| {
+                if d.tier == ViewTier::Preview {
+                    CopyTarget::BodyPreview
+                } else {
+                    CopyTarget::Body
+                }
+            }),
+            ResponseSection::Headers => Some(CopyTarget::Headers),
+            ResponseSection::Certificate => None,
+        }
+    }
+
+    /// 顶栏"复制"按钮要复制的文本：Body 页是当前显示的文档（Pretty / Raw、SSE 的文本 / 原始视图；
+    /// 落盘响应只有内存里的预览部分），Headers 页是全部响应头（每行 `Name: value`），证书页没有。
+    pub fn copy_target_text(&self) -> Option<String> {
+        let ResponseState::Done { view, .. } = &self.response else {
+            return None;
+        };
+        match self.copy_target()? {
+            CopyTarget::Body | CopyTarget::BodyPreview => {
+                self.current_doc(view).map(|d| d.doc.text().to_string())
+            }
+            CopyTarget::Headers => Some(
+                view.header_rows
+                    .iter()
+                    .map(|(name, value)| format!("{name}: {value}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+        }
+    }
+
+    /// ⌘A 落在 B/C 档行视图上：整份响应体进入选中态，⌘C 复制全文。
+    pub fn select_all_response_lines(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.lines_selection.select_all(window, cx);
+    }
+
+    /// 让选择参与者知道 B/C 档当前显示的是哪份文档（A 档走只读编辑器，不归它管）；
+    /// 文档换了就清掉旧选区。响应到达、Pretty/Raw 与 SSE 视图切换、清空响应后都要调一次。
+    fn sync_lines_selection(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let doc = match &self.response {
+            ResponseState::Done { view, .. } => self
+                .current_doc(view)
+                .filter(|d| d.tier != ViewTier::Editor)
+                .map(|d| d.doc.clone()),
+            _ => None,
+        };
+        self.lines_selection.set_doc(doc, window, cx);
+    }
+
     pub fn toggle_response_wrap(&mut self, cx: &mut Context<Self>) {
         settings::update(cx, |s| s.wrap_response_body = !s.wrap_response_body);
         cx.notify();
