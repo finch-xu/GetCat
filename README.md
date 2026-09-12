@@ -65,22 +65,17 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 
 更老的发行版跑不了：Ubuntu 20.04、Debian 11，以及 RHEL / Rocky / AlmaLinux 9 —— 下限是 glibc 2.35，它们都在这之下。
 
-解压后装到 `~/.local/bin`，并加进应用菜单：
+解压后直接运行 `./getcat` 即可。想让它出现在应用列表（Ubuntu 的「显示应用程序」）与 Dock 里，打开 **设置 → 通用 → 加入应用菜单**：GetCat 会把启动项与图标写到 `~/.local/share` 下，之后按 Super 键搜索 GetCat 就能启动，右键还能「添加到收藏夹」钉在 Dock 上；关掉开关即删除。Wayland 下窗口与 Dock 的图标也来自这份启动项，所以没打开开关时任务栏里显示的是通用图标。
+
+启动项指向当前可执行文件，建议先把 `getcat` 放到固定位置再打开开关，例如：
 
 ```bash
 tar -xzf GetCat-linux-x64.tar.gz
 install -Dm755 getcat ~/.local/bin/getcat
-mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/getcat.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=GetCat
-Exec=$HOME/.local/bin/getcat
-Categories=Development;
-EOF
+~/.local/bin/getcat
 ```
 
-如果之后 `getcat` 命令找不到，说明 `~/.local/bin` 还不在 PATH 里，重新登录一次即可。
+挪动过文件的话，把开关关掉再打开一次，路径就会更新。
 
 </details>
 

@@ -142,7 +142,7 @@ fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, cx: &Ap
 
 fn general_page(workspace: WeakEntity<Workspace>) -> SettingPage {
     let theme_for_read = workspace.clone();
-    SettingPage::new(tr!("settings.general"))
+    let page = SettingPage::new(tr!("settings.general"))
         .icon(IconName::Settings)
         .group(
             SettingGroup::new()
@@ -216,7 +216,28 @@ fn general_page(workspace: WeakEntity<Workspace>) -> SettingPage {
                     )
                     .description(tr!("settings.editor_font_size_desc")),
                 ),
+        );
+    #[cfg(target_os = "linux")]
+    let page = page.group(linux_system_group());
+    page
+}
+
+/// Linux 专属：「加入应用菜单」开关。真值是 .desktop 文件存不存在，不进 settings.json，
+/// 所以「恢复默认」不会碰它——它是对系统做的一件事，不是偏好。
+#[cfg(target_os = "linux")]
+fn linux_system_group() -> SettingGroup {
+    use crate::state::desktop_entry;
+    SettingGroup::new().title(tr!("settings.system")).item(
+        SettingItem::new(
+            tr!("settings.app_menu_entry"),
+            SettingField::switch(
+                desktop_entry::installed,
+                |value, cx| desktop_entry::set_installed(cx, value),
+            )
+            .default_value(false),
         )
+        .description(tr!("settings.app_menu_entry_desc")),
+    )
 }
 
 fn request_page() -> SettingPage {

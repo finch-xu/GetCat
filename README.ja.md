@@ -65,22 +65,17 @@ GPU レンダリング · 低リソース · アカウント不要 · データ�
 
 これより古いリリースでは動きません：Ubuntu 20.04、Debian 11、RHEL / Rocky / AlmaLinux 9 はいずれも glibc 2.35 という下限を下回っています。
 
-`~/.local/bin` に展開して、アプリケーションメニューに登録するには：
+展開して `./getcat` を実行するだけで動きます。アプリ一覧（Ubuntu の「アプリケーションを表示」）や Dock に出したい場合は、**設定 → 一般 → アプリケーションメニューに追加** をオンにしてください。GetCat がランチャーとアイコンを `~/.local/share` 以下に書き込み、以後は Super キーで検索して起動でき、右クリックの「お気に入りに追加」で Dock に固定できます。オフにすると削除されます。Wayland ではウィンドウと Dock のアイコンもこのランチャーから取られるため、オンにしていないと汎用アイコンが表示されます。
+
+ランチャーは現在の実行ファイルを指すので、先に `getcat` を固定の場所へ置いてからオンにしてください。例：
 
 ```bash
 tar -xzf GetCat-linux-x64.tar.gz
 install -Dm755 getcat ~/.local/bin/getcat
-mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/getcat.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=GetCat
-Exec=$HOME/.local/bin/getcat
-Categories=Development;
-EOF
+~/.local/bin/getcat
 ```
 
-あとで `getcat` コマンドが見つからない場合は、`~/.local/bin` がまだ PATH に入っていません。ログインし直してください。
+あとでファイルを移動した場合は、スイッチを一度オフにしてからオンにし直すとパスが更新されます。
 
 </details>
 

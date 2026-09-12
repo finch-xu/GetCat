@@ -13,6 +13,14 @@
 /// 应用显示名。OS 层窗口标题、标题栏、「关于」页共用。
 pub const APP_NAME: &str = "GetCat";
 
+/// 反向域名形式的应用标识。Linux 桌面靠它把窗口和 `.desktop` 文件对上：
+/// Wayland 下作为 `xdg_toplevel` 的 app_id，X11 下作为 `WM_CLASS`，桌面环境再按
+/// `<APP_ID>.desktop` 找到应用名与图标——**没有这条对应，Wayland 下窗口就没有图标**
+/// （协议里根本没有「窗口图标」，图标只能来自 .desktop）。与 `scripts/ci/gen-oss-manifest.py`
+/// 里镜像清单的 `app_id` 是同一个值。
+#[allow(dead_code)]
+pub const APP_ID: &str = "top.catonthe.getcat";
+
 /// 「关于」页的作者署名。只在应用内渲染（gpui 全程 UTF-8），不要送进 Windows 资源。
 pub const AUTHOR: &str = "虚拟世界的懒猫 (@finch-xu)";
 

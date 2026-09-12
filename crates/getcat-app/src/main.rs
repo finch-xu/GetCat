@@ -42,6 +42,18 @@ actions!(
     ]
 );
 
+/// X11 的窗口图标：解码内嵌 logo。解码失败（不该发生，资源是编译期嵌入的）就没图标，不影响启动。
+#[cfg(target_os = "linux")]
+fn linux_window_icon() -> Option<std::sync::Arc<image::RgbaImage>> {
+    match image::load_from_memory(crate::assets::LOGO_PNG) {
+        Ok(img) => Some(std::sync::Arc::new(img.into_rgba8())),
+        Err(e) => {
+            tracing::warn!("窗口图标解码失败: {e}");
+            None
+        }
+    }
+}
+
 fn primary(key: &str) -> String {
     if cfg!(target_os = "macos") {
         format!("cmd-{key}")
@@ -110,6 +122,12 @@ fn main() {
                 window_background: WindowBackgroundAppearance::Transparent,
                 #[cfg(target_os = "linux")]
                 window_decorations: Some(WindowDecorations::Client),
+                // Linux 桌面靠 app_id 把窗口和 .desktop 对上（Wayland 的图标只能来自那里，见
+                // state/desktop_entry.rs）；X11 没有这条路，图标由 _NET_WM_ICON 直接给
+                #[cfg(target_os = "linux")]
+                app_id: Some(crate::brand::APP_ID.to_string()),
+                #[cfg(target_os = "linux")]
+                icon: linux_window_icon(),
                 ..TitleBar::window_options()
             };
             cx.spawn(async move |cx| {
@@ -121,6 +139,8 @@ fn main() {
                     settings::install(cx, loaded.settings.take());
                     // 更新器在开窗前安装：Workspace 构造时要订阅它
                     update::install(cx);
+                    #[cfg(target_os = "linux")]
+                    state::desktop_entry::init(cx);
                     cx.open_window(options, |window, cx| {
                         // TitlebarOptions.title 为 None（标题由 TitleBar 自绘）；OS 层的窗口标题给 Dock / 任务栏 / 屏幕阅读器
                         window.set_window_title(crate::brand::APP_NAME);

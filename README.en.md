@@ -65,22 +65,17 @@ Runs on mainstream desktop distributions from 2022 onward: **Ubuntu 22.04+**, **
 
 Older releases won't run it: Ubuntu 20.04, Debian 11, and RHEL / Rocky / AlmaLinux 9 all sit below the glibc 2.35 floor.
 
-Unpack it into `~/.local/bin` and add a menu entry:
+Unpack it and run `./getcat`. To have it show up in the app grid (Ubuntu's "Show Applications") and the dock, turn on **Settings → General → Add to application menu**: GetCat writes a launcher and icon under `~/.local/share`, after which the Super key finds it and a right-click can "Add to Favorites" to pin it. Turn the switch off to remove them. On Wayland the window and dock icon also come from this launcher, so without it the taskbar shows a generic icon.
+
+The launcher points at the current executable, so put `getcat` somewhere permanent before enabling it, for example:
 
 ```bash
 tar -xzf GetCat-linux-x64.tar.gz
 install -Dm755 getcat ~/.local/bin/getcat
-mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/getcat.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=GetCat
-Exec=$HOME/.local/bin/getcat
-Categories=Development;
-EOF
+~/.local/bin/getcat
 ```
 
-If `getcat` is not found afterwards, `~/.local/bin` is not on your PATH yet — log out and back in.
+If you move the file later, toggle the switch off and on again to refresh the path.
 
 </details>
 

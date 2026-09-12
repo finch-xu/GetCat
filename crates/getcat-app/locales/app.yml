@@ -1047,6 +1047,18 @@ settings:
     en: Language
     zh-CN: 语言
     ja: 言語
+  system:
+    en: System
+    zh-CN: 系统
+    ja: システム
+  app_menu_entry:
+    en: Add to application menu
+    zh-CN: 加入应用菜单
+    ja: アプリケーションメニューに追加
+  app_menu_entry_desc:
+    en: Writes a launcher and icon under ~/.local/share so GetCat shows up in the app grid and the dock. It points at this executable, so move the file first and re-enable if you relocate it. Turn off to remove.
+    zh-CN: 在 ~/.local/share 下写入启动项与图标，GetCat 会出现在应用列表和 Dock 中。启动项指向当前可执行文件，挪动文件后需重新打开一次；关闭即删除。
+    ja: ~/.local/share にランチャーとアイコンを書き込み、GetCat がアプリ一覧と Dock に表示されるようになります。現在の実行ファイルを指すため、ファイルを移動したら再度オンにしてください。オフにすると削除されます。
   language_desc:
     en: Follow system picks from your preferred languages and falls back to English
     zh-CN: 跟随系统按系统首选语言选择，没有匹配的语言时使用英文

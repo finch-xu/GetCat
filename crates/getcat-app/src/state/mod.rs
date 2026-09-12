@@ -1,3 +1,4 @@
+pub mod desktop_entry;
 pub mod request_tab;
 pub mod response;
 pub mod saved_filter;

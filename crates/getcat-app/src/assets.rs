@@ -15,6 +15,10 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// 这份 PNG 由 `scripts/gen-logo.py` 从 `assets/logo/cat.png` 合成，改 logo 要重跑脚本。
 pub const LOGO_PATH: &str = "logo/getcat.png";
 
+/// Logo 的原始 PNG 字节（512 px 见方）。除了作为 [`LOGO_PATH`] 资源，Linux 上还直接用它：
+/// 解码后作 X11 的窗口图标，原样写进 hicolor 主题目录给 .desktop 用。
+pub const LOGO_PNG: &[u8] = include_bytes!("../assets/logo/getcat.png");
+
 /// 「自动换行」切换按钮的图标。
 pub const ICON_WRAP_TEXT: &str = "icons/wrap-text.svg";
 /// 「导入 cURL」的图标。
@@ -28,7 +32,7 @@ pub const ICON_ROWS_3: &str = "icons/rows-3.svg";
 /// 补图标而不是拿现成的凑：`wrap-text` / `file-input` / `rows-3` 各自都是一眼能认出
 /// 语义的标准图形，用意思相近的替代只会让按钮更难懂。
 const ASSETS: &[(&str, &[u8])] = &[
-    (LOGO_PATH, include_bytes!("../assets/logo/getcat.png")),
+    (LOGO_PATH, LOGO_PNG),
     (
         ICON_WRAP_TEXT,
         include_bytes!("../assets/icons/wrap-text.svg"),

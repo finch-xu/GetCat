@@ -2306,6 +2306,7 @@ dependencies = [
  "gpui-kit",
  "gpui-tokio",
  "gpui-updater",
+ "image",
  "rust-i18n",
  "serde_json",
  "sys-locale",
