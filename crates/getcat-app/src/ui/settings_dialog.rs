@@ -602,6 +602,7 @@ fn language_key(pref: LanguagePref) -> SharedString {
         LanguagePref::System => "system".into(),
         LanguagePref::English => "en".into(),
         LanguagePref::Chinese => "zh-CN".into(),
+        LanguagePref::Japanese => "ja".into(),
     }
 }
 

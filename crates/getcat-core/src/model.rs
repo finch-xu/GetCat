@@ -320,9 +320,9 @@ impl ThemePref {
     }
 }
 
-/// 界面语言偏好：跟随系统，或固定英文 / 中文。
+/// 界面语言偏好：跟随系统，或固定英文 / 中文 / 日文。
 ///
-/// 序列化值就是 BCP 47 语言标签（`"en"` / `"zh-CN"`），`"system"` 表示跟随系统。
+/// 序列化值就是 BCP 47 语言标签（`"en"` / `"zh-CN"` / `"ja"`），`"system"` 表示跟随系统。
 /// 简体与繁体系统语言都落到 `zh-CN`（目前只有一套中文文案）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LanguagePref {
@@ -333,13 +333,16 @@ pub enum LanguagePref {
     English,
     #[serde(rename = "zh-CN")]
     Chinese,
+    #[serde(rename = "ja")]
+    Japanese,
 }
 
 impl LanguagePref {
-    pub const ALL: [LanguagePref; 3] = [
+    pub const ALL: [LanguagePref; 4] = [
         LanguagePref::System,
         LanguagePref::English,
         LanguagePref::Chinese,
+        LanguagePref::Japanese,
     ];
 }
 
@@ -790,9 +793,20 @@ mod tests {
             "\"en\""
         );
         assert_eq!(
+            serde_json::to_string(&LanguagePref::Japanese).unwrap(),
+            "\"ja\""
+        );
+        assert_eq!(
+            serde_json::from_str::<LanguagePref>("\"ja\"").unwrap(),
+            LanguagePref::Japanese
+        );
+        assert_eq!(
             serde_json::from_str::<LanguagePref>("\"system\"").unwrap(),
             LanguagePref::System
         );
+        // 设置面板按 ALL 出下拉项：每个变体都要在里面，且没有重复
+        assert_eq!(LanguagePref::ALL.len(), 4);
+        assert!(LanguagePref::ALL.contains(&LanguagePref::Japanese));
         let legacy: AppSettings =
             serde_json::from_str(r#"{"editor_font_size":14,"check_updates_on_launch":false}"#)
                 .unwrap();

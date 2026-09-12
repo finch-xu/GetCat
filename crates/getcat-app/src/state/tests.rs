@@ -2999,6 +2999,36 @@ fn switching_language_updates_placeholders_immediately(cx: &mut TestAppContext) 
         );
     });
 
+    // 第三门语言走同一条链路：中文 → 日文也要立即生效，不能只在英文 ↔ 中文之间切得动
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::Japanese));
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(app.global::<Locale>().0, "ja");
+        assert_eq!(&*rust_i18n::locale(), "ja");
+        assert_eq!(settings::settings(app).language, LanguagePref::Japanese);
+        assert_eq!(
+            tab.read(app)
+                .url
+                .read(app)
+                .presentation()
+                .placeholder()
+                .as_ref(),
+            "リクエスト URL を入力（例：https://api.example.com/users/{id}）"
+        );
+        assert_eq!(
+            tab.read(app)
+                .params
+                .read(app)
+                .key_placeholder(0, app)
+                .as_ref(),
+            "名前"
+        );
+        assert_eq!(
+            crate::ui::text::language_label(LanguagePref::Japanese).as_ref(),
+            "日本語"
+        );
+    });
+
     cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::English));
     cx.run_until_parked();
     cx.read(|app| {

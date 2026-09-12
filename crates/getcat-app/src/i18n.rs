@@ -1,9 +1,11 @@
 //! 界面语言：把设置里的偏好解析成 rust-i18n 的 locale，并在运行时切换。
 //!
-//! - 文案放在 `crates/getcat-app/locales/app.yml`（rust-i18n v2 格式，一个 key 下并列 `en` / `zh-CN`）；
-//!   `rust_i18n::i18n!` 在 `main.rs` 注册，`fallback = "en"`。
+//! - 文案放在 `crates/getcat-app/locales/app.yml`（rust-i18n v2 格式，一个 key 下并列
+//!   `en` / `zh-CN` / `ja`）；`rust_i18n::i18n!` 在 `main.rs` 注册，`fallback = "en"`。
 //! - `rust_i18n::set_locale` 是跨 crate 的全局：gpui-component 自带的「确定 / 取消 / 搜索设置…」
-//!   用的是同一个 rust-i18n，切换后一起生效，不需要我们补它的翻译。
+//!   用的是同一个 rust-i18n，切换后一起生效，不需要我们补它的翻译。但它自带的 `ui.yml` 只有
+//!   `en` / `zh-CN` / `zh-HK` / `zh-TW` / `it`——界面切到日文时那几条组件内置文案会按
+//!   fallback 回落成英文，这是上游的覆盖范围，`app.yml` 无法替它补。
 //! - 渲染期取文案（`tr!`）的地方切换后随 `refresh_windows` 自动更新；驻留在实体里的字符串
 //!   （输入框占位符等）通过 `cx.observe_global_in::<Locale>` 自己刷新。
 
@@ -14,6 +16,8 @@ use gpui_kit::{App, Global};
 pub const EN: &str = "en";
 /// 中文；简体与繁体系统语言都落到这里。
 pub const ZH_CN: &str = "zh-CN";
+/// 日文。
+pub const JA: &str = "ja";
 
 /// 当前生效的 locale；`set_global` 后所有 `observe_global::<Locale>` 的实体会被通知。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +27,8 @@ impl Global for Locale {}
 
 /// 把偏好解析成 locale。`system` 是系统首选语言列表（按优先级排列）。
 ///
-/// 跟随系统时按顺序找第一个能支持的：`zh*` → 中文，`en*` → 英文；一个都不匹配用英文。
+/// 跟随系统时按顺序找第一个能支持的：`zh*` → 中文，`ja*` → 日文，`en*` → 英文；
+/// 一个都不匹配用英文。
 pub fn resolve<I, S>(pref: LanguagePref, system: I) -> &'static str
 where
     I: IntoIterator<Item = S>,
@@ -32,6 +37,7 @@ where
     match pref {
         LanguagePref::English => EN,
         LanguagePref::Chinese => ZH_CN,
+        LanguagePref::Japanese => JA,
         LanguagePref::System => system
             .into_iter()
             .find_map(|tag| supported(tag.as_ref()))
@@ -48,6 +54,7 @@ fn supported(tag: &str) -> Option<&'static str> {
         .to_ascii_lowercase();
     match lang.as_str() {
         "zh" => Some(ZH_CN),
+        "ja" => Some(JA),
         "en" => Some(EN),
         _ => None,
     }
@@ -107,15 +114,24 @@ mod tests {
     fn explicit_preferences_ignore_the_system() {
         assert_eq!(resolve(LanguagePref::English, ["zh-Hans-CN"]), EN);
         assert_eq!(resolve(LanguagePref::Chinese, ["en-US"]), ZH_CN);
+        assert_eq!(resolve(LanguagePref::Japanese, ["zh-CN"]), JA);
     }
 
     #[test]
     fn system_picks_the_first_supported_language_in_order() {
         assert_eq!(
-            resolve(LanguagePref::System, ["ja-JP", "zh-Hant-TW", "en-US"]),
+            resolve(LanguagePref::System, ["fr-FR", "zh-Hant-TW", "en-US"]),
             ZH_CN
         );
         assert_eq!(resolve(LanguagePref::System, ["en-GB", "zh-CN"]), EN);
+        assert_eq!(resolve(LanguagePref::System, ["ja-JP", "zh-CN"]), JA);
+    }
+
+    #[test]
+    fn japanese_system_tags_map_to_ja() {
+        for tag in ["ja", "ja-JP", "ja_JP.UTF-8", "ja-Jpan-JP"] {
+            assert_eq!(resolve(LanguagePref::System, [tag]), JA, "{tag}");
+        }
     }
 
     #[test]
@@ -135,7 +151,7 @@ mod tests {
 
     #[test]
     fn unsupported_or_empty_system_list_falls_back_to_english() {
-        assert_eq!(resolve(LanguagePref::System, ["ja-JP", "fr-FR"]), EN);
+        assert_eq!(resolve(LanguagePref::System, ["ko-KR", "fr-FR"]), EN);
         assert_eq!(resolve(LanguagePref::System, Vec::<String>::new()), EN);
     }
 }

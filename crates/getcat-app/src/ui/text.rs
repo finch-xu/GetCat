@@ -116,6 +116,7 @@ pub fn language_label(pref: LanguagePref) -> SharedString {
         LanguagePref::System => tr!("language.system"),
         LanguagePref::English => tr!("language.english"),
         LanguagePref::Chinese => tr!("language.chinese"),
+        LanguagePref::Japanese => tr!("language.japanese"),
     }
 }
 
@@ -184,5 +185,21 @@ mod tests {
             rust_i18n::t!("theme.system", locale = "en").as_ref(),
             "System"
         );
+    }
+
+    #[test]
+    fn japanese_locale_is_wired_up() {
+        assert_eq!(
+            rust_i18n::t!("theme.system", locale = "ja").as_ref(),
+            "システムに従う"
+        );
+        // 语言名在任何界面语言下都按它自己的语言显示
+        for locale in ["en", "zh-CN", "ja"] {
+            assert_eq!(
+                rust_i18n::t!("language.japanese", locale = locale).as_ref(),
+                "日本語",
+                "{locale}"
+            );
+        }
     }
 }

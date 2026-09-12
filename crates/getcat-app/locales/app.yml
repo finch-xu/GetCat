@@ -5,536 +5,707 @@ common:
   cancel:
     en: Cancel
     zh-CN: 取消
+    ja: キャンセル
   save:
     en: Save
     zh-CN: 保存
+    ja: 保存
   delete:
     en: Delete
     zh-CN: 删除
+    ja: 削除
   done:
     en: Done
     zh-CN: 完成
+    ja: 完了
   clear:
     en: Clear
     zh-CN: 清除
+    ja: クリア
   choose:
     en: Choose
     zh-CN: 选择
+    ja: 選択
   choose_file:
     en: Choose file…
     zh-CN: 选择文件…
+    ja: ファイルを選択…
 
 app:
   workspace_aria:
     en: GetCat workspace
     zh-CN: GetCat 工作区
+    ja: GetCat ワークスペース
 
 theme:
   system:
     en: System
     zh-CN: 跟随系统
+    ja: システムに従う
   light:
     en: Light
     zh-CN: 浅色
+    ja: ライト
   dark:
     en: Dark
     zh-CN: 深色
+    ja: ダーク
 
-# 语言名按它自己的语言显示：English / 中文 在两种界面里都一样
+# 语言名按它自己的语言显示：English / 中文 / 日本語 在三种界面里都一样
 language:
   system:
     en: Follow system
     zh-CN: 跟随系统
+    ja: システムに従う
   english:
     en: English
     zh-CN: English
+    ja: English
   chinese:
     en: 中文
     zh-CN: 中文
+    ja: 中文
+  japanese:
+    en: 日本語
+    zh-CN: 日本語
+    ja: 日本語
 
 # 更新源（设置 > 检查更新）
 update_source:
   auto:
     en: Auto (follow UI language)
     zh-CN: 自动（跟随界面语言）
+    ja: 自動（UI の言語に従う）
   global:
     en: Global (GitHub)
     zh-CN: 全球（GitHub）
+    ja: グローバル（GitHub）
   china_mirror:
     en: China mainland (mirror)
     zh-CN: 中国大陆（镜像）
+    ja: 中国本土（ミラー）
 
 # 右侧图标栏与它弹出的抽屉
 tools:
   rail_aria:
     en: Tools rail
     zh-CN: 工具栏
+    ja: ツールバー
   code:
     title:
       en: Generate code
       zh-CN: 生成代码
+      ja: コードを生成
     copy:
       en: Copy code
       zh-CN: 复制代码
+      ja: コードをコピー
     editor_aria:
       en: Generated code
       zh-CN: 生成的代码
+      ja: 生成されたコード
   import_curl:
     title:
       en: Import cURL
       zh-CN: 导入 cURL
+      ja: cURL をインポート
     placeholder:
       en: "Paste a curl command, e.g. from a browser’s “Copy as cURL”"
       zh-CN: "粘贴 curl 命令，例如浏览器的「以 cURL 格式复制」"
+      ja: curl コマンドを貼り付け（ブラウザの「cURL としてコピー」など）
     input_aria:
       en: cURL command
       zh-CN: cURL 命令
+      ja: cURL コマンド
     import:
       en: Import as new tab
       zh-CN: 导入为新 Tab
+      ja: 新しいタブとしてインポート
     summary:
       en: "%{method} · %{headers} headers · %{body}"
       zh-CN: "%{method} · %{headers} 个请求头 · %{body}"
+      ja: "%{method} · ヘッダー %{headers} 件 · %{body}"
     body_none:
       en: no body
       zh-CN: 无请求体
+      ja: ボディなし
     body_raw:
       en: "%{format} body"
       zh-CN: "%{format} 请求体"
+      ja: "%{format} ボディ"
     body_form_data:
       en: "form-data (%{count} fields)"
       zh-CN: "form-data（%{count} 个字段）"
+      ja: "form-data（%{count} フィールド）"
     body_urlencoded:
       en: "urlencoded (%{count} fields)"
       zh-CN: "urlencoded（%{count} 个字段）"
+      ja: "urlencoded（%{count} フィールド）"
     body_binary:
       en: file body
       zh-CN: 文件请求体
+      ja: ファイルボディ
     warnings:
       en: "Not carried over (%{count})"
       zh-CN: "没有搬过来的部分（%{count} 项）"
+      ja: "引き継げなかった項目（%{count}）"
     warn_runtime:
       en: "%{flag} — a send-time setting, configure it in Settings"
       zh-CN: "%{flag} — 属于发送设置，请在「设置」里调整"
+      ja: "%{flag} — 送信時の設定です。「設定」で変更してください"
     warn_unknown:
       en: "%{flag} — unrecognized, skipped"
       zh-CN: "%{flag} — 无法识别，已跳过"
+      ja: "%{flag} — 認識できないためスキップしました"
     warn_unsupported:
       en: "%{flag} — not supported by GetCat"
       zh-CN: "%{flag} — GetCat 不支持"
+      ja: "%{flag} — GetCat では未対応です"
     empty_hint:
       en: The parsed request will be summarized here
       zh-CN: 解析结果会显示在这里
+      ja: 解析結果の概要がここに表示されます
 
 sidebar:
   rail_aria:
     en: Navigation rail
     zh-CN: 功能栏
+    ja: ナビゲーションバー
   settings:
     en: Settings…
     zh-CN: 设置…
+    ja: 設定…
   collapse:
     en: Collapse
     zh-CN: 收起
+    ja: 折りたたむ
   theme_tooltip:
     en: "Theme: %{theme} (click to switch)"
     zh-CN: "主题：%{theme}（点击切换）"
+    ja: "テーマ：%{theme}（クリックで切り替え）"
   saved:
     title:
       en: Saved requests
       zh-CN: 已保存请求
+      ja: 保存済みリクエスト
     title_with_count:
       en: "Saved requests (%{count})"
       zh-CN: "已保存请求（%{count}）"
+      ja: "保存済みリクエスト（%{count}）"
     empty_title:
       en: No saved requests yet
       zh-CN: 尚无已保存的请求
+      ja: 保存済みリクエストはまだありません
     empty_hint_prefix:
       en: Press
       zh-CN: 按
+      ja: 現在のリクエストは
     empty_hint_suffix:
       en: to save the current request
       zh-CN: 保存当前请求
+      ja: で保存できます
     row_aria:
       en: "Saved request: %{name}"
       zh-CN: "已保存请求：%{name}"
+      ja: "保存済みリクエスト：%{name}"
     delete:
       en: Delete…
       zh-CN: 删除…
+      ja: 削除…
     menu_open:
       en: Open
       zh-CN: 打开
+      ja: 開く
     menu_delete:
       en: Delete…
       zh-CN: 删除…
+      ja: 削除…
     filter_all:
       en: All
       zh-CN: 全部
+      ja: すべて
     filter_uncategorized:
       en: Uncategorized
       zh-CN: 未分类
+      ja: 未分類
     groups_aria:
       en: Categories
       zh-CN: 分类列表
+      ja: カテゴリ一覧
     group_row_aria:
       en: "Category %{name}, %{count} requests"
       zh-CN: "分类 %{name}，%{count} 条请求"
+      ja: "カテゴリ %{name}、リクエスト %{count} 件"
     menu_move_to:
       en: Move to Category
       zh-CN: 移动到分类
+      ja: カテゴリへ移動
     menu_new_group:
       en: New Category…
       zh-CN: 新建分类…
+      ja: 新しいカテゴリ…
     menu_clear_group:
       en: Remove from Category
       zh-CN: 移出分类
+      ja: カテゴリから外す
     menu_rename_group:
       en: Rename Category…
       zh-CN: 重命名分类…
+      ja: カテゴリ名を変更…
     menu_dissolve_group:
       en: Dissolve Category
       zh-CN: 解散分类
+      ja: カテゴリを解除
   templates:
     title:
       en: Templates
       zh-CN: 模板
+      ja: テンプレート
     hint:
       en: Replace YOUR_API_KEY before sending
       zh-CN: 发送前先替换 YOUR_API_KEY
+      ja: 送信前に YOUR_API_KEY を置き換えてください
     row_aria:
       en: "Template: %{name} (%{variant})"
       zh-CN: "模板：%{name}（%{variant}）"
+      ja: "テンプレート：%{name}（%{variant}）"
     variant_text:
       en: Plain text
       zh-CN: 纯文本
+      ja: テキストのみ
     variant_vision:
       en: With image
       zh-CN: 含图片
+      ja: 画像付き
     variant_stream:
       en: Streaming (SSE)
       zh-CN: 流式（SSE）
+      ja: ストリーミング（SSE）
     variant_mcp_stateless:
       en: 2026-07-28 · stateless
       zh-CN: 2026-07-28 · 无状态
+      ja: 2026-07-28 · ステートレス
     variant_mcp_session:
       en: 2025-06-18 · session
       zh-CN: 2025-06-18 · 会话式
+      ja: 2025-06-18 · セッション
 
 tab:
   untitled:
     en: New request
     zh-CN: 新请求
+    ja: 新しいリクエスト
   new:
     en: New request
     zh-CN: 新建请求
+    ja: 新しいリクエスト
   close:
     en: Close tab
     zh-CN: 关闭 Tab
+    ja: タブを閉じる
   aria:
     en: "Request tab: %{title}"
     zh-CN: "请求 Tab：%{title}"
+    ja: "リクエストタブ：%{title}"
   aria_dirty:
     en: "Request tab: %{title} (unsaved)"
     zh-CN: "请求 Tab：%{title}（未保存）"
+    ja: "リクエストタブ：%{title}（未保存）"
   scroll_left:
     en: Show tabs on the left
     zh-CN: 向左查看标签
+    ja: 左側のタブを表示
   scroll_right:
     en: Show tabs on the right
     zh-CN: 向右查看标签
+    ja: 右側のタブを表示
   prev_page:
     en: Previous page of tabs
     zh-CN: 上一页标签
+    ja: 前のページのタブ
   next_page:
     en: Next page of tabs
     zh-CN: 下一页标签
+    ja: 次のページのタブ
   rows_toggle:
     en: Show tabs on up to three rows
     zh-CN: 最多三行展示标签
+    ja: タブを最大 3 行で表示
   rows_toggle_off:
     en: Show tabs on a single row
     zh-CN: 单行展示标签
+    ja: タブを 1 行で表示
   menu_duplicate:
     en: Duplicate tab
     zh-CN: 复制当前 Tab
+    ja: タブを複製
   menu_close_others:
     en: Close other tabs
     zh-CN: 关闭其他 Tab
+    ja: 他のタブを閉じる
   menu_close_all:
     en: Close all tabs
     zh-CN: 关闭所有 Tab
+    ja: すべてのタブを閉じる
   strip_aria:
     en: Request tabs
     zh-CN: 请求标签栏
+    ja: リクエストタブバー
 
 url_bar:
   placeholder:
     en: "Enter a request URL, e.g. https://api.example.com/users/{id}"
     zh-CN: "输入请求 URL，例如 https://api.example.com/users/{id}"
+    ja: "リクエスト URL を入力（例：https://api.example.com/users/{id}）"
   method_aria:
     en: Request method
     zh-CN: 请求方法
+    ja: リクエストメソッド
   url_aria:
     en: Request URL
     zh-CN: 请求 URL
+    ja: リクエスト URL
   send:
     en: Send
     zh-CN: 发送
+    ja: 送信
   cancel:
     en: Cancel
     zh-CN: 取消
+    ja: キャンセル
   save:
     en: Save
     zh-CN: 保存
+    ja: 保存
   save_tooltip:
     en: Save request
     zh-CN: 保存请求
+    ja: リクエストを保存
   more_tooltip:
     en: More actions
     zh-CN: 更多操作
+    ja: その他の操作
   duplicate_tab:
     en: Duplicate tab
     zh-CN: 复制标签页
+    ja: タブを複製
   http_version_tooltip:
     en: HTTP version for this request
     zh-CN: 这次请求走的 HTTP 版本
+    ja: このリクエストで使う HTTP バージョン
   http_version_auto:
     en: Auto
     zh-CN: 自动
+    ja: 自動
   http_version_auto_hint:
     en: Auto (negotiate via ALPN)
     zh-CN: 自动（由 ALPN 协商）
+    ja: 自動（ALPN でネゴシエーション）
   http3_unsupported:
     en: HTTP/3 (not supported yet)
     zh-CN: HTTP/3（暂不支持）
+    ja: HTTP/3（未対応）
 
 request:
   path_params:
     en: Path parameters
     zh-CN: Path 参数
+    ja: パスパラメータ
   query_params:
     en: Query parameters
     zh-CN: Query 参数
+    ja: クエリパラメータ
   format_json:
     en: Format
     zh-CN: 格式化
+    ja: 整形
   format_json_tooltip:
     en: Re-indent the JSON body
     zh-CN: 重新缩进 JSON 请求体
+    ja: JSON ボディのインデントを整え直します
   wrap_lines:
     en: Wrap long lines
     zh-CN: 长行自动换行
+    ja: 長い行を折り返す
   hint_invalid_json:
     en: Not valid JSON — nothing to format
     zh-CN: 不是合法的 JSON，无法格式化
+    ja: 有効な JSON ではないため整形できません
   no_body:
     en: This request has no body
     zh-CN: 此请求没有 Body
+    ja: このリクエストにはボディがありません
   body_editor_aria:
     en: Request body editor
     zh-CN: 请求 Body 编辑器
+    ja: リクエストボディエディタ
   no_file:
     en: No file selected. The file is streamed when sending and never loaded into memory
     zh-CN: 尚未选择文件；发送时将以流式方式上传，内容不进入内存
+    ja: ファイルが未選択です。送信時にストリーミングでアップロードされ、メモリには読み込まれません
   hint_body_too_large:
     en: "Text body exceeds %{size}; consider a binary body to stream the file instead"
     zh-CN: "文本 Body 超过 %{size}，建议改用文件 Body 流式上传"
+    ja: "テキストボディが %{size} を超えています。ファイルボディでのストリーミング送信をおすすめします"
   hint_form_data_content_type:
     en: GetCat generates the form-data Content-Type (with boundary); the Content-Type header is ignored
     zh-CN: form-data 的 Content-Type（含 boundary）由 GetCat 生成，Headers 中的 Content-Type 将被忽略
+    ja: form-data の Content-Type（boundary 付き）は GetCat が生成します。ヘッダーの Content-Type は無視されます
   default_headers:
     en: Default headers
     zh-CN: 默认参数（Header）
+    ja: デフォルトヘッダー
   default_headers_global:
     en: Global
     zh-CN: 全局
+    ja: グローバル
   default_headers_desc:
     en: Sent with every request unless this request sets the same header
     zh-CN: 每个请求都会自动带上；本请求填了同名 Header 时以本请求为准
+    ja: すべてのリクエストに自動で付与されます。このリクエストに同名のヘッダーがある場合はそちらが優先されます
   default_headers_overridden:
     en: Overridden by a header in this request
     zh-CN: 已被本请求的同名 Header 覆盖
+    ja: このリクエストの同名ヘッダーで上書きされています
 
 kv:
   param_key:
     en: Name
     zh-CN: 参数名
+    ja: 名前
   header_key:
     en: Header
     zh-CN: Header 名
+    ja: ヘッダー名
   field_key:
     en: Field
     zh-CN: 字段名
+    ja: フィールド名
   value:
     en: Value
     zh-CN: 值
+    ja: 値
   description:
     en: Description
     zh-CN: 描述
+    ja: 説明
   row_aria:
     en: "%{what} (row %{row})"
     zh-CN: "%{what}（第 %{row} 行）"
+    ja: "%{what}（%{row} 行目）"
   enabled:
     en: Enabled
     zh-CN: 启用
+    ja: 有効
   remove:
     en: Remove
     zh-CN: 删除
+    ja: 削除
   choose_file_aria:
     en: Choose file
     zh-CN: 选择文件
+    ja: ファイルを選択
   no_file:
     en: No file selected
     zh-CN: 未选择文件
+    ja: ファイルが未選択です
   kind_toggle:
     en: "Value type: click to switch between Text and File"
     zh-CN: "值类型：点击在 Text / File 间切换"
+    ja: 値の種類：クリックで Text / File を切り替え
   no_path_params:
     en: "The URL has no {name}-style path parameters"
     zh-CN: "URL 中没有 {name} 形式的 Path 参数"
+    ja: "URL に {name} 形式のパスパラメータはありません"
 
 response:
   idle_prefix:
     en: Enter a URL and click Send, or press
     zh-CN: 输入 URL 后点击发送，或按
+    ja: URL を入力して「送信」をクリック、または
   in_flight:
     en: "Sending… received %{received} / %{total}"
     zh-CN: "发送中… 已接收 %{received} / %{total}"
+    ja: "送信中… %{received} / %{total} 受信"
   in_flight_unknown:
     en: "Sending… received %{received}"
     zh-CN: "发送中… 已接收 %{received}"
+    ja: "送信中… %{received} 受信"
   cancelled:
     en: Request cancelled
     zh-CN: 请求已取消
+    ja: リクエストをキャンセルしました
   status_idle:
     en: Not sent yet
     zh-CN: 尚未发送
+    ja: 未送信
   status_in_flight:
     en: "Sending… %{elapsed}"
     zh-CN: "发送中… %{elapsed}"
+    ja: "送信中… %{elapsed}"
   status_cancelled:
     en: Cancelled
     zh-CN: 已取消
+    ja: キャンセル済み
   status_failed:
     en: Request failed
     zh-CN: 请求失败
+    ja: リクエスト失敗
   find:
     en: Find in response
     zh-CN: 在响应中查找
+    ja: レスポンス内を検索
   copy_body:
     en: Copy body
     zh-CN: 复制响应体
+    ja: ボディをコピー
   copy_body_preview:
     en: Copy the previewed part
     zh-CN: 复制预览部分
+    ja: プレビュー部分をコピー
   copy_headers:
     en: Copy all headers
     zh-CN: 复制全部响应头
+    ja: すべてのヘッダーをコピー
   copy_header:
     en: Copy this header
     zh-CN: 复制这一行
+    ja: このヘッダーをコピー
   save_to_file:
     en: Save to file…
     zh-CN: 保存到文件…
+    ja: ファイルに保存…
   clear:
     en: Clear response
     zh-CN: 清空响应
+    ja: レスポンスをクリア
   wrap_lines:
     en: Wrap long lines
     zh-CN: 长行自动换行
+    ja: 長い行を折り返す
   wrap_unavailable:
     en: Large responses render line by line and can’t wrap; scroll sideways instead
     zh-CN: 大响应按行渲染，无法换行，请横向滚动查看
+    ja: 大きなレスポンスは行単位で描画するため折り返せません。横にスクロールしてください
   binary_no_preview:
     en: Binary content has no text preview; use “Save to file…” in the top right to export it
     zh-CN: 二进制内容不提供文本预览，可用右上角「保存到文件…」导出
+    ja: バイナリ内容はテキストプレビューできません。右上の「ファイルに保存…」で書き出してください
   empty_body:
     en: Empty response body
     zh-CN: 响应体为空
+    ja: レスポンスボディは空です
   body_aria:
     en: Response body
     zh-CN: 响应 Body
+    ja: レスポンスボディ
   headers_aria:
     en: Response headers
     zh-CN: 响应头列表
+    ja: レスポンスヘッダー一覧
   lines_aria:
     en: Response body (plain text view)
     zh-CN: 响应正文（纯文本视图）
+    ja: レスポンスボディ（プレーンテキスト表示）
   line_truncated:
     en: "… (%{size} omitted)"
     zh-CN: "…（已省略 %{size}）"
+    ja: "…（%{size} 省略）"
   open_with_system:
     en: Open with system app
     zh-CN: 用系统程序打开
+    ja: システムのアプリで開く
   summary:
     size:
       en: Size
       zh-CN: 大小
+      ja: サイズ
     type:
       en: Type
       zh-CN: 类型
+      ja: 種類
     duration:
       en: Duration
       zh-CN: 耗时
+      ja: 所要時間
     temp_file:
       en: Temp file
       zh-CN: 临时文件
+      ja: 一時ファイル
   tier:
     virtual:
       en: "Large response: over %{size} or %{lines} lines; switched to plain text mode"
       zh-CN: "大响应：超过 %{size} 或 %{lines} 行，已切换为纯文本模式"
+      ja: "大きなレスポンス：%{size} または %{lines} 行を超えたため、プレーンテキストモードに切り替えました"
     preview:
       en: "Response exceeds %{size}; written to a temp file, previewing the first %{head}"
       zh-CN: "响应超过 %{size}，已写入临时文件，仅预览前 %{head}"
+      ja: "レスポンスが %{size} を超えたため一時ファイルに書き出しました。先頭 %{head} のみプレビューします"
   # SSE（text/event-stream）响应：Body 区的三视图段控与统计条
   sse_mode_text:
     en: Text
     zh-CN: 文本
+    ja: テキスト
   sse_mode_events:
     en: Events
     zh-CN: 事件流
+    ja: イベント
   sse_mode_raw:
     en: Raw
     zh-CN: 原始
+    ja: Raw
   sse_streaming:
     en: "Streaming… %{events} events"
     zh-CN: "流式接收中… %{events} 个事件"
+    ja: "ストリーミング受信中… %{events} イベント"
   sse_stats_ttft:
     en: "TTFT %{value}"
     zh-CN: "TTFT %{value}"
+    ja: "TTFT %{value}"
   sse_stats_events:
     en: "%{count} events"
     zh-CN: "%{count} 个事件"
+    ja: "%{count} イベント"
   sse_stats_input_tokens:
     en: "%{count} tokens in"
     zh-CN: "输入 %{count} tokens"
+    ja: "入力 %{count} トークン"
   sse_stats_output_tokens:
     en: "%{count} tokens out"
     zh-CN: "输出 %{count} tokens"
+    ja: "出力 %{count} トークン"
   sse_stats_rate:
     en: "%{rate} tok/s"
     zh-CN: "%{rate} tok/s"
+    ja: "%{rate} tok/s"
   sse_default_event:
     en: message
     zh-CN: message
+    ja: message
   sse_events_aria:
     en: SSE event list
     zh-CN: SSE 事件列表
+    ja: SSE イベント一覧
   sse_live_aria:
     en: Live streaming response
     zh-CN: 流式响应实时内容
+    ja: ストリーミングレスポンスのライブ内容
   section_certificate:
     en: Certificate
     zh-CN: 证书
+    ja: 証明書
   cert_banner:
     en: "Certificate problem: %{issue}. The request still went through because TLS verification is off."
     zh-CN: "证书异常：%{issue}。TLS 校验已关闭，请求仍照常发出。"
+    ja: "証明書に問題があります：%{issue}。TLS 検証がオフのため、リクエストはそのまま送信されました。"
   cert_view:
     en: View certificate
     zh-CN: 查看证书
+    ja: 証明書を表示
   forced_version_hint:
     en: "This request was forced to %{version}. If the server doesn't speak it, switch the selector in the URL bar back to Auto."
     zh-CN: "这次请求被强制走 %{version}。如果服务端不支持，把 URL 栏里的选择器切回「自动」。"
+    ja: "このリクエストは %{version} に固定されています。サーバーが対応していない場合は、URL バーのセレクタを「自動」に戻してください。"
 
 # 证书页签的字段名与体检结论。字段值（主体、颁发者、SAN）是证书原文，不翻译。
 cert:
@@ -542,74 +713,96 @@ cert:
     expired:
       en: expired
       zh-CN: 已过期
+      ja: 有効期限切れ
     not_yet_valid:
       en: not valid yet (check the system clock)
       zh-CN: 尚未生效（请检查系统时钟）
+      ja: まだ有効になっていません（システムの時計を確認してください）
     hostname_mismatch:
       en: hostname does not match the certificate
       zh-CN: 主机名与证书不符
+      ja: ホスト名が証明書と一致しません
     self_signed:
       en: self-signed, no trust chain
       zh-CN: 自签名，没有信任链
+      ja: 自己署名で、信頼チェーンがありません
   subject:
     en: Subject
     zh-CN: 主体
+    ja: サブジェクト
   issuer:
     en: Issuer
     zh-CN: 颁发者
+    ja: 発行者
   not_before:
     en: Valid from
     zh-CN: 生效时间
+    ja: 有効期間の開始
   not_after:
     en: Valid until
     zh-CN: 到期时间
+    ja: 有効期間の終了
   san:
     en: Alt names
     zh-CN: 备用名称
+    ja: 代替名
   san_empty:
     en: none (a certificate without SAN is not trusted by modern clients)
     zh-CN: 无（不带 SAN 的证书不被现代客户端信任）
+    ja: なし（SAN のない証明書は最近のクライアントでは信頼されません）
   serial:
     en: Serial
     zh-CN: 序列号
+    ja: シリアル番号
   signature_algorithm:
     en: Signature
     zh-CN: 签名算法
+    ja: 署名アルゴリズム
   fingerprint:
     en: SHA-256
     zh-CN: SHA-256 指纹
+    ja: SHA-256 フィンガープリント
 
 notice:
   virtual_search:
     en: Search isn’t available in plain text view; save to a file and search in an editor
     zh-CN: 纯文本视图暂不支持搜索：可「保存到文件…」后用编辑器查找
+    ja: プレーンテキスト表示では検索できません。「ファイルに保存…」してからエディタで検索してください
   sse_events_search:
     en: Search isn’t available in the event list; switch to the Text or Raw view
     zh-CN: 事件列表视图不支持搜索：请切换到「文本」或「原始」视图再搜
+    ja: イベント一覧では検索できません。「テキスト」または「Raw」表示に切り替えてください
 
   no_response:
     en: No response to search
     zh-CN: 没有可搜索的响应
+    ja: 検索できるレスポンスがありません
   binary_search:
     en: Binary content can’t be searched
     zh-CN: 二进制内容不提供搜索
+    ja: バイナリ内容は検索できません
   empty_body_search:
     en: Empty response body, nothing to search
     zh-CN: 响应体为空，无可搜索内容
+    ja: レスポンスボディが空のため、検索する内容がありません
   saved_to:
     en: "Saved to %{path}"
     zh-CN: "已保存到 %{path}"
+    ja: "%{path} に保存しました"
   save_failed:
     en: "Couldn’t save: %{error}"
     zh-CN: "保存失败：%{error}"
+    ja: "保存できませんでした：%{error}"
 
 content:
   text:
     en: Text
     zh-CN: 文本
+    ja: テキスト
   binary:
     en: Binary
     zh-CN: 二进制
+    ja: バイナリ
 
 # 请求错误：kind 是短标签（状态行 / 标题），detail 只在种类本身没有附加信息时使用
 error:
@@ -617,295 +810,388 @@ error:
     invalid_url:
       en: Invalid URL
       zh-CN: URL 无效
+      ja: URL が無効です
     invalid_header:
       en: Invalid header
       zh-CN: Header 无效
+      ja: ヘッダーが無効です
     unsupported:
       en: Unsupported
       zh-CN: 暂不支持
+      ja: 未対応
     dns:
       en: DNS lookup failed
       zh-CN: DNS 失败
+      ja: DNS 解決に失敗
     connection_refused:
       en: Connection refused
       zh-CN: 连接被拒绝
+      ja: 接続が拒否されました
     tls:
       en: TLS error
       zh-CN: TLS 错误
+      ja: TLS エラー
     timeout:
       en: Timeout
       zh-CN: 超时
+      ja: タイムアウト
     spill:
       en: Couldn’t write temp file
       zh-CN: 落盘失败
+      ja: 一時ファイルを書き込めません
     file_body:
       en: File not readable
       zh-CN: 文件不可读
+      ja: ファイルを読み取れません
     cancelled:
       en: Cancelled
       zh-CN: 已取消
+      ja: キャンセル済み
     other:
       en: Network error
       zh-CN: 网络错误
+      ja: ネットワークエラー
     background_failed:
       en: Background processing failed
       zh-CN: 后台处理异常
+      ja: バックグラウンド処理に失敗しました
   detail:
     timeout:
       en: The connection timed out
       zh-CN: 连接超时
+      ja: 接続がタイムアウトしました
 
 dialog:
   delete_saved:
     title:
       en: "Delete “%{name}”?"
       zh-CN: "删除“%{name}”？"
+      ja: "「%{name}」を削除しますか？"
     body:
       en: This can’t be undone.
       zh-CN: 此操作不可撤销。
+      ja: この操作は元に戻せません。
   save_request:
     title:
       en: Save request
       zh-CN: 保存请求
+      ja: リクエストを保存
     name:
       en: Request name
       zh-CN: 请求名称
+      ja: リクエスト名
     group_label:
       en: Category
       zh-CN: 分类
+      ja: カテゴリ
     no_group:
       en: No category
       zh-CN: 无分类
+      ja: カテゴリなし
     new_group:
       en: New category…
       zh-CN: 新建分类…
+      ja: 新しいカテゴリ…
     new_group_name:
       en: Category name
       zh-CN: 分类名称
+      ja: カテゴリ名
   rename_group:
     title:
       en: "Rename category “%{name}”"
       zh-CN: "重命名分类「%{name}」"
+      ja: "カテゴリ「%{name}」の名前を変更"
     body:
       en: Renaming to an existing category merges them.
       zh-CN: 改成已存在的分类名会合并两个分类。
+      ja: 既存のカテゴリ名に変更すると、2 つのカテゴリは統合されます。
     name:
       en: Category name
       zh-CN: 分类名称
+      ja: カテゴリ名
   dissolve_group:
     title:
       en: "Dissolve category “%{name}”?"
       zh-CN: "解散分类「%{name}」？"
+      ja: "カテゴリ「%{name}」を解除しますか？"
     body:
       en: Its requests move back to Uncategorized. No request is deleted.
       zh-CN: 该分类下的请求会回到未分类，不会删除任何请求。
+      ja: このカテゴリのリクエストは未分類に戻ります。リクエストは削除されません。
     ok:
       en: Dissolve
       zh-CN: 解散
+      ja: 解除
   move_to_new_group:
     title:
       en: New category
       zh-CN: 新建分类
+      ja: 新しいカテゴリ
     name:
       en: Category name
       zh-CN: 分类名称
+      ja: カテゴリ名
 
 status:
   update_restart:
     en: "Restart to finish updating to v%{version}"
     zh-CN: "重新启动以完成更新 v%{version}"
+    ja: "再起動して v%{version} への更新を完了"
   update_restart_tooltip:
     en: The update is installed; restart to apply it
     zh-CN: 新版本已安装，重新启动后生效
+    ja: 更新はインストール済みです。再起動すると適用されます
   update_available:
     en: "v%{version} available"
     zh-CN: "有新版本 v%{version}"
+    ja: "v%{version} が利用可能"
   update_available_tooltip:
     en: Open About to review and install
     zh-CN: 在「关于」页查看并安装
+    ja: 「バージョン情報」で確認してインストール
   split_right:
     en: Response on the right
     zh-CN: 响应区在右侧
+    ja: レスポンスを右側に表示
   split_bottom:
     en: Response at the bottom
     zh-CN: 响应区在下方
+    ja: レスポンスを下側に表示
 
 store:
   unavailable:
     en: "Storage unavailable: %{error}"
     zh-CN: "持久化不可用：%{error}"
+    ja: "ストレージを利用できません：%{error}"
   write_failed:
     en: "Couldn’t write to storage: %{error}"
     zh-CN: "持久化写入失败：%{error}"
+    ja: "ストレージに書き込めませんでした：%{error}"
 
 update:
   idle:
     en: "Not checked yet (current v%{current})"
     zh-CN: "尚未检查更新（当前 v%{current}）"
+    ja: "まだ確認していません（現在 v%{current}）"
   checking:
     en: Checking for updates…
     zh-CN: 正在检查更新…
+    ja: 更新を確認中…
   up_to_date:
     en: "Up to date (v%{current})"
     zh-CN: "已是最新版本（v%{current}）"
+    ja: "最新版です（v%{current}）"
   available:
     en: "v%{version} is available"
     zh-CN: "发现新版本 v%{version}"
+    ja: "v%{version} が利用可能です"
   downloading:
     en: "Downloading %{downloaded} / %{total}"
     zh-CN: "正在下载 %{downloaded} / %{total}"
+    ja: "ダウンロード中 %{downloaded} / %{total}"
   downloaded:
     en: "Downloaded %{downloaded}"
     zh-CN: "已下载 %{downloaded}"
+    ja: "%{downloaded} をダウンロードしました"
   installing:
     en: Installing…
     zh-CN: 正在安装…
+    ja: インストール中…
   staged:
     en: "v%{version} installed; restart to apply"
     zh-CN: "v%{version} 已安装，重新启动后生效"
+    ja: "v%{version} をインストールしました。再起動すると適用されます"
   failed:
     en: "Update failed: %{error}"
     zh-CN: "更新失败：%{error}"
+    ja: "更新に失敗しました：%{error}"
 
 settings:
   title:
     en: Settings
     zh-CN: 设置
+    ja: 設定
   reset:
     en: Reset to defaults
     zh-CN: 恢复默认
+    ja: デフォルトに戻す
   general:
     en: General
     zh-CN: 通用
+    ja: 一般
   request:
     en: Request
     zh-CN: 请求
+    ja: リクエスト
   data:
     en: Data
     zh-CN: 数据
+    ja: データ
   about:
     en: About
     zh-CN: 关于
+    ja: バージョン情報
   appearance:
     en: Appearance
     zh-CN: 外观
+    ja: 外観
   theme:
     en: Theme
     zh-CN: 主题
+    ja: テーマ
   theme_desc:
     en: System follows the macOS appearance automatically
     zh-CN: 跟随系统会随 macOS 的外观自动切换
+    ja: 「システムに従う」を選ぶと macOS の外観に合わせて自動で切り替わります
   language:
     en: Language
     zh-CN: 语言
+    ja: 言語
   language_desc:
     en: Follow system picks from your preferred languages and falls back to English
     zh-CN: 跟随系统按系统首选语言选择，没有匹配的语言时使用英文
+    ja: 「システムに従う」はシステムの優先言語から選び、一致する言語がなければ英語になります
   editor_font_size:
     en: Editor font size
     zh-CN: 编辑器字号
+    ja: エディタのフォントサイズ
   editor_font_size_desc:
     en: Monospace size for the request body and response (px)
     zh-CN: 请求 Body 与响应正文使用的等宽字号（px）
+    ja: リクエストボディとレスポンス本文に使う等幅フォントのサイズ（px）
   timeout:
     en: Timeout
     zh-CN: 超时
+    ja: タイムアウト
   timeout_total:
     en: Total timeout (s)
     zh-CN: 总超时（秒）
+    ja: 合計タイムアウト（秒）
   timeout_desc:
     en: Upper bound from connect to the last byte; 0 means unlimited. The connect timeout is fixed at 10 s
     zh-CN: 从连接到读完响应的总时长上限；0 表示不限。连接超时固定 10 秒
+    ja: 接続から最後のバイトを受信するまでの上限です。0 は無制限。接続タイムアウトは 10 秒固定です
   redirects:
     en: Redirects
     zh-CN: 跳转
+    ja: リダイレクト
   follow_redirects:
     en: Follow 3xx redirects
     zh-CN: 自动跟随 3xx 跳转
+    ja: 3xx リダイレクトに従う
   follow_redirects_desc:
     en: When off, 301 / 302 responses are shown as-is
     zh-CN: 关闭后直接显示 301 / 302 等响应本身
+    ja: オフにすると 301 / 302 などのレスポンスをそのまま表示します
   max_redirects:
     en: Maximum redirects
     zh-CN: 最大跳转次数
+    ja: 最大リダイレクト回数
   security:
     en: Security
     zh-CN: 安全
+    ja: セキュリティ
   verify_tls:
     en: Verify TLS certificates
     zh-CN: 校验 TLS 证书
+    ja: TLS 証明書を検証する
   verify_tls_desc:
     en: On by default — a bad certificate aborts the handshake. Turn it off to debug local self-signed endpoints; certificate problems are still detected and shown in the response's Certificate tab.
     zh-CN: 默认打开，遇到坏证书直接握手失败。调试本地自签名接口时可关闭；关闭后依然会检测证书问题并在响应的「证书」页签里展示。
+    ja: デフォルトはオンで、不正な証明書ではハンドシェイクが失敗します。ローカルの自己署名エンドポイントをデバッグするときはオフにできます。オフでも証明書の問題は検出され、レスポンスの「証明書」タブに表示されます。
   storage:
     en: Storage
     zh-CN: 存储位置
+    ja: 保存場所
   storage_desc:
     en: Saved requests, drafts and settings live here as JSON files; back them up or manage them with Git
     zh-CN: 已保存请求、草稿与设置都以 JSON 文件形式放在这里，可直接备份或用 Git 管理
+    ja: 保存済みリクエスト、下書き、設定はここに JSON ファイルとして置かれます。そのままバックアップしたり Git で管理したりできます
   data_dir:
     en: Data directory
     zh-CN: 数据目录
+    ja: データディレクトリ
   data_dir_unavailable:
     en: (storage unavailable)
     zh-CN: （持久化不可用）
+    ja: （ストレージを利用できません）
   reveal_finder:
     en: Reveal in Finder
     zh-CN: 在访达中显示
+    ja: Finder で表示
   reveal_folder:
     en: Open containing folder
     zh-CN: 打开所在文件夹
+    ja: 保存先フォルダを開く
   about_blurb:
     en: An HTTP debugging tool built on gpui and gpui-component.
     zh-CN: 基于 gpui 与 gpui-component 构建的 HTTP 调试工具。
+    ja: gpui と gpui-component で作られた HTTP デバッグツールです。
   version:
     en: Version
     zh-CN: 版本
+    ja: バージョン
   author:
     en: Author
     zh-CN: 作者
+    ja: 作者
   license:
     en: License
     zh-CN: 许可证
+    ja: ライセンス
   repository:
     en: Repository
     zh-CN: 项目主页
+    ja: リポジトリ
   updates_page:
     en: Updates
     zh-CN: 检查更新
+    ja: アップデート
   check_on_launch:
     en: Check for updates on launch
     zh-CN: 启动时检查更新
+    ja: 起動時に更新を確認する
   check_on_launch_desc:
     en: Queries the update source once, 5 s after launch; never downloads automatically
     zh-CN: 启动 5 秒后向更新源查询一次，不会自动下载
+    ja: 起動 5 秒後に更新ソースへ 1 回だけ問い合わせます。自動ではダウンロードしません
   update_source:
     en: Update source
     zh-CN: 更新源
+    ja: 更新ソース
   update_source_desc:
     en: Auto picks the China mainland mirror when the UI language is Chinese, otherwise GitHub Releases; both serve identical signed builds
     zh-CN: 自动模式下界面语言为中文时走中国大陆镜像，否则走 GitHub Releases；两个源的安装包与签名完全一致
+    ja: 自動では UI の言語が中国語のとき中国本土ミラーを、それ以外は GitHub Releases を使います。どちらも同一の署名済みビルドを配信します
   update_unsupported:
     en: No automatic updates on this platform; download from the releases page
     zh-CN: 此平台暂无自动更新，请前往发布页下载
+    ja: このプラットフォームでは自動更新に対応していません。リリースページからダウンロードしてください
   install_update:
     en: Download and install
     zh-CN: 下载并安装
+    ja: ダウンロードしてインストール
   restart:
     en: Restart
     zh-CN: 重新启动
+    ja: 再起動
   retry:
     en: Retry
     zh-CN: 重试
+    ja: 再試行
   check_updates:
     en: Check for updates
     zh-CN: 检查更新
+    ja: 更新を確認
   releases:
     en: Releases
     zh-CN: 发布页
+    ja: リリースページ
   update_dev_build:
     en: Development builds can’t update in place; download from the releases page
     zh-CN: 开发构建无法就地更新，请从发布页下载
+    ja: 開発ビルドはその場で更新できません。リリースページからダウンロードしてください
   update_translocated:
     en: Move GetCat to the Applications folder before updating
     zh-CN: 请先把 GetCat 拖到「应用程序」文件夹，再进行更新
+    ja: 更新の前に GetCat を「アプリケーション」フォルダへ移動してください
