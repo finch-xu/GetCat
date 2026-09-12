@@ -2298,7 +2298,7 @@ dependencies = [
 
 [[package]]
 name = "getcat-app"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "embed-resource",
@@ -2317,7 +2317,7 @@ dependencies = [
 
 [[package]]
 name = "getcat-core"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "bytes",
  "directories",
