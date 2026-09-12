@@ -1151,10 +1151,6 @@ settings:
     en: Check for updates on launch
     zh-CN: 启动时检查更新
     ja: 起動時に更新を確認する
-  check_on_launch_desc:
-    en: Queries the update source once, 5 s after launch; never downloads automatically
-    zh-CN: 启动 5 秒后向更新源查询一次，不会自动下载
-    ja: 起動 5 秒後に更新ソースへ 1 回だけ問い合わせます。自動ではダウンロードしません
   update_source:
     en: Update source
     zh-CN: 更新源

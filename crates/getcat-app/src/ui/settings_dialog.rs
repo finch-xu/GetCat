@@ -360,17 +360,14 @@ fn updates_page() -> SettingPage {
         .icon(IconName::ArrowDown)
         .group(
             SettingGroup::new()
-                .item(
-                    SettingItem::new(
-                        tr!("settings.check_on_launch"),
-                        SettingField::switch(
-                            |cx| settings::settings(cx).check_updates_on_launch,
-                            |value, cx| settings::update(cx, |s| s.check_updates_on_launch = value),
-                        )
-                        .default_value(true),
+                .item(SettingItem::new(
+                    tr!("settings.check_on_launch"),
+                    SettingField::switch(
+                        |cx| settings::settings(cx).check_updates_on_launch,
+                        |value, cx| settings::update(cx, |s| s.check_updates_on_launch = value),
                     )
-                    .description(tr!("settings.check_on_launch_desc")),
-                )
+                    .default_value(true),
+                ))
                 .item(
                     SettingItem::new(
                         tr!("settings.update_source"),
