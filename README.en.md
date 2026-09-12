@@ -1,3 +1,7 @@
+<div align="right">
+<a href="README.md">简体中文</a> · <b>English</b> · <a href="README.ja.md">日本語</a>
+</div>
+
 <div align="center">
 
 <img src="crates/getcat-app/assets/logo/getcat.png" width="128" alt="GetCat">
@@ -17,7 +21,7 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 
-**English** · [简体中文](README.md) · [DeepWiki Docs](https://deepwiki.com/finch-xu/GetCat) · [Official Site](https://getcat.io/)
+[DeepWiki Docs](https://deepwiki.com/finch-xu/GetCat) · [Official Site](https://getcat.io/)
 
 <img src="assets/screenshot.png" width="900" alt="GetCat main window: request builder on the left, response viewer on the right">
 
@@ -31,7 +35,7 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 - **LLM streaming debugging**: SSE (text/event-stream) responses render as they arrive — no waiting for the stream to finish. The stream formats of OpenAI Chat Completions / Responses and Anthropic Messages are recognized automatically, with three views (event list / assembled text / raw) plus TTFT, event count, token usage, and generation-rate stats. The sidebar ships request templates for all three APIs (plain text / with image / streaming), and for both MCP protocol eras.
 - **Commands in and out**: the right-hand rail turns the current request into a cURL / Python snippet, and takes one back — paste a curl command (a browser's "Copy as cURL" works as-is) and it becomes a new tab, with anything that couldn't be carried over listed explicitly.
 - **Your data is yours**: no history, no stored responses, nothing uploaded anywhere. Saved requests, drafts, and settings are pretty-printed JSON files you can hand-edit and track in Git.
-- **Theme follows the system**, or pin it to light / dark. The title bar is custom-drawn, so all three platforms look the same.
+- **Theme and language follow the system**, or pin them to light / dark and English / Chinese. The title bar is custom-drawn, so all three platforms look the same.
 - **Accessible**: every control has an accessible name and works with screen readers.
 
 ## Install
@@ -133,7 +137,7 @@ Neither is code-signed yet, so SmartScreen will stop it the first time. For the 
 | Search in response | ⌘ F | Ctrl F |
 | Settings | ⌘ , | Ctrl , |
 
-Settings cover request timeout, redirects, TLS verification, editor font size, and whether to check for updates at startup.
+Settings cover the interface language (system / English / Chinese), request timeout, redirects, TLS verification, editor font size, and whether to check for updates at startup.
 
 ### Data directory
 
