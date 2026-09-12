@@ -40,7 +40,7 @@ GPU レンダリング · 低リソース · アカウント不要 · データ�
 
 ## インストール
 
-お使いのプラットフォーム向けのパッケージをダウンロードしてください。「グローバル」は [GitHub Releases](https://github.com/finch-xu/GetCat/releases)、「中国ミラー」は中国本土のミラー（Alibaba Cloud OSS）を指します。どちらも同じファイルで、リンクは常に最新バージョンを指します：
+お使いのプラットフォーム向けのパッケージをダウンロードしてください [GitHub Releases](https://github.com/finch-xu/GetCat/releases)
 
 <table>
   <thead>

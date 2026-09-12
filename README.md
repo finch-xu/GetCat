@@ -40,7 +40,7 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 
 ## 安装
 
-下载对应平台的包。「全球下载」走 [GitHub Releases](https://github.com/finch-xu/GetCat/releases)，「中国下载」走国内镜像（阿里云 OSS），两边文件相同，链接始终指向最新版本：
+下载对应平台的包 [GitHub Releases](https://github.com/finch-xu/GetCat/releases)
 
 <table>
   <thead>

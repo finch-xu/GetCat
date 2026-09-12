@@ -40,7 +40,7 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 
 ## Install
 
-Download the package for your platform. **Global** links go to [GitHub Releases](https://github.com/finch-xu/GetCat/releases); **China mirror** links go to a mirror in mainland China (Alibaba Cloud OSS). Both serve identical files and always point at the latest version:
+Download the package for your platform [GitHub Releases](https://github.com/finch-xu/GetCat/releases)
 
 <table>
   <thead>
