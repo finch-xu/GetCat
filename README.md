@@ -36,14 +36,14 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 
 ## 安装
 
-到 [Releases](https://github.com/finch-xu/GetCat/releases) 下载对应平台的包：
+下载对应平台的包。「全球下载」走 [GitHub Releases](https://github.com/finch-xu/GetCat/releases)，「中国下载」走国内镜像（阿里云 OSS），两边文件相同，链接始终指向最新版本：
 
-| 平台 | 文件 | 说明 |
-|---|---|---|
-| macOS（Apple Silicon / Intel） | `GetCat-macos-arm64.dmg` / `GetCat-macos-x64.dmg` | 已签名公证，拖进「应用程序」即可 |
-| Linux（x64 / arm64） | `GetCat-linux-x64.tar.gz` / `GetCat-linux-arm64.tar.gz` | 解压得到 `getcat`，系统要求见下 |
-| Windows（安装版，x64 / arm64） | `GetCat-windows-x64.msi` / `GetCat-windows-arm64.msi` | 装到当前用户目录，不需要管理员；开始菜单可启动 |
-| Windows（免安装，x64 / arm64） | `GetCat-windows-x64.exe` / `GetCat-windows-arm64.exe` | 单文件，放哪都能跑，系统要求见下 |
+| 平台 | 文件 | 下载 | 说明 |
+|---|---|---|---|
+| macOS（Apple Silicon / Intel） | `GetCat-macos-arm64.dmg`<br>`GetCat-macos-x64.dmg` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg)<br>[全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg) | 已签名公证，拖进「应用程序」即可 |
+| Linux（x64 / arm64） | `GetCat-linux-x64.tar.gz`<br>`GetCat-linux-arm64.tar.gz` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz)<br>[全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz) | 解压得到 `getcat`，系统要求见下 |
+| Windows（免安装，x64 / arm64）**推荐** | `GetCat-windows-x64.exe`<br>`GetCat-windows-arm64.exe` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe)<br>[全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe) | 单文件，放哪都能跑，系统要求见下 |
+| Windows（安装版，x64 / arm64） | `GetCat-windows-x64.msi`<br>`GetCat-windows-arm64.msi` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi)<br>[全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi) | 装到当前用户目录，不需要管理员；开始菜单可启动 |
 
 <details>
 <summary>兼容的 Linux 系统版本</summary>
@@ -97,10 +97,10 @@ vulkaninfo --summary
 
 需要 **Windows 10 1803（2018 年 4 月更新）及以上**，或 Windows 11。界面走 Direct3D 11 渲染，2010 年前后的显卡就够（feature level 10.1 起），不要求 DirectX 12。
 
-两个版本都能用，装哪个看习惯（ARM 设备，如骁龙笔记本，选 `-arm64` 后缀的包）：
+两个版本都能用，推荐免安装版（ARM 设备，如骁龙笔记本，选 `-arm64` 后缀的包）：
 
+- **`GetCat-windows-<arch>.exe`（免安装，推荐）**：单文件，放 U 盘或任意目录直接双击，不写注册表。
 - **`GetCat-windows-<arch>.msi`（安装版）**：装到 `%LOCALAPPDATA%\Programs\GetCat`，不需要管理员权限，开始菜单里会出现 GetCat，也能从「应用和功能」里卸载。
-- **`GetCat-windows-<arch>.exe`（免安装）**：单文件，放 U 盘或任意目录直接双击，不写注册表。
 
 应用内的自动更新两者都支持：装了 MSI 的会拉新的 MSI 静默升级，免安装版直接替换 exe。
 

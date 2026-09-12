@@ -36,14 +36,14 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 
 ## Install
 
-Download the package for your platform from [Releases](https://github.com/finch-xu/GetCat/releases):
+Download the package for your platform. **Global** links go to [GitHub Releases](https://github.com/finch-xu/GetCat/releases); **China mirror** links go to a mirror in mainland China (Alibaba Cloud OSS). Both serve identical files and always point at the latest version:
 
-| Platform | File | Notes |
-|---|---|---|
-| macOS (Apple Silicon / Intel) | `GetCat-macos-arm64.dmg` / `GetCat-macos-x64.dmg` | Signed and notarized — drag it into Applications |
-| Linux (x64 / arm64) | `GetCat-linux-x64.tar.gz` / `GetCat-linux-arm64.tar.gz` | Unpacks to `getcat` — see the system requirements below |
-| Windows (installer, x64 / arm64) | `GetCat-windows-x64.msi` / `GetCat-windows-arm64.msi` | Installs per-user, no administrator needed; launches from the Start menu |
-| Windows (portable, x64 / arm64) | `GetCat-windows-x64.exe` / `GetCat-windows-arm64.exe` | Single file, runs from anywhere — see the system requirements below |
+| Platform | File | Download | Notes |
+|---|---|---|---|
+| macOS (Apple Silicon / Intel) | `GetCat-macos-arm64.dmg`<br>`GetCat-macos-x64.dmg` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg)<br>[Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg) | Signed and notarized — drag it into Applications |
+| Linux (x64 / arm64) | `GetCat-linux-x64.tar.gz`<br>`GetCat-linux-arm64.tar.gz` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz)<br>[Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz) | Unpacks to `getcat` — see the system requirements below |
+| Windows (portable, x64 / arm64) **Recommended** | `GetCat-windows-x64.exe`<br>`GetCat-windows-arm64.exe` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe)<br>[Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe) | Single file, runs from anywhere — see the system requirements below |
+| Windows (installer, x64 / arm64) | `GetCat-windows-x64.msi`<br>`GetCat-windows-arm64.msi` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi)<br>[Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi) | Installs per-user, no administrator needed; launches from the Start menu |
 
 <details>
 <summary>Supported Linux distributions</summary>
@@ -97,10 +97,10 @@ If that prints nothing or reports no devices, install the driver for your GPU:
 
 Requires **Windows 10 1803 (April 2018 Update) or later**, or Windows 11. The interface renders through Direct3D 11, so graphics hardware from around 2010 is enough (feature level 10.1 and up) — DirectX 12 is not required.
 
-Either build works — pick whichever suits you (on ARM devices such as Snapdragon laptops, grab the `-arm64` package):
+Either build works; the portable build is recommended (on ARM devices such as Snapdragon laptops, grab the `-arm64` package):
 
+- **`GetCat-windows-<arch>.exe` (portable, recommended)**: a single file — keep it on a USB stick or anywhere else and double-click it; nothing is written to the registry.
 - **`GetCat-windows-<arch>.msi` (installer)**: installs into `%LOCALAPPDATA%\Programs\GetCat`, needs no administrator rights, adds a Start menu entry, and uninstalls from Apps & features.
-- **`GetCat-windows-<arch>.exe` (portable)**: a single file — keep it on a USB stick or anywhere else and double-click it; nothing is written to the registry.
 
 In-app updates work for both: an MSI install pulls the new MSI and upgrades silently, while the portable build replaces its own exe.
 
