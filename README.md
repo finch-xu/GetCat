@@ -38,16 +38,21 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 
 下载对应平台的包。「全球下载」走 [GitHub Releases](https://github.com/finch-xu/GetCat/releases)，「中国下载」走国内镜像（阿里云 OSS），两边文件相同，链接始终指向最新版本：
 
-| 平台 | 文件 | 下载 | 说明 |
-|---|---|---|---|
-| macOS（Apple Silicon） | `GetCat-macos-arm64.dmg` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg) | 已签名公证，拖进「应用程序」即可 |
-| macOS（Intel） | `GetCat-macos-x64.dmg` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg) | 已签名公证，拖进「应用程序」即可 |
-| Linux（x64） | `GetCat-linux-x64.tar.gz` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz) | 解压得到 `getcat`，系统要求见下 |
-| Linux（arm64） | `GetCat-linux-arm64.tar.gz` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz) | 解压得到 `getcat`，系统要求见下 |
-| Windows（免安装，x64） **推荐** | `GetCat-windows-x64.exe` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe) | 单文件，放哪都能跑，系统要求见下 |
-| Windows（免安装，arm64） **推荐** | `GetCat-windows-arm64.exe` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe) | 单文件，放哪都能跑，系统要求见下 |
-| Windows（安装版，x64） | `GetCat-windows-x64.msi` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi) | 装到当前用户目录，不需要管理员；开始菜单可启动 |
-| Windows（安装版，arm64） | `GetCat-windows-arm64.msi` | [全球下载](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi) · [中国下载](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi) | 装到当前用户目录，不需要管理员；开始菜单可启动 |
+<table>
+  <thead>
+    <tr><th>平台</th><th>文件</th><th>下载</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>macOS（Apple Silicon）</td><td><code>GetCat-macos-arm64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg">中国下载</a></td><td rowspan="2">已签名公证，拖进「应用程序」即可</td></tr>
+    <tr><td>macOS（Intel）</td><td><code>GetCat-macos-x64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg">中国下载</a></td></tr>
+    <tr><td>Linux（x64）</td><td><code>GetCat-linux-x64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz">中国下载</a></td><td rowspan="2">解压得到 <code>getcat</code>，系统要求见下</td></tr>
+    <tr><td>Linux（arm64）</td><td><code>GetCat-linux-arm64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz">中国下载</a></td></tr>
+    <tr><td>Windows（免安装，x64） <strong>推荐</strong></td><td><code>GetCat-windows-x64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe">中国下载</a></td><td rowspan="2">单文件，放哪都能跑，系统要求见下</td></tr>
+    <tr><td>Windows（免安装，arm64） <strong>推荐</strong></td><td><code>GetCat-windows-arm64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe">中国下载</a></td></tr>
+    <tr><td>Windows（安装版，x64）</td><td><code>GetCat-windows-x64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi">中国下载</a></td><td rowspan="2">装到当前用户目录，不需要管理员；开始菜单可启动</td></tr>
+    <tr><td>Windows（安装版，arm64）</td><td><code>GetCat-windows-arm64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi">中国下载</a></td></tr>
+  </tbody>
+</table>
 
 <details>
 <summary>兼容的 Linux 系统版本</summary>

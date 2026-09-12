@@ -38,16 +38,21 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 
 Download the package for your platform. **Global** links go to [GitHub Releases](https://github.com/finch-xu/GetCat/releases); **China mirror** links go to a mirror in mainland China (Alibaba Cloud OSS). Both serve identical files and always point at the latest version:
 
-| Platform | File | Download | Notes |
-|---|---|---|---|
-| macOS (Apple Silicon) | `GetCat-macos-arm64.dmg` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg) | Signed and notarized — drag it into Applications |
-| macOS (Intel) | `GetCat-macos-x64.dmg` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg) | Signed and notarized — drag it into Applications |
-| Linux (x64) | `GetCat-linux-x64.tar.gz` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz) | Unpacks to `getcat` — see the system requirements below |
-| Linux (arm64) | `GetCat-linux-arm64.tar.gz` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz) | Unpacks to `getcat` — see the system requirements below |
-| Windows (portable, x64) **Recommended** | `GetCat-windows-x64.exe` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe) | Single file, runs from anywhere — see the system requirements below |
-| Windows (portable, arm64) **Recommended** | `GetCat-windows-arm64.exe` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe) | Single file, runs from anywhere — see the system requirements below |
-| Windows (installer, x64) | `GetCat-windows-x64.msi` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi) | Installs per-user, no administrator needed; launches from the Start menu |
-| Windows (installer, arm64) | `GetCat-windows-arm64.msi` | [Global](https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi) · [China mirror](https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi) | Installs per-user, no administrator needed; launches from the Start menu |
+<table>
+  <thead>
+    <tr><th>Platform</th><th>File</th><th>Download</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>macOS (Apple Silicon)</td><td><code>GetCat-macos-arm64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg">China mirror</a></td><td rowspan="2">Signed and notarized — drag it into Applications</td></tr>
+    <tr><td>macOS (Intel)</td><td><code>GetCat-macos-x64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg">China mirror</a></td></tr>
+    <tr><td>Linux (x64)</td><td><code>GetCat-linux-x64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz">China mirror</a></td><td rowspan="2">Unpacks to <code>getcat</code> — see the system requirements below</td></tr>
+    <tr><td>Linux (arm64)</td><td><code>GetCat-linux-arm64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz">China mirror</a></td></tr>
+    <tr><td>Windows (portable, x64) <strong>Recommended</strong></td><td><code>GetCat-windows-x64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe">China mirror</a></td><td rowspan="2">Single file, runs from anywhere — see the system requirements below</td></tr>
+    <tr><td>Windows (portable, arm64) <strong>Recommended</strong></td><td><code>GetCat-windows-arm64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe">China mirror</a></td></tr>
+    <tr><td>Windows (installer, x64)</td><td><code>GetCat-windows-x64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi">China mirror</a></td><td rowspan="2">Installs per-user, no administrator needed; launches from the Start menu</td></tr>
+    <tr><td>Windows (installer, arm64)</td><td><code>GetCat-windows-arm64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi">China mirror</a></td></tr>
+  </tbody>
+</table>
 
 <details>
 <summary>Supported Linux distributions</summary>
