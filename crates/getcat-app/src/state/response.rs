@@ -16,7 +16,8 @@ use getcat_core::body::text::{TextDoc, trim_partial_utf8};
 use getcat_core::body::tier::{ViewTier, select_tier};
 use getcat_core::detect::{ContentKind, SNIFF_LEN, detect};
 use getcat_core::http::{BodyStore, RequestError};
-use getcat_core::model::ResponseMeta;
+use getcat_core::model::{PostOp, PreOp, ResponseMeta};
+use getcat_core::ops::{self, OpOutcome, PostReport};
 use getcat_core::sse::{self, LlmStream, SseParser, Usage};
 use gpui_kit::{SharedString, Task};
 
@@ -222,19 +223,30 @@ impl ResponseView {
 /// 它是 `RequestError::Other` 的载荷，界面上按技术细节原样显示）。
 pub(crate) const PREPARE_PANIC_PREFIX: &str = "Background processing failed";
 
+/// 后台准备完成、等 `apply_outcome` 写回的一份结果：原始存储、渲染视图、后置操作报告
+/// （没有启用的后置操作时为 None）。
+pub(crate) type Prepared = (BodyStore, ResponseView, Option<PostReport>);
+
 /// 后台线程的总入口：`catch_unwind` 包住全部 O(n) 工作（spec §11：后台 panic 不得传播到主线程）。
 /// - `None`：已取消，调用方什么都不回写；
 /// - `Some(Err(Other("后台处理异常：…")))`：准备阶段 panic，Tab 显示为失败而不是永远停在"发送中"。
 pub(crate) fn prepare_guarded(
     meta: ResponseMeta,
     body: BodyStore,
+    post_ops: Vec<PostOp>,
     should_cancel: impl FnMut() -> bool,
-) -> Option<Result<(BodyStore, ResponseView), RequestError>> {
+) -> Option<Result<Prepared, RequestError>> {
     let outcome = catch_unwind(AssertUnwindSafe(|| {
-        ResponseView::prepare_cancellable(meta, &body, should_cancel)
+        // 后置操作先跑：它要读 meta，而 prepare_cancellable 会把 meta 移进视图。
+        // 只看启用的：全部停用时与没有操作一样给 None，「操作」页签不出现（同 run_pre_ops）
+        let report = post_ops
+            .iter()
+            .any(|o| o.enabled)
+            .then(|| ops::run_post_ops(&post_ops, &meta, body.memory()));
+        ResponseView::prepare_cancellable(meta, &body, should_cancel).map(|view| (view, report))
     }));
     match outcome {
-        Ok(Some(view)) => Some(Ok((body, view))),
+        Ok(Some((view, report))) => Some(Ok((body, view, report))),
         Ok(None) => None,
         Err(payload) => {
             let message = panic_message(payload.as_ref());
@@ -332,6 +344,29 @@ impl SseLive {
     }
 }
 
+/// 一次发送的前置 + 后置操作结果。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OpsReport {
+    pub pre: Vec<(PreOp, OpOutcome)>,
+    pub post: PostReport,
+}
+
+// 计划 3 的「操作」页签（页签徽标「通过 / 总数」）才读这两个；测试已在用
+#[allow(dead_code)]
+impl OpsReport {
+    pub fn total(&self) -> usize {
+        self.pre.len() + self.post.results.len()
+    }
+
+    pub fn passed(&self) -> usize {
+        self.pre
+            .iter()
+            .filter(|(_, o)| *o == OpOutcome::Passed)
+            .count()
+            + self.post.passed()
+    }
+}
+
 pub enum ResponseState {
     Idle,
     InFlight {
@@ -351,6 +386,10 @@ pub enum ResponseState {
         /// 且 `Spilled` 的临时文件守卫必须随 Done 状态一起存活，否则文件会被 drop 删除。
         body: BodyStore,
         view: ResponseView,
+        /// 这次发送的前后置操作结果；两边都没有启用的操作时为 None，「操作」页签随之不出现。
+        // 计划 3 的「操作」页签读它；本计划只写入、由测试断言
+        #[allow(dead_code)]
+        ops: Option<OpsReport>,
     },
     Failed {
         error: RequestError,
@@ -381,6 +420,7 @@ mod tests {
     use super::*;
     use getcat_core::body::spill::SpillFile;
     use getcat_core::body::tier::{EDITOR_MAX_BYTES, EDITOR_MAX_LINES};
+    use getcat_core::model::{AssertOp, PostOpKind, ResponseSource};
     use std::time::Duration;
 
     fn meta(ct: Option<&str>, len: u64) -> ResponseMeta {
@@ -613,7 +653,7 @@ mod tests {
     #[test]
     fn prepare_guarded_turns_a_panic_into_failed() {
         let body = mem(br#"{"a":1}"#);
-        let result = prepare_guarded(meta(Some("application/json"), 7), body, || {
+        let result = prepare_guarded(meta(Some("application/json"), 7), body, Vec::new(), || {
             panic!("boom in background")
         });
         match result {
@@ -631,10 +671,38 @@ mod tests {
             prepare_guarded(
                 meta(Some("application/json"), 7),
                 mem(br#"{"a":1}"#),
+                Vec::new(),
                 || false
             ),
             Some(Ok(_))
         ));
-        assert!(prepare_guarded(meta(None, 2), mem(b"{}"), || true).is_none());
+        assert!(prepare_guarded(meta(None, 2), mem(b"{}"), Vec::new(), || true).is_none());
+    }
+
+    /// 后置操作与视图在同一次后台准备里完成；全部停用时与没有操作一样不出报告。
+    #[test]
+    fn prepare_guarded_runs_only_enabled_post_ops() {
+        let status_is = |enabled: bool, expected: &str| PostOp {
+            enabled,
+            kind: PostOpKind::Assert {
+                subject: ResponseSource::Status,
+                op: AssertOp::Equals,
+                expected: expected.into(),
+            },
+        };
+        let report = |post_ops: Vec<PostOp>| match prepare_guarded(
+            meta(Some("application/json"), 2),
+            mem(b"{}"),
+            post_ops,
+            || false,
+        ) {
+            Some(Ok((_, _, report))) => report,
+            _ => panic!("expected Some(Ok)"),
+        };
+        assert_eq!(report(Vec::new()), None);
+        assert_eq!(report(vec![status_is(false, "200")]), None);
+        let r = report(vec![status_is(false, "500"), status_is(true, "200")]).unwrap();
+        assert_eq!(r.results.len(), 1);
+        assert_eq!(r.passed(), 1);
     }
 }

@@ -1,14 +1,6 @@
 //! 变量（全局）：内存里一份 [`VariableSets`]，改动后同步写 `variables.json`。
 //! 与 [`crate::state::settings`] 同款：`update` 在副本上改、比对、落盘、`set_global`；
 //! 只读模式下 `store(cx)` 为 None，写盘自动变 no-op。
-//!
-//! 本任务只装全局、还没接进发送路径（下一批任务接 `run_pre_ops` / `resolve` / `apply_extracted`
-//! 到 `RequestTab::send`），所以正常 bin 目标里这个模块除 `install` 外整体没有调用方、
-//! 测试目标里 `run_pre_ops` / `apply_extracted` 也还没人调。两个编译单元「没人用」的子集不同，
-//! 用 `allow` 而不是 `expect`（原因同 `crate::brand`：`expect` 会在真被用到的那一侧报
-//! 「预期未兑现」）。
-
-#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 
@@ -60,6 +52,8 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut VariableSets)) {
     cx.set_global(VariablesHandle { sets: next });
 }
 
+// 计划 3 的环境切换器（UI）调用；本计划只有测试在用
+#[allow(dead_code)]
 pub fn set_active_environment(cx: &mut App, id: Option<Ulid>) {
     update(cx, |s| s.active_environment = id);
 }

@@ -1,5 +1,6 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -7,11 +8,12 @@ use std::time::{Duration, Instant};
 use getcat_core::body::pretty::{is_valid_json, pretty_json};
 use getcat_core::body::tier::{ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
-use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
+use getcat_core::http::{self, HttpResponse, RequestError, guess_content_type};
 use getcat_core::model::{
-    BodyKind, HttpVersionPref, Method, RawFormat, RequestDraft, SplitDirection, TabDraft, TabId,
-    Ulid,
+    BodyKind, HttpVersionPref, Method, PostOp, PreOp, RawFormat, RequestDraft, SplitDirection,
+    TabDraft, TabId, Ulid,
 };
+use getcat_core::ops::OpOutcome;
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui_kit::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui_kit::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
@@ -31,9 +33,12 @@ use tokio::sync::mpsc;
 
 use crate::bridge;
 use crate::i18n::{Locale, tr};
-use crate::state::response::{CancelFlag, ResponseState, ResponseView, SseLive, prepare_guarded};
+use crate::state::response::{
+    CancelFlag, OpsReport, Prepared, ResponseState, ResponseView, SseLive, prepare_guarded,
+};
 use crate::state::settings;
 use crate::state::store::store;
+use crate::state::variables;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
 use crate::ui::selectable_lines::LinesSelection;
 
@@ -260,6 +265,13 @@ pub struct RequestTab {
     /// 发送前校验失败的错误（URL 非法 / Header 非法 / 未选文件），显示在 URL 栏下方（spec §11）；
     /// 存错误本身，渲染时按当前语言翻译。
     pub prepare_error: Option<RequestError>,
+    /// 上一次发送时没能解析的变量名（URL 栏下方 warning）；每次发送重算。
+    pub unresolved_vars: BTreeSet<String>,
+    /// 前置 / 后置操作。计划 3 会换成表格实体；此时先做纯数据字段。
+    pub pre_ops: Vec<PreOp>,
+    pub post_ops: Vec<PostOp>,
+    /// 本次发送的前置结果，等响应到达后并进 `Done.ops`。
+    pre_results: Vec<(PreOp, OpOutcome)>,
     pub path_params: Entity<KvTable>,
     pub params: Entity<KvTable>,
     pub headers: Entity<KvTable>,
@@ -396,6 +408,10 @@ impl RequestTab {
             method,
             url,
             prepare_error: None,
+            unresolved_vars: BTreeSet::new(),
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
+            pre_results: Vec::new(),
             path_params,
             params,
             headers,
@@ -595,8 +611,8 @@ impl RequestTab {
             params: self.params.read(cx).values(cx),
             headers: self.headers.read(cx).values(cx),
             body,
-            pre_ops: Vec::new(),
-            post_ops: Vec::new(),
+            pre_ops: self.pre_ops.clone(),
+            post_ops: self.post_ops.clone(),
         }
     }
 
@@ -785,6 +801,8 @@ impl RequestTab {
                 }
             }
         }
+        self.pre_ops = draft.pre_ops.clone();
+        self.post_ops = draft.post_ops.clone();
         self.prepare_error = None;
         self.refresh_body_hint(cx);
         cx.notify();
@@ -814,7 +832,14 @@ impl RequestTab {
         if self.response.is_in_flight() {
             return;
         }
+        let group = self.saved_group.clone();
         let draft = self.draft(cx);
+        // 前置操作先写进变量表（会落盘），再做替换——顺序决定了 {{ts}} 能引用刚设的值
+        self.pre_results = variables::run_pre_ops(cx, group.as_deref(), &draft.pre_ops);
+        // 按值交出草稿：draft() 刚拷出来的快照，替换后直接复用，不再多克隆一次 body
+        let resolved = variables::resolve(cx, group.as_deref(), draft);
+        self.unresolved_vars = resolved.unresolved;
+        let draft = resolved.draft;
         let req = match http::prepare(&draft) {
             Ok(r) => r,
             Err(e) => {
@@ -823,6 +848,8 @@ impl RequestTab {
                 return;
             }
         };
+        // 断言的期望值在上面已经替换完；这份快照随完成任务进后台
+        let post_ops: Vec<PostOp> = draft.post_ops.clone();
         self.prepare_error = None;
         self.notice = None;
         self.generation += 1;
@@ -912,7 +939,9 @@ impl RequestTab {
                     // prepare_guarded 把后台 panic 转成 Err（spec §11），取消仍是 None
                     let guarded = cx
                         .background_spawn(async move {
-                            prepare_guarded(meta, body, || cancelled.load(Ordering::Relaxed))
+                            prepare_guarded(meta, body, post_ops, || {
+                                cancelled.load(Ordering::Relaxed)
+                            })
                         })
                         .await;
                     match guarded {
@@ -944,7 +973,7 @@ impl RequestTab {
     pub(crate) fn apply_outcome(
         &mut self,
         generation: u64,
-        outcome: Result<(BodyStore, ResponseView), RequestError>,
+        outcome: Result<Prepared, RequestError>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -952,7 +981,7 @@ impl RequestTab {
             return;
         }
         match outcome {
-            Ok((body, mut view)) => {
+            Ok((body, mut view, report)) => {
                 // TTFT（首个内容 delta 的时刻）只有在途解析才知道：从被替换掉的
                 // InFlight 状态里合并进 Done 视图。
                 if let Some(sse) = view.sse.as_mut()
@@ -974,11 +1003,25 @@ impl RequestTab {
                 self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
                 // reset 让列表按新响应的行数重建，滚动位置一并回到顶部
                 self.headers_list.reset(view.header_rows.len());
-                self.response = ResponseState::Done { body, view };
+                let pre = std::mem::take(&mut self.pre_results);
+                let mut report = report;
+                if let Some(report) = report.as_mut() {
+                    // generation 已在函数开头校验：过期回调不会走到这里，提取值也就不会写盘。
+                    // 必须在组装 OpsReport 之前调：写不进去的提取行在这里才被改写为「跳过」
+                    variables::apply_extracted(cx, self.saved_group.as_deref(), report);
+                }
+                let ops = (!pre.is_empty() || report.is_some()).then(|| OpsReport {
+                    pre,
+                    post: report.unwrap_or_default(),
+                });
+                self.response = ResponseState::Done { body, view, ops };
                 self.response_section = ResponseSection::Body;
                 self.sync_lines_selection(window, cx);
             }
-            Err(error) => self.response = ResponseState::Failed { error },
+            Err(error) => {
+                self.pre_results.clear();
+                self.response = ResponseState::Failed { error };
+            }
         }
         cx.notify();
     }
@@ -989,6 +1032,7 @@ impl RequestTab {
             return;
         }
         self.generation += 1;
+        self.pre_results.clear();
         self.response = ResponseState::Failed {
             error: RequestError::Cancelled,
         };
@@ -1009,6 +1053,8 @@ impl RequestTab {
         // 先把号改掉，换 response 时被 drop 的任务就再也写不回来了
         self.generation += 1;
         self.response = ResponseState::Idle;
+        // 在途请求的前置结果随它一起作废（完成回调已因 generation 失效，不会再来取）
+        self.pre_results.clear();
         // 编辑器是常驻实体，不随 response 一起 drop。留着上一条响应的文本，
         // 下一条非 A 档响应到来时 apply_outcome 不会覆写它，残留内容会在 ⌘F 里冒出来
         for (_, editor) in &self.response_editors {
@@ -1080,7 +1126,7 @@ impl RequestTab {
     /// "保存到文件"：弹系统保存对话框（从上次保存的目录打开），选中后在 tokio 上原子写入 / 拷贝，
     /// 完成后在工具栏显示结果并记住目录。
     pub fn save_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let ResponseState::Done { body, view } = &self.response else {
+        let ResponseState::Done { body, view, .. } = &self.response else {
             return;
         };
         let body = body.clone();

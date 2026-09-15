@@ -19,10 +19,12 @@ use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::codegen::{CodeTarget, PLACEHOLDER_URL};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    AppSettings, BodyKind, Environment, FormField, FormValue, HttpVersionPref, KeyValue, Method,
-    RawFormat, RequestDraft, ResponseMeta, SavedRequest, SplitDirection, TabDraft, TabId,
-    ThemePref, Ulid, Variable, WorkspaceState,
+    AppSettings, AssertOp, BodyKind, Environment, FormField, FormValue, HttpVersionPref, KeyValue,
+    Method, PostOp, PostOpKind, PreOp, PreOpKind, RawFormat, RequestDraft, ResponseMeta,
+    ResponseSource, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, VarScope,
+    Variable, WorkspaceState,
 };
+use getcat_core::ops::{OpFailure, OpOutcome, OpSkip};
 use getcat_core::store::{Store, codec::decode};
 use getcat_core::tls::{CertWarning, CertificateInfo};
 use gpui_kit::base::TextSelection;
@@ -155,7 +157,7 @@ fn copy_target_follows_the_response_section(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
             // Body：跟随 Pretty / Raw
             assert_eq!(t.copy_target_text().as_deref(), Some("{\n  \"a\": 1\n}"));
             t.set_pretty(false, window, cx);
@@ -613,7 +615,7 @@ fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((body.clone(), view)), window, cx);
+            t.apply_outcome(g, Ok((body.clone(), view, None)), window, cx);
         })
     });
 
@@ -694,7 +696,7 @@ fn sse_events_view_scrolls_horizontally(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((BodyStore::in_memory(body), view)), window, cx);
+            t.apply_outcome(g, Ok((BodyStore::in_memory(body), view, None)), window, cx);
             // 该流拼不出 delta：Text 模式自动回落到事件列表
             assert_eq!(t.sse_mode, SseBodyMode::Text);
         })
@@ -737,7 +739,7 @@ fn long_header_values_wrap_instead_of_truncating(cx: &mut TestAppContext) {
             let g = t.generation;
             t.apply_outcome(
                 g,
-                Ok((BodyStore::in_memory(b"ok".to_vec()), view)),
+                Ok((BodyStore::in_memory(b"ok".to_vec()), view, None)),
                 window,
                 cx,
             );
@@ -843,7 +845,7 @@ pub(crate) fn install_done_with(
         tab.update(cx, |t, cx| {
             t.generation += 1;
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
         })
     });
 }
@@ -2418,7 +2420,7 @@ fn find_in_response_only_notices_on_virtual_tier(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
             t.find_in_response(window, cx);
             assert_eq!(t.notice, Some(Notice::VirtualSearch));
             assert!(
@@ -2653,7 +2655,7 @@ fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
         tab.update(cx, |t, cx| {
             t.generation += 1;
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
             // 切到证书页：横幅 + 字段表都要能画
             t.response_section = ResponseSection::Certificate;
             cx.notify();
@@ -4112,4 +4114,266 @@ fn saved_group_follows_the_request_and_variables_follow_the_group(cx: &mut TestA
     // 删除已保存请求：分类清空
     cx.update(|_, cx| ws2.update(cx, |ws, cx| ws.delete_saved(id, cx)));
     cx.read(|app| assert_eq!(ws2.read(app).active_tab().read(app).saved_group, None));
+}
+
+/// 回一次固定 JSON，并把收到的请求首行（`GET /path?x HTTP/1.1`）与全部头送回来。
+pub(crate) fn echo_server(body: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 8192];
+            let mut got = Vec::new();
+            while let Ok(n) = stream.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&buf[..n]);
+                if got.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = tx.send(String::from_utf8_lossy(&got).into_owned());
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Req: abc\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    (format!("http://{addr}"), rx)
+}
+
+/// 发送时按激活环境替换 URL / 头；未解析的名字记在 Tab 上；草稿与已保存请求仍是原文。
+#[gpui_kit::test]
+fn send_resolves_variables_and_keeps_the_draft_verbatim(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, rx) = echo_server("{}");
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals.push(Variable::new("base", base.clone()));
+            s.globals.push(Variable::new("tok", "T"));
+        });
+    });
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.headers.update(cx, |h, cx| {
+                h.set_values(
+                    &[KeyValue::new("Authorization", "Bearer {{tok}}")],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    set_url_and_send(&tab, "{{base}}/users/{{missing}}", cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    let received = rx.recv().unwrap();
+    assert!(
+        received.starts_with("GET /users/%7B%7Bmissing%7D%7D HTTP/1.1"),
+        "{received}"
+    );
+    assert!(
+        received.to_lowercase().contains("authorization: bearer t"),
+        "{received}"
+    );
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.response.is_done(), "{:?}", t.response.error());
+        assert_eq!(
+            t.unresolved_vars.iter().cloned().collect::<Vec<_>>(),
+            vec!["missing".to_string()]
+        );
+        assert_eq!(t.draft(app).url, "{{base}}/users/{{missing}}");
+        assert_eq!(t.draft(app).headers[0].value, "Bearer {{tok}}");
+    });
+    // 草稿文件也是原文
+    cx.update(|_, cx| tab.update(cx, |t, cx| t.save_draft_now(cx)));
+    assert!(store.flush());
+    let id = cx.read(|app| tab.read(app).id);
+    assert_eq!(
+        read_draft(&store, id).unwrap().draft.url,
+        "{{base}}/users/{{missing}}"
+    );
+}
+
+/// 前置操作在发送前写变量并落盘，同一次发送里后面的替换就能用上。
+#[gpui_kit::test]
+fn pre_ops_write_variables_before_the_request_goes_out(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, rx) = echo_server("{}");
+    cx.update(|_, app| {
+        variables::update(app, |s| s.globals.push(Variable::new("base", base.clone())))
+    });
+    let tab = new_tab(cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.pre_ops = vec![PreOp {
+                enabled: true,
+                kind: PreOpKind::SetVariable {
+                    scope: VarScope::Global,
+                    key: "who".into(),
+                    value: "cat-{{$randomInt}}".into(),
+                },
+            }];
+        })
+    });
+    set_url_and_send(&tab, "{{base}}/hi/{{who}}", cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    let received = rx.recv().unwrap();
+    assert!(received.starts_with("GET /hi/cat-"), "{received}");
+    assert!(store.flush());
+    let who = store
+        .load_all()
+        .variables
+        .unwrap()
+        .globals
+        .iter()
+        .find(|v| v.key == "who")
+        .unwrap()
+        .value
+        .clone();
+    assert!(who.starts_with("cat-"), "{who}");
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.unresolved_vars.is_empty());
+        match &t.response {
+            ResponseState::Done {
+                ops: Some(report), ..
+            } => {
+                assert_eq!(report.pre.len(), 1);
+                assert_eq!(report.pre[0].1, OpOutcome::Passed);
+                assert!(report.post.results.is_empty());
+            }
+            _ => panic!("expected Done with ops report"),
+        }
+    });
+}
+
+/// 后置操作从响应里提取变量并断言；提取结果写进 variables.json。
+#[gpui_kit::test]
+fn post_ops_extract_and_assert_then_persist(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, _rx) = echo_server(r#"{"data":{"token":"T"}}"#);
+    let tab = new_tab(cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.post_ops = vec![
+                PostOp {
+                    enabled: true,
+                    kind: PostOpKind::Extract {
+                        scope: VarScope::Global,
+                        key: "token".into(),
+                        source: ResponseSource::JsonPath {
+                            path: "$.data.token".into(),
+                        },
+                    },
+                },
+                PostOp {
+                    enabled: true,
+                    kind: PostOpKind::Extract {
+                        scope: VarScope::Environment,
+                        key: "req".into(),
+                        source: ResponseSource::Header {
+                            name: "x-req".into(),
+                        },
+                    },
+                },
+                PostOp {
+                    enabled: true,
+                    kind: PostOpKind::Assert {
+                        subject: ResponseSource::Status,
+                        op: AssertOp::Equals,
+                        expected: "201".into(),
+                    },
+                },
+            ];
+        })
+    });
+    set_url_and_send(&tab, &base, cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        match &tab.read(app).response {
+            ResponseState::Done {
+                ops: Some(report), ..
+            } => {
+                assert_eq!(report.total(), 3);
+                // 全局提取通过；环境提取因没有激活环境被改写为跳过；断言失败
+                assert_eq!(report.passed(), 1);
+                assert_eq!(report.post.results[0].1, OpOutcome::Passed);
+                assert_eq!(
+                    report.post.results[1].1,
+                    OpOutcome::Skipped(OpSkip::NoActiveEnvironment)
+                );
+                assert!(matches!(
+                    report.post.results[2].1,
+                    OpOutcome::Failed(OpFailure::Mismatch { .. })
+                ));
+                // 只剩真正写入的提取，index 指回它的结果行
+                assert_eq!(report.post.extracted.len(), 1);
+                assert_eq!(report.post.extracted[0].index, 0);
+            }
+            _ => panic!("expected Done with ops report"),
+        }
+        // 没有激活环境：环境作用域的提取写不进去，但全局的写了
+        let sets = variables::variables(app);
+        assert_eq!(
+            sets.globals
+                .iter()
+                .find(|v| v.key == "token")
+                .unwrap()
+                .value,
+            "T"
+        );
+        assert!(sets.environments.is_empty());
+    });
+    assert!(store.flush());
+    assert_eq!(store.load_all().variables.unwrap().globals[0].key, "token");
+}
+
+/// 过期的完成回调（取消 / 重发后 generation 不匹配）不得写回提取的变量。
+#[gpui_kit::test]
+fn stale_outcome_does_not_apply_extracted_variables(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let body = BodyStore::in_memory(b"{}".to_vec());
+    let meta = ResponseMeta {
+        status: 200,
+        status_text: "OK".into(),
+        headers: vec![],
+        duration: Duration::from_millis(1),
+        ttfb: None,
+        body_len: 2,
+        content_type: Some("application/json".into()),
+        http_version: None,
+        certificate: None,
+    };
+    let view = ResponseView::prepare(meta, &body);
+    let report = getcat_core::ops::PostReport {
+        results: vec![],
+        extracted: vec![getcat_core::ops::Extracted {
+            index: 0,
+            scope: VarScope::Global,
+            key: "leak".into(),
+            value: "x".into(),
+        }],
+    };
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let stale = t.generation + 1;
+            t.generation = stale + 1;
+            t.apply_outcome(stale, Ok((body, view, Some(report))), window, cx);
+        })
+    });
+    cx.read(|app| assert!(variables::variables(app).globals.is_empty()));
 }
