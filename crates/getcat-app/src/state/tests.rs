@@ -2860,7 +2860,7 @@ fn kv_table_form_fields_roundtrip_and_refresh_size(cx: &mut TestAppContext) {
     let _ = std::fs::remove_file(&file);
 }
 
-/// 变量表：secret 行掩码显示、往返保留 secret 标记、`$` 开头的 key 有提示。
+/// 变量表：secret 行掩码显示、往返保留 secret 标记。
 #[gpui_kit::test]
 fn kv_table_variables_round_trip_with_secret(cx: &mut TestAppContext) {
     let cx = init(cx);
@@ -2881,6 +2881,8 @@ fn kv_table_variables_round_trip_with_secret(cx: &mut TestAppContext) {
         assert!(!t.row_secret(0));
         assert!(t.row_secret(1));
         assert!(t.row_value_masked(1, app));
+        // 没有 `$` 开头的 key：不提示
+        assert!(!t.has_builtin_name_hint(app));
     });
     cx.update(|window, cx| table.update(cx, |t, cx| t.set_row_secret(0, true, window, cx)));
     cx.read(|app| {
@@ -2888,6 +2890,30 @@ fn kv_table_variables_round_trip_with_secret(cx: &mut TestAppContext) {
         assert!(t.variables(app)[0].secret);
         assert!(t.row_value_masked(0, app));
     });
+}
+
+/// 变量表：key 以 `$` 开头（内置动态变量命名空间）会触发提示；普通表（非 secret_capable）不提示。
+#[gpui_kit::test]
+fn kv_table_dynamic_name_clash_triggers_builtin_hint(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Variable, window, cx).secret_capable(true))
+    });
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_variables(&[Variable::new("$timestamp", "")], window, cx)
+        })
+    });
+    cx.read(|app| assert!(table.read(app).has_builtin_name_hint(app)));
+
+    // 非变量表（未开 secret_capable）即便凑巧撞上 `$` 前缀也不提示：这条提示只对变量表有意义
+    let plain = cx.update(|window, cx| cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx)));
+    cx.update(|window, cx| {
+        plain.update(cx, |t, cx| {
+            t.set_values(&[KeyValue::new("$timestamp", "")], window, cx)
+        })
+    });
+    cx.read(|app| assert!(!plain.read(app).has_builtin_name_hint(app)));
 }
 
 #[gpui_kit::test]

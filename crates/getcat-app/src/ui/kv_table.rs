@@ -607,6 +607,21 @@ impl KvTable {
         self.rows[ix].value.read(cx).presentation().is_masked()
     }
 
+    /// 变量名以 `$` 开头是内置动态变量的命名空间，用户填了这样的 key 提前提示，
+    /// 免得发送时才发现这条变量被内置值盖住（`vars::is_dynamic` 与替换逻辑同一个判断）。
+    fn has_builtin_name_clash(&self, cx: &App) -> bool {
+        self.secret_capable
+            && self
+                .rows
+                .iter()
+                .any(|r| is_dynamic(r.key.read(cx).value().trim()))
+    }
+
+    #[cfg(test)]
+    pub fn has_builtin_name_hint(&self, cx: &App) -> bool {
+        self.has_builtin_name_clash(cx)
+    }
+
     fn render_value_cell(&self, ix: usize, row: &KvRow, cx: &mut Context<Self>) -> AnyElement {
         if row.kind == RowKind::Text {
             let input = Input::new(&row.value)
@@ -863,6 +878,14 @@ impl KvTable {
                             })
                             .when(secret_capable, |d| {
                                 let secret = row.secret;
+                                let label = row_aria_label(
+                                    ix,
+                                    &if secret {
+                                        tr!("kv.secret_on")
+                                    } else {
+                                        tr!("kv.secret_off")
+                                    },
+                                );
                                 d.child(
                                     div().pl_1().flex_none().child(
                                         Button::new(("kv-secret", ix))
@@ -874,14 +897,11 @@ impl KvTable {
                                                 ICON_LOCK_OPEN
                                             }))
                                             .selected(secret)
-                                            .tooltip(row_aria_label(
-                                                ix,
-                                                &if secret {
-                                                    tr!("kv.secret_on")
-                                                } else {
-                                                    tr!("kv.secret_off")
-                                                },
-                                            ))
+                                            // 纯图标按钮：gpui-component 的可访问名称取
+                                            // accessibility_label.or(label)，不会退回 tooltip，
+                                            // 必须显式给一份，否则屏幕阅读器读不到名字。
+                                            .accessibility_label(label.clone())
+                                            .tooltip(label)
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 this.set_row_secret(ix, !secret, window, cx)
                                             })),
@@ -913,17 +933,21 @@ impl KvTable {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(
+                    .child({
+                        let label = row_aria_label(ix, &tr!("kv.remove"));
                         Button::new(("kv-remove", ix))
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
-                            .tooltip(row_aria_label(ix, &tr!("kv.remove")))
+                            // 纯图标按钮同上：可访问名称取 accessibility_label.or(label)，
+                            // 不会退回 tooltip，必须显式给一份。
+                            .accessibility_label(label.clone())
+                            .tooltip(label)
                             .disabled(locked)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.remove_row(ix, window, cx)
-                            })),
-                    ),
+                            }))
+                    }),
             )
             .into_any_element()
     }
@@ -932,13 +956,7 @@ impl KvTable {
 impl Render for KvTable {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let locked = self.locked_keys;
-        // 变量名以 `$` 开头是内置动态变量的命名空间，用户填了这样的 key 提前提示，
-        // 免得发送时才发现这条变量被内置值盖住（vars::is_dynamic 与替换逻辑同一个判断）。
-        let has_builtin_name_clash = self.secret_capable
-            && self
-                .rows
-                .iter()
-                .any(|r| is_dynamic(r.key.read(cx).value().trim()));
+        let has_builtin_name_clash = self.has_builtin_name_clash(cx);
         v_flex()
             .w_full()
             .rounded(cx.theme().radius)
