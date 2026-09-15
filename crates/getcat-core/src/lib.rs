@@ -7,6 +7,7 @@ pub mod http;
 pub mod import;
 pub mod model;
 pub mod ops;
+pub mod postman_env;
 pub mod sse;
 pub mod store;
 pub mod tls;
