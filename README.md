@@ -34,7 +34,7 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 - **完整的请求构造**：GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS；Path 参数（URL 中 `{name}`）、Query、Headers；Body 支持 form-data（文本 / 文件字段，文件定长流式上传）、x-www-form-urlencoded、raw JSON / Text / XML、binary 整文件上传。
 - **大模型流式调试**：SSE（text/event-stream）响应边收边显示，不必等流结束；自动识别 OpenAI Chat Completions / Responses 与 Anthropic Messages 的流格式，提供事件流 / 拼装文本 / 原始三种视图，附 TTFT、事件数、token 用量与生成速率统计。侧栏自带三家接口的请求模板（纯文本 / 含图片 / 流式），以及 MCP 两个协议时代的模板。
 - **命令进出自如**：右侧栏可把当前请求转成 cURL / Python 示例，也能反过来粘一条 curl 命令导进来——浏览器「以 cURL 格式复制」的输出直接可用，没搬过来的选项会如实列出。
-- **变量与前后置操作**：全局 / 分类 / 环境三层变量，`{{var}}` 与 `{{$timestamp}}` 替换；发送前设变量、响应后提取字段到变量与断言，不用写脚本；Postman environment 导入导出。
+- **变量与前后置操作**：全局 / 分类 / 环境三层变量，`{{var}}` 与 `{{$timestamp}}` 替换；发送前设变量、响应后提取字段到变量与断言，不用写脚本；Postman environment 导入导出；敏感变量在界面上掩码显示。
 - **数据属于你**：不存历史、不存响应、不上传任何东西。已保存请求、草稿、设置都是美化过的 JSON 文件，可手工编辑、可用 Git 管理。
 - **主题与语言跟随系统**，也可固定浅色 / 深色、English / 中文 / 日本語；自绘标题栏，三平台外观一致。
 - **无障碍**：所有控件都有可访问名称，屏幕阅读器可用。
