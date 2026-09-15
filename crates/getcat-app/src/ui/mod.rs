@@ -4,6 +4,7 @@ pub mod body_view;
 pub mod code_sheet;
 pub mod curl_sheet;
 pub mod kv_table;
+pub mod ops_table;
 pub mod request_pane;
 pub mod response_pane;
 pub mod selectable_lines;

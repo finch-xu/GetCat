@@ -534,6 +534,194 @@ kv:
     zh-CN: "以 $ 开头的是内置动态变量，不能被覆盖"
     ja: "$ で始まる名前は組み込みの動的変数で、上書きできません"
 
+# 前后置操作表与结果
+ops:
+  pre_title:
+    en: Before sending
+    zh-CN: 发送前
+    ja: 送信前
+  post_title:
+    en: After response
+    zh-CN: 响应后
+    ja: レスポンス後
+  pre_hint:
+    en: Set variables before the request goes out. Values may use {{var}} and {{$timestamp}}.
+    zh-CN: 发送前设置变量；值里可以写 {{var}} 与 {{$timestamp}}。
+    ja: 送信前に変数を設定します。値には {{var}} や {{$timestamp}} を使えます。
+  post_hint:
+    en: Extract values from the response into variables, or assert on it. Expected values are resolved when sending.
+    zh-CN: 从响应提取值到变量，或做断言；期望值在发送时替换。
+    ja: レスポンスから値を変数に取り出す、または検証します。期待値は送信時に展開されます。
+  kind_extract_json:
+    en: Extract JSON path
+    zh-CN: 提取 JSON 路径
+    ja: JSON パスを抽出
+  kind_extract_header:
+    en: Extract header
+    zh-CN: 提取响应头
+    ja: ヘッダーを抽出
+  kind_extract_status:
+    en: Extract status code
+    zh-CN: 提取状态码
+    ja: ステータスコードを抽出
+  kind_assert_status:
+    en: Assert status code
+    zh-CN: 断言状态码
+    ja: ステータスコードを検証
+  kind_assert_header:
+    en: Assert header
+    zh-CN: 断言响应头
+    ja: ヘッダーを検証
+  kind_assert_json:
+    en: Assert JSON path
+    zh-CN: 断言 JSON 路径
+    ja: JSON パスを検証
+  scope_global:
+    en: Global
+    zh-CN: 全局
+    ja: グローバル
+  scope_environment:
+    en: Environment
+    zh-CN: 当前环境
+    ja: 現在の環境
+  scope_group:
+    en: Category
+    zh-CN: 当前分类
+    ja: 現在のカテゴリ
+  op_equals:
+    en: equals
+    zh-CN: 等于
+    ja: 等しい
+  op_not_equals:
+    en: not equals
+    zh-CN: 不等于
+    ja: 等しくない
+  op_contains:
+    en: contains
+    zh-CN: 包含
+    ja: 含む
+  op_exists:
+    en: exists
+    zh-CN: 存在
+    ja: 存在する
+  path_placeholder:
+    en: "JSON path, e.g. $.data.token"
+    zh-CN: "JSON 路径，例如 $.data.token"
+    ja: "JSON パス（例：$.data.token）"
+  header_placeholder:
+    en: Header name
+    zh-CN: 响应头名
+    ja: ヘッダー名
+  variable_placeholder:
+    en: Variable name
+    zh-CN: 变量名
+    ja: 変数名
+  expected_placeholder:
+    en: Expected value
+    zh-CN: 期望值
+    ja: 期待値
+  value_placeholder:
+    en: Value
+    zh-CN: 值
+    ja: 値
+  kind_aria:
+    en: Operation type
+    zh-CN: 操作类型
+    ja: 操作の種類
+  scope_aria:
+    en: Variable scope
+    zh-CN: 变量作用域
+    ja: 変数のスコープ
+  assert_op_aria:
+    en: Comparison
+    zh-CN: 比较方式
+    ja: 比較方法
+  # 结果页
+  section_title:
+    en: "Operations %{passed}/%{total}"
+    zh-CN: "操作 %{passed}/%{total}"
+    ja: "操作 %{passed}/%{total}"
+  result_passed:
+    en: Passed
+    zh-CN: 通过
+    ja: 成功
+  result_failed:
+    en: Failed
+    zh-CN: 失败
+    ja: 失敗
+  result_skipped:
+    en: Skipped
+    zh-CN: 跳过
+    ja: スキップ
+  extracted_line:
+    en: "%{key} = %{value}"
+    zh-CN: "%{key} = %{value}"
+    ja: "%{key} = %{value}"
+  set_line:
+    en: "Set %{scope} variable %{key}"
+    zh-CN: "设置%{scope}变量 %{key}"
+    ja: "%{scope}変数 %{key} を設定"
+  skip_no_environment:
+    en: No active environment
+    zh-CN: 没有激活的环境
+    ja: 有効な環境がありません
+  skip_request_failed:
+    en: Request failed, not run
+    zh-CN: 请求失败，未执行
+    ja: リクエストが失敗したため実行されませんでした
+  skip_no_group:
+    en: This request is not in a category
+    zh-CN: 这条请求不属于任何分类
+    ja: このリクエストはカテゴリに属していません
+  fail_empty_key:
+    en: Variable name is empty
+    zh-CN: 变量名为空
+    ja: 変数名が空です
+  fail_invalid_key:
+    en: "“%{key}” can’t be used as a variable name (no braces or line breaks, not starting with $)"
+    zh-CN: "「%{key}」不能用作变量名（不能含花括号或换行，不能以 $ 开头）"
+    ja: "「%{key}」は変数名に使えません（波括弧や改行を含まず、$ で始まらないこと）"
+  fail_empty_header:
+    en: Header name is empty
+    zh-CN: 响应头名为空
+    ja: ヘッダー名が空です
+  fail_empty_path:
+    en: JSON path is empty
+    zh-CN: JSON 路径为空
+    ja: JSON パスが空です
+  fail_body_unavailable:
+    en: Response body was written to disk; JSON path is unavailable
+    zh-CN: 响应体已落盘，无法解析 JSON 路径
+    ja: レスポンスボディはディスクに保存されたため、JSON パスを解析できません
+  fail_body_too_large:
+    en: "Response body exceeds %{size}; JSON path skipped"
+    zh-CN: "响应体超过 %{size}，未解析 JSON 路径"
+    ja: "レスポンスボディが %{size} を超えたため、JSON パスを解析しませんでした"
+  fail_not_json:
+    en: Response body is not JSON
+    zh-CN: 响应体不是 JSON
+    ja: レスポンスボディが JSON ではありません
+  fail_path_not_found:
+    en: "Path not found: %{path}"
+    zh-CN: "路径不存在：%{path}"
+    ja: "パスが見つかりません：%{path}"
+  fail_header_not_found:
+    en: "Header not found: %{name}"
+    zh-CN: "响应头不存在：%{name}"
+    ja: "ヘッダーが見つかりません：%{name}"
+  fail_mismatch:
+    en: "Expected %{expected}, got %{actual}"
+    zh-CN: "期望 %{expected}，实际 %{actual}"
+    ja: "期待値 %{expected}、実際 %{actual}"
+  fail_unexpected:
+    en: "Value is %{actual}, which should not equal it"
+    zh-CN: "实际值 %{actual}，不应相等"
+    ja: "実際の値 %{actual} は等しくないはずでした"
+  fail_missing:
+    en: Not present
+    zh-CN: 不存在
+    ja: 存在しません
+
 response:
   idle_prefix:
     en: Enter a URL and click Send, or press

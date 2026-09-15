@@ -28,10 +28,14 @@ use getcat_core::ops::{OpFailure, OpOutcome, OpSkip};
 use getcat_core::store::{Store, codec::decode};
 use getcat_core::tls::{CertWarning, CertificateInfo};
 use gpui_kit::base::TextSelection;
-use gpui_kit::component::{ActiveTheme, Root, input::InputEvent};
+use gpui_kit::component::{
+    ActiveTheme, IndexPath, Root,
+    input::InputEvent,
+    select::{SelectEvent, SelectState},
+};
 use gpui_kit::{
-    AppContext, Entity, Focusable, IntoElement, Modifiers, MouseButton, TestAppContext,
-    VisualTestContext, point, px, size,
+    AppContext, Entity, Focusable, IntoElement, Modifiers, MouseButton, SharedString,
+    TestAppContext, VisualTestContext, point, px, size,
 };
 use tempfile::TempDir;
 
@@ -52,6 +56,7 @@ use crate::state::workspace::{
 };
 use crate::ui::body_view::{LINE_HEIGHT_PX, gutter_px};
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
+use crate::ui::ops_table::{OpsMode, OpsTable, PostRowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 use crate::ui::tab_strip::{page_count, tabs_per_page};
 use getcat_core::model::{LanguagePref, MAX_TAB_ROWS};
@@ -2914,6 +2919,150 @@ fn kv_table_dynamic_name_clash_triggers_builtin_hint(cx: &mut TestAppContext) {
         })
     });
     cx.read(|app| assert!(!plain.read(app).has_builtin_name_hint(app)));
+}
+
+#[gpui_kit::test]
+fn ops_table_round_trips_pre_and_post_ops(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let pre = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Pre, window, cx)));
+    let post = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let pre_ops = vec![PreOp {
+        enabled: false,
+        kind: PreOpKind::SetVariable {
+            scope: VarScope::Environment,
+            key: "ts".into(),
+            value: "{{$timestamp}}".into(),
+        },
+    }];
+    let post_ops = vec![
+        PostOp {
+            enabled: true,
+            kind: PostOpKind::Extract {
+                scope: VarScope::Global,
+                key: "tok".into(),
+                source: ResponseSource::JsonPath { path: "$.t".into() },
+            },
+        },
+        PostOp {
+            enabled: true,
+            kind: PostOpKind::Assert {
+                subject: ResponseSource::Status,
+                op: AssertOp::Equals,
+                expected: "200".into(),
+            },
+        },
+    ];
+    cx.update(|window, cx| {
+        pre.update(cx, |t, cx| t.set_pre_ops(&pre_ops, window, cx));
+        post.update(cx, |t, cx| t.set_post_ops(&post_ops, window, cx));
+    });
+    cx.read(|app| {
+        assert_eq!(pre.read(app).pre_ops(app), pre_ops);
+        assert_eq!(post.read(app).post_ops(app), post_ops);
+        // 末尾各有一个空行，不进结果
+        assert_eq!(pre.read(app).row_count(), 2);
+        assert_eq!(post.read(app).row_count(), 3);
+    });
+}
+
+/// 删掉前面的行之后，下拉的订阅必须按实体找行而不是按创建时的行号：
+/// 否则后面的行整体上移，改第 0 行的下拉会落到原来的第 2 行上。
+#[gpui_kit::test]
+fn ops_table_select_changes_after_removing_a_row_land_on_the_right_row(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let extract = |source: ResponseSource, key: &str| PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Global,
+            key: key.into(),
+            source,
+        },
+    };
+    let ops = vec![
+        extract(ResponseSource::JsonPath { path: "$.a".into() }, "k1"),
+        extract(ResponseSource::Header { name: "b".into() }, "k2"),
+        PostOp {
+            enabled: true,
+            kind: PostOpKind::Assert {
+                subject: ResponseSource::JsonPath { path: "$.c".into() },
+                op: AssertOp::Equals,
+                expected: "v".into(),
+            },
+        },
+    ];
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_post_ops(&ops, window, cx)));
+    cx.update(|window, cx| table.update(cx, |t, cx| t.remove_row(0, window, cx)));
+    cx.read(|app| assert_eq!(table.read(app).post_ops(app), ops[1..].to_vec()));
+
+    // 与用户在下拉里选中一项走同一条路：改选中项并发出 Confirm，由表格的订阅处理
+    let pick =
+        |cx: &mut VisualTestContext, sel: Entity<SelectState<Vec<SharedString>>>, ix: usize| {
+            cx.update(|window, cx| {
+                sel.update(cx, |s, cx| {
+                    s.set_selected_index(Some(IndexPath::new(ix)), window, cx);
+                    let value = s.selected_value().cloned();
+                    cx.emit(SelectEvent::Confirm(value));
+                })
+            });
+        };
+
+    // 第 0 行（原第 1 行）作用域 → 当前环境
+    let scope_select = cx.read(|app| table.read(app).row_scope_select(0));
+    pick(cx, scope_select, VarScope::Environment.index());
+    let row0_extract = PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Environment,
+            key: "k2".into(),
+            source: ResponseSource::Header { name: "b".into() },
+        },
+    };
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![row0_extract.clone(), ops[2].clone()]
+        )
+    });
+
+    // 第 1 行（原第 2 行）算子 → 包含
+    let op_select = cx.read(|app| table.read(app).row_op_select(1));
+    pick(cx, op_select, AssertOp::Contains.index());
+    let row1_contains = PostOp {
+        enabled: true,
+        kind: PostOpKind::Assert {
+            subject: ResponseSource::JsonPath { path: "$.c".into() },
+            op: AssertOp::Contains,
+            expected: "v".into(),
+        },
+    };
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![row0_extract.clone(), row1_contains.clone()]
+        )
+    });
+
+    // 第 0 行类型 → 断言响应头：参数 A / B 原样沿用，第 1 行不受影响
+    let kind_select = cx.read(|app| table.read(app).row_kind_select(0));
+    pick(cx, kind_select, PostRowKind::AssertHeader.index());
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![
+                PostOp {
+                    enabled: true,
+                    kind: PostOpKind::Assert {
+                        subject: ResponseSource::Header { name: "b".into() },
+                        op: AssertOp::Equals,
+                        expected: "k2".into(),
+                    },
+                },
+                row1_contains,
+            ]
+        );
+        assert_eq!(table.read(app).row_count(), 3);
+    });
 }
 
 #[gpui_kit::test]
