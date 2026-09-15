@@ -2284,6 +2284,49 @@ fn code_sheet_uses_resolved_variables_without_running_pre_ops(cx: &mut TestAppCo
     });
 }
 
+/// 保存 / 重开都带着操作列表，且存的是原文。
+#[gpui_kit::test]
+fn saved_requests_keep_ops_and_raw_placeholders(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://{{host}}/x", cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.post_ops = vec![PostOp {
+                enabled: true,
+                kind: PostOpKind::Assert {
+                    subject: ResponseSource::Status,
+                    op: AssertOp::Equals,
+                    expected: "{{code}}".into(),
+                },
+            }];
+        })
+    });
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "x".into(), None, cx)
+            })
+        })
+        .unwrap();
+    assert!(store.flush());
+    let saved = read_request(&store, id).unwrap();
+    assert_eq!(saved.draft.url, "https://{{host}}/x");
+    assert_eq!(saved.draft.post_ops.len(), 1);
+    // 重开：操作跟着回来
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.close_tab(0, window, cx);
+            ws.open_saved(id, window, cx);
+        })
+    });
+    cx.read(|app| {
+        let t = ws.read(app).active_tab();
+        assert_eq!(t.read(app).post_ops.len(), 1);
+    });
+}
+
 #[gpui_kit::test]
 fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
