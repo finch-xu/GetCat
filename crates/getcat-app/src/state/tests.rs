@@ -19,9 +19,9 @@ use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::codegen::{CodeTarget, PLACEHOLDER_URL};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    AppSettings, BodyKind, FormField, FormValue, HttpVersionPref, KeyValue, Method, RawFormat,
-    RequestDraft, ResponseMeta, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid,
-    WorkspaceState,
+    AppSettings, BodyKind, Environment, FormField, FormValue, HttpVersionPref, KeyValue, Method,
+    RawFormat, RequestDraft, ResponseMeta, SavedRequest, SplitDirection, TabDraft, TabId,
+    ThemePref, Ulid, Variable, WorkspaceState,
 };
 use getcat_core::store::{Store, codec::decode};
 use getcat_core::tls::{CertWarning, CertificateInfo};
@@ -43,6 +43,7 @@ use crate::state::saved_filter::SavedFilter;
 use crate::state::settings;
 use crate::state::store;
 use crate::state::update::{self, InstallKind};
+use crate::state::variables;
 use crate::state::workspace::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarSection, ToolSection,
     Workspace,
@@ -3992,4 +3993,59 @@ fn sidebar_width_constants_match_spec() {
     assert_eq!(SIDEBAR_DEFAULT_WIDTH, 360.);
     assert_eq!(SIDEBAR_MIN_WIDTH, 280.);
     assert_eq!(SIDEBAR_MAX_WIDTH, 560.);
+}
+
+/// 没装全局时返回空集；`update` 写盘 + 装全局；无变化不写。
+#[gpui_kit::test]
+fn variables_update_persists_and_no_change_skips_write(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    cx.read(|app| assert!(variables::variables(app).globals.is_empty()));
+    cx.update(|_, app| {
+        variables::update(app, |s| s.globals.push(Variable::new("host", "h")));
+    });
+    assert!(store.flush());
+    assert_eq!(store.write_count(), 1);
+    let on_disk = store.load_all().variables.unwrap();
+    assert_eq!(on_disk.globals[0].value, "h");
+    cx.update(|_, app| variables::update(app, |_| {}));
+    assert!(store.flush());
+    assert_eq!(store.write_count(), 1, "没变化不该再写一次");
+}
+
+#[gpui_kit::test]
+fn resolve_layers_environment_over_group_over_global(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals = vec![Variable::new("code", "200"), Variable::new("host", "h")];
+            s.groups
+                .insert("g".into(), vec![Variable::new("code", "418")]);
+            let mut env = Environment::new("dev");
+            env.variables.push(Variable::new("code", "503"));
+            s.active_environment = Some(env.id);
+            s.environments.push(env);
+        });
+    });
+    let draft = RequestDraft {
+        url: "http://{{host}}/status/{{code}}?x={{nope}}".into(),
+        ..Default::default()
+    };
+    cx.read(|app| {
+        let r = variables::resolve(app, Some("g"), draft.clone());
+        assert_eq!(r.draft.url, "http://h/status/503?x={{nope}}");
+        assert!(r.unresolved.contains("nope"));
+        let r = variables::resolve(app, None, draft.clone());
+        assert_eq!(r.draft.url, "http://h/status/503?x={{nope}}");
+    });
+    cx.update(|_, app| variables::set_active_environment(app, None));
+    cx.read(|app| {
+        assert_eq!(
+            variables::resolve(app, Some("g"), draft.clone()).draft.url,
+            "http://h/status/418?x={{nope}}"
+        );
+        assert_eq!(
+            variables::resolve(app, None, draft.clone()).draft.url,
+            "http://h/status/200?x={{nope}}"
+        );
+    });
 }
