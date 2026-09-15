@@ -1265,9 +1265,9 @@ dialog:
       zh-CN: "解散分类「%{name}」？"
       ja: "カテゴリ「%{name}」を解除しますか？"
     body:
-      en: Its requests move back to Uncategorized. No request is deleted.
-      zh-CN: 该分类下的请求会回到未分类，不会删除任何请求。
-      ja: このカテゴリのリクエストは未分類に戻ります。リクエストは削除されません。
+      en: Its requests move back to Uncategorized and its category variables are deleted. No request is deleted.
+      zh-CN: 该分类下的请求会回到未分类，分类变量会被删除；不会删除任何请求。
+      ja: このカテゴリのリクエストは未分類に戻り、カテゴリの変数は削除されます。リクエストは削除されません。
     ok:
       en: Dissolve
       zh-CN: 解散
