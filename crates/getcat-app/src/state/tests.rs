@@ -44,7 +44,7 @@ use crate::state::request_tab::{
     BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestTab, ResponseSection,
     SseBodyMode,
 };
-use crate::state::response::{ResponseState, ResponseView};
+use crate::state::response::{OpsReport, ResponseState, ResponseView};
 use crate::state::saved_filter::SavedFilter;
 use crate::state::settings;
 use crate::state::store;
@@ -2776,11 +2776,11 @@ fn url_bar_with_split_save_and_version_picker_draws(cx: &mut TestAppContext) {
 fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
     // 纯函数部分：http 请求不该多出一页
     assert_eq!(
-        ResponseSection::visible(false),
+        ResponseSection::visible(false, false),
         vec![ResponseSection::Body, ResponseSection::Headers]
     );
     assert_eq!(
-        ResponseSection::visible(true),
+        ResponseSection::visible(true, false),
         vec![
             ResponseSection::Body,
             ResponseSection::Headers,
@@ -5055,6 +5055,57 @@ fn cancel_discards_the_ops_report(cx: &mut TestAppContext) {
             }
         ));
     });
+}
+
+/// 「操作」页签只在这次响应真的挂了报告时出现（纯函数部分）。
+#[test]
+fn ops_section_only_appears_when_a_report_exists() {
+    assert_eq!(
+        ResponseSection::visible(false, false),
+        vec![ResponseSection::Body, ResponseSection::Headers]
+    );
+    assert_eq!(
+        ResponseSection::visible(true, true),
+        vec![
+            ResponseSection::Body,
+            ResponseSection::Headers,
+            ResponseSection::Certificate,
+            ResponseSection::Ops
+        ]
+    );
+}
+
+/// 请求失败时前置结果与「请求失败，未执行」的后置结果一起挂在 `Failed` 上，
+/// `ops_report()` 认得到，「操作」页签也该出现。
+#[gpui_kit::test]
+fn failed_response_still_exposes_the_ops_report(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let post_ops = vec![PostOp {
+        enabled: true,
+        kind: PostOpKind::Assert {
+            subject: ResponseSource::Status,
+            op: AssertOp::Equals,
+            expected: "200".into(),
+        },
+    }];
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response = ResponseState::Failed {
+                error: RequestError::Timeout,
+                ops: Some(OpsReport {
+                    pre: vec![],
+                    post: getcat_core::ops::skip_all(&post_ops),
+                }),
+            };
+            cx.notify();
+        })
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.ops_report().is_some());
+    });
+    assert!(ResponseSection::visible(false, true).contains(&ResponseSection::Ops));
 }
 
 /// `persist == false`（variables.json 在但读不出来）时只改内存、不写盘；正常安装照常写。

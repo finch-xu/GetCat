@@ -374,8 +374,6 @@ pub struct OpsReport {
     pub post: PostReport,
 }
 
-// 计划 3 的「操作」页签（页签徽标「通过 / 总数」）才读这两个；测试已在用
-#[allow(dead_code)]
 impl OpsReport {
     pub fn total(&self) -> usize {
         self.pre.len() + self.post.results.len()
@@ -410,16 +408,12 @@ pub enum ResponseState {
         body: BodyStore,
         view: ResponseView,
         /// 这次发送的前后置操作结果；两边都没有启用的操作时为 None，「操作」页签随之不出现。
-        // 计划 3 的「操作」页签读它；本计划只写入、由测试断言
-        #[allow(dead_code)]
         ops: Option<OpsReport>,
     },
     Failed {
         error: RequestError,
         /// 请求失败（网络错误、后台处理异常）时仍保留的前置结果，后置操作逐条记为
         /// `Skipped(RequestFailed)`；两边都没有启用的操作、或是用户取消时为 None。
-        // 计划 3 的「操作」页签读它；本计划只写入、由测试断言
-        #[allow(dead_code)]
         ops: Option<OpsReport>,
     },
 }

@@ -71,15 +71,20 @@ pub enum ResponseSection {
     Body,
     Headers,
     Certificate,
+    Ops,
 }
 
 impl ResponseSection {
     /// 当前能看到的页签。证书页签只在真拿到了对端证书时出现——http 请求、
-    /// 以及打开校验后握手失败的 https 请求都没有证书可看。
-    pub fn visible(has_certificate: bool) -> Vec<ResponseSection> {
+    /// 以及打开校验后握手失败的 https 请求都没有证书可看；「操作」页签只在这次响应挂了
+    /// 前后置操作报告时出现（两边都没有启用的操作时不出现）。
+    pub fn visible(has_certificate: bool, has_ops: bool) -> Vec<ResponseSection> {
         let mut sections = vec![ResponseSection::Body, ResponseSection::Headers];
         if has_certificate {
             sections.push(ResponseSection::Certificate);
+        }
+        if has_ops {
+            sections.push(ResponseSection::Ops);
         }
         sections
     }
@@ -1264,7 +1269,7 @@ impl RequestTab {
                 }
             }),
             ResponseSection::Headers => Some(CopyTarget::Headers),
-            ResponseSection::Certificate => None,
+            ResponseSection::Certificate | ResponseSection::Ops => None,
         }
     }
 
@@ -1309,6 +1314,14 @@ impl RequestTab {
     pub fn toggle_response_wrap(&mut self, cx: &mut Context<Self>) {
         settings::update(cx, |s| s.wrap_response_body = !s.wrap_response_body);
         cx.notify();
+    }
+
+    /// 当前响应上的前后置操作报告（Done 与 Failed 都可能有；Idle / InFlight / 取消没有）。
+    pub fn ops_report(&self) -> Option<&OpsReport> {
+        match &self.response {
+            ResponseState::Done { ops, .. } | ResponseState::Failed { ops, .. } => ops.as_ref(),
+            _ => None,
+        }
     }
 
     /// 响应体当前这一档是否支持换行：只有 A 档的只读 Editor 支持。
