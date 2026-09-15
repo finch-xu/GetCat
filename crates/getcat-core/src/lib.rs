@@ -10,3 +10,4 @@ pub mod sse;
 pub mod store;
 pub mod tls;
 pub mod url;
+pub mod vars;
