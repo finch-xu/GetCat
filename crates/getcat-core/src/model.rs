@@ -1,6 +1,6 @@
 //! 领域模型：描述"一个具体的请求实例"与"一次响应的元数据"。
 
-use std::{path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -221,6 +221,174 @@ pub enum BodyKind {
         path: PathBuf,
         content_type: Option<String>,
     },
+}
+
+/// 一个变量：全局 / 分类 / 环境三层共用这一个形状（spec「变量与替换」）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Variable {
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 敏感值：界面掩码显示；仍明文落盘（数据目录文件固定 0600）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+    /// 备注，不参与替换；空串不落盘。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+impl Variable {
+    pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+            secret: false,
+            description: String::new(),
+        }
+    }
+}
+
+/// 一个环境（开发 / 测试 / 生产 …）；同一时间只有一个激活。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Environment {
+    pub id: Ulid,
+    pub name: String,
+    #[serde(default)]
+    pub variables: Vec<Variable>,
+}
+
+impl Environment {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            id: Ulid::generate(),
+            name: name.into(),
+            variables: Vec::new(),
+        }
+    }
+}
+
+/// 变量的作用域；`ALL` 的顺序就是界面上下拉框的顺序。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VarScope {
+    Global,
+    Environment,
+    Group,
+}
+
+impl VarScope {
+    pub const ALL: [VarScope; 3] = [VarScope::Global, VarScope::Environment, VarScope::Group];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|s| *s == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(VarScope::Global)
+    }
+}
+
+/// 全部变量（`variables.json`）：全局一层、若干环境、按分类名挂的分类变量。
+///
+/// 分类目前没有实体（由已保存请求的 `group` 反推），所以这里按名字挂；
+/// 分类改名 / 解散时由 app 层调 [`Self::rename_group`] / [`Self::remove_group`] 联动。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct VariableSets {
+    #[serde(default)]
+    pub globals: Vec<Variable>,
+    #[serde(default)]
+    pub environments: Vec<Environment>,
+    #[serde(default)]
+    pub active_environment: Option<Ulid>,
+    #[serde(default)]
+    pub groups: BTreeMap<String, Vec<Variable>>,
+}
+
+impl VariableSets {
+    pub fn active_env(&self) -> Option<&Environment> {
+        let id = self.active_environment?;
+        self.environments.iter().find(|e| e.id == id)
+    }
+
+    pub fn active_env_mut(&mut self) -> Option<&mut Environment> {
+        let id = self.active_environment?;
+        self.environments.iter_mut().find(|e| e.id == id)
+    }
+
+    /// 某个分类的变量；未分类 / 分类没有变量时是空切片。
+    pub fn group_vars(&self, group: Option<&str>) -> &[Variable] {
+        group
+            .and_then(|g| self.groups.get(g))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// 某个作用域的可写变量表；作用域不可用（没激活环境 / 请求未分类）时为 None。
+    pub fn scope_vars_mut(
+        &mut self,
+        scope: VarScope,
+        group: Option<&str>,
+    ) -> Option<&mut Vec<Variable>> {
+        match scope {
+            VarScope::Global => Some(&mut self.globals),
+            VarScope::Environment => self.active_env_mut().map(|e| &mut e.variables),
+            VarScope::Group => group.map(|g| self.groups.entry(g.to_string()).or_default()),
+        }
+    }
+
+    /// 写一个变量：已有同名则只改值（保留 secret / description / enabled），否则追加。
+    /// 返回 false 表示作用域不可用，什么都没写。
+    pub fn set_var(
+        &mut self,
+        scope: VarScope,
+        group: Option<&str>,
+        key: &str,
+        value: &str,
+    ) -> bool {
+        let Some(vars) = self.scope_vars_mut(scope, group) else {
+            return false;
+        };
+        match vars.iter_mut().find(|v| v.key == key) {
+            Some(v) => v.value = value.to_string(),
+            None => vars.push(Variable::new(key, value)),
+        }
+        true
+    }
+
+    /// 分类改名：变量跟着搬；目标已有变量时按 key 合并，目标优先。
+    pub fn rename_group(&mut self, from: &str, to: &str) {
+        if from == to {
+            return;
+        }
+        let Some(moved) = self.groups.remove(from) else {
+            return;
+        };
+        let target = self.groups.entry(to.to_string()).or_default();
+        for v in moved {
+            if !target.iter().any(|t| t.key == v.key) {
+                target.push(v);
+            }
+        }
+    }
+
+    pub fn remove_group(&mut self, name: &str) {
+        self.groups.remove(name);
+    }
+
+    /// 不与现有环境重名的名字：`base`、`base 2`、`base 3` …
+    pub fn unique_env_name(&self, base: &str) -> String {
+        let taken = |n: &str| self.environments.iter().any(|e| e.name == n);
+        if !taken(base) {
+            return base.to_string();
+        }
+        (2..)
+            .map(|i| format!("{base} {i}"))
+            .find(|n| !taken(n))
+            .expect("unbounded counter")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -930,5 +1098,101 @@ mod tests {
                 content_type: None
             }
         );
+    }
+
+    #[test]
+    fn variable_defaults_and_serde_skip_empty_flags() {
+        let v: Variable = serde_json::from_str(r#"{"key":"a"}"#).unwrap();
+        assert_eq!(v.value, "");
+        assert!(v.enabled);
+        assert!(!v.secret);
+        let json = serde_json::to_string(&Variable::new("a", "b")).unwrap();
+        assert!(!json.contains("secret"), "{json}");
+        assert!(!json.contains("description"), "{json}");
+        let s = Variable {
+            secret: true,
+            ..Variable::new("t", "x")
+        };
+        let back: Variable = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn variable_sets_tolerate_missing_fields_and_round_trip() {
+        let empty: VariableSets = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, VariableSets::default());
+        let mut sets = VariableSets::default();
+        let env = Environment::new("dev");
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+        sets.globals.push(Variable::new("host", "h"));
+        sets.groups
+            .insert("订单".into(), vec![Variable::new("code", "418")]);
+        let back: VariableSets =
+            serde_json::from_str(&serde_json::to_string(&sets).unwrap()).unwrap();
+        assert_eq!(back, sets);
+        assert_eq!(back.active_env().map(|e| e.name.as_str()), Some("dev"));
+        assert_eq!(back.group_vars(Some("订单")).len(), 1);
+        assert!(back.group_vars(Some("nope")).is_empty());
+        assert!(back.group_vars(None).is_empty());
+    }
+
+    #[test]
+    fn set_var_updates_value_keeps_flags_and_reports_unavailable_scopes() {
+        let mut sets = VariableSets::default();
+        // 没有激活环境 / 没有分类：写不进去
+        assert!(!sets.set_var(VarScope::Environment, None, "k", "v"));
+        assert!(!sets.set_var(VarScope::Group, None, "k", "v"));
+        assert!(sets.set_var(VarScope::Global, None, "k", "v"));
+        assert_eq!(sets.globals, vec![Variable::new("k", "v")]);
+        // 已有的 key：只改值，secret / description 保留
+        sets.globals[0].secret = true;
+        sets.globals[0].description = "d".into();
+        assert!(sets.set_var(VarScope::Global, None, "k", "v2"));
+        assert_eq!(sets.globals.len(), 1);
+        assert_eq!(sets.globals[0].value, "v2");
+        assert!(sets.globals[0].secret);
+        assert_eq!(sets.globals[0].description, "d");
+        // 分类：按名字建条目
+        assert!(sets.set_var(VarScope::Group, Some("g"), "code", "1"));
+        assert_eq!(sets.group_vars(Some("g"))[0].value, "1");
+        // 环境：写进激活的那个
+        let env = Environment::new("dev");
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+        assert!(sets.set_var(VarScope::Environment, None, "token", "t"));
+        assert_eq!(sets.active_env().unwrap().variables[0].key, "token");
+    }
+
+    #[test]
+    fn rename_group_moves_and_merges_target_wins() {
+        let mut sets = VariableSets::default();
+        sets.groups.insert(
+            "a".into(),
+            vec![Variable::new("x", "from-a"), Variable::new("only_a", "1")],
+        );
+        sets.groups
+            .insert("b".into(), vec![Variable::new("x", "from-b")]);
+        sets.rename_group("a", "b");
+        assert!(!sets.groups.contains_key("a"));
+        let b = sets.group_vars(Some("b"));
+        assert_eq!(b.len(), 2);
+        assert_eq!(b.iter().find(|v| v.key == "x").unwrap().value, "from-b");
+        assert!(b.iter().any(|v| v.key == "only_a"));
+        // 目标不存在：整体搬过去
+        sets.rename_group("b", "c");
+        assert_eq!(sets.group_vars(Some("c")).len(), 2);
+        sets.remove_group("c");
+        assert!(sets.groups.is_empty());
+    }
+
+    #[test]
+    fn unique_env_name_appends_counter() {
+        let mut sets = VariableSets::default();
+        assert_eq!(sets.unique_env_name("dev"), "dev");
+        sets.environments.push(Environment::new("dev"));
+        assert_eq!(sets.unique_env_name("dev"), "dev 2");
+        sets.environments.push(Environment::new("dev 2"));
+        assert_eq!(sets.unique_env_name("dev"), "dev 3");
     }
 }
