@@ -4,9 +4,9 @@
 //! "_postman_variable_scope": "environment" | "globals" }`。`type: secret` ↔ [`Variable::secret`]。
 //! 导出的 secret 值是明文——Postman 自己的导出也是，界面上要提示。
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::model::{Ulid, Variable};
+use crate::model::{Variable, default_true};
 use crate::vars::iso_utc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,20 +31,63 @@ pub enum PostmanEnvError {
     NotEnvironment,
 }
 
-#[derive(Serialize, Deserialize)]
-struct PostmanValue {
+/// 导入用：只读需要的字段；其它字段（`id`、`_postman_exported_at` …）不论取值与类型一律忽略。
+#[derive(Deserialize)]
+struct PostmanFileIn {
+    #[serde(default, deserialize_with = "string_or_empty")]
+    name: String,
+    values: Vec<PostmanValueIn>,
+    #[serde(default, rename = "_postman_variable_scope")]
+    scope: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct PostmanValueIn {
     key: String,
     #[serde(default)]
     value: serde_json::Value,
-    #[serde(default = "default_true")]
+    /// 缺省、`null` 或不是布尔时按启用处理。
+    #[serde(default = "default_true", deserialize_with = "bool_or_true")]
     enabled: bool,
-    /// `"default"` / `"secret"`；其它值当 default。
-    #[serde(default, rename = "type")]
-    kind: String,
+    /// 只有 `"type": "secret"` 算 secret；缺省、`null`、其它值或类型都按 default。
+    #[serde(default, rename = "type", deserialize_with = "is_secret_type")]
+    secret: bool,
 }
 
-fn default_true() -> bool {
-    true
+fn string_or_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(v.as_str().unwrap_or_default().to_string())
+}
+
+fn bool_or_true<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    Ok(serde_json::Value::deserialize(d)?.as_bool().unwrap_or(true))
+}
+
+fn is_secret_type<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    Ok(serde_json::Value::deserialize(d)?.as_str() == Some("secret"))
+}
+
+/// 导出用：字段顺序与 Postman 自己的导出一致。
+#[derive(Serialize)]
+struct PostmanFileOut<'a> {
+    id: String,
+    name: &'a str,
+    values: Vec<PostmanValueOut<'a>>,
+    #[serde(rename = "_postman_variable_scope")]
+    scope: &'static str,
+    #[serde(rename = "_postman_exported_at")]
+    exported_at: String,
+    #[serde(rename = "_postman_exported_using")]
+    exported_using: String,
+}
+
+#[derive(Serialize)]
+struct PostmanValueOut<'a> {
+    key: &'a str,
+    value: &'a str,
+    enabled: bool,
+    #[serde(rename = "type")]
+    kind: &'static str,
 }
 
 /// JSON 值转字符串：string → as-is; null/missing → ""; 其它 → JSON 文本。
@@ -64,29 +107,6 @@ fn scope_from_value(val: &Option<serde_json::Value>) -> PostmanScope {
         Some(serde_json::Value::String(s)) if s == "globals" => PostmanScope::Globals,
         _ => PostmanScope::Environment,
     }
-}
-
-#[derive(Serialize, Deserialize)]
-struct PostmanFile {
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    name: String,
-    values: Vec<PostmanValue>,
-    #[serde(default, rename = "_postman_variable_scope")]
-    scope: Option<serde_json::Value>,
-    #[serde(
-        default,
-        rename = "_postman_exported_at",
-        skip_serializing_if = "Option::is_none"
-    )]
-    exported_at: Option<String>,
-    #[serde(
-        default,
-        rename = "_postman_exported_using",
-        skip_serializing_if = "Option::is_none"
-    )]
-    exported_using: Option<String>,
 }
 
 pub fn parse(text: &str) -> Result<PostmanEnv, PostmanEnvError> {
@@ -113,7 +133,7 @@ pub fn parse(text: &str) -> Result<PostmanEnv, PostmanEnvError> {
         }
     }
 
-    let file: PostmanFile =
+    let file: PostmanFileIn =
         serde_json::from_value(value).map_err(|_| PostmanEnvError::NotEnvironment)?;
     Ok(PostmanEnv {
         name: file.name,
@@ -125,7 +145,7 @@ pub fn parse(text: &str) -> Result<PostmanEnv, PostmanEnvError> {
                 key: v.key,
                 value: value_to_string(&v.value),
                 enabled: v.enabled,
-                secret: v.kind == "secret",
+                secret: v.secret,
                 description: String::new(),
             })
             .collect(),
@@ -138,24 +158,24 @@ pub fn render(name: &str, scope: PostmanScope, variables: &[Variable]) -> String
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let file = PostmanFile {
-        id: Ulid::generate().to_string(),
-        name: name.to_string(),
+    let file = PostmanFileOut {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
         values: variables
             .iter()
-            .map(|v| PostmanValue {
-                key: v.key.clone(),
-                value: serde_json::Value::String(v.value.clone()),
+            .map(|v| PostmanValueOut {
+                key: &v.key,
+                value: &v.value,
                 enabled: v.enabled,
-                kind: if v.secret { "secret" } else { "default" }.to_string(),
+                kind: if v.secret { "secret" } else { "default" },
             })
             .collect(),
-        scope: Some(serde_json::json!(match scope {
+        scope: match scope {
             PostmanScope::Environment => "environment",
             PostmanScope::Globals => "globals",
-        })),
-        exported_at: Some(iso_utc(secs)),
-        exported_using: Some(format!("GetCat/{}", env!("CARGO_PKG_VERSION"))),
+        },
+        exported_at: iso_utc(secs),
+        exported_using: format!("GetCat/{}", env!("CARGO_PKG_VERSION")),
     };
     serde_json::to_string_pretty(&file).expect("plain structs serialize")
 }
@@ -262,5 +282,64 @@ mod tests {
             parse(r#"{"values":[{"value":"x"}]}"#),
             Err(PostmanEnvError::NotEnvironment)
         );
+    }
+
+    /// 只读 name / values / scope 与条目的 key / value / enabled / type；
+    /// 其它字段是 null 或类型不对都不影响导入，enabled / type 不对时按默认处理。
+    #[test]
+    fn tolerates_null_or_mistyped_fields_it_does_not_need() {
+        let text = r#"{
+          "id": null,
+          "name": "Loose",
+          "values": [
+            {"key": "a", "value": "1", "enabled": null, "type": 3},
+            {"key": "b", "value": "2", "enabled": "no", "type": null},
+            {"key": "c", "value": "3", "enabled": false, "type": "secret", "description": null}
+          ],
+          "_postman_variable_scope": "environment",
+          "_postman_exported_at": null,
+          "_postman_exported_using": 7
+        }"#;
+        let env = parse(text).unwrap();
+        assert_eq!(env.name, "Loose");
+        assert_eq!(
+            env.variables,
+            vec![
+                Variable::new("a", "1"),
+                Variable::new("b", "2"),
+                Variable {
+                    enabled: false,
+                    secret: true,
+                    ..Variable::new("c", "3")
+                },
+            ]
+        );
+        // 名字为 null 与缺名字一样，由调用方补
+        assert_eq!(parse(r#"{"name":null,"values":[]}"#).unwrap().name, "");
+    }
+
+    #[test]
+    fn render_writes_a_uuid_id_and_export_metadata() {
+        let text = render("Dev", PostmanScope::Environment, &[]);
+        let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let id = doc["id"].as_str().unwrap();
+        assert_eq!(
+            uuid::Uuid::parse_str(id).map(|u| u.get_version_num()),
+            Ok(4),
+            "{id}"
+        );
+        assert_ne!(
+            render("Dev", PostmanScope::Environment, &[]),
+            text,
+            "每次导出新 id"
+        );
+        assert!(doc["_postman_exported_at"].as_str().unwrap().ends_with('Z'));
+        assert!(
+            doc["_postman_exported_using"]
+                .as_str()
+                .unwrap()
+                .starts_with("GetCat/")
+        );
+        assert_eq!(doc["values"], serde_json::json!([]));
     }
 }

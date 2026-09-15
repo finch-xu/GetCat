@@ -725,7 +725,7 @@ fn default_timeout_secs() -> u64 {
 fn default_max_redirects() -> u32 {
     10
 }
-fn default_true() -> bool {
+pub(crate) fn default_true() -> bool {
     true
 }
 
