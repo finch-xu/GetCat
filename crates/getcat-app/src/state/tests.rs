@@ -2284,7 +2284,15 @@ fn code_sheet_uses_resolved_variables_without_running_pre_ops(cx: &mut TestAppCo
     });
 }
 
-/// 保存 / 重开都带着操作列表，且存的是原文。
+/// 断言操作的期望值（原文或已替换）。
+fn assert_expected(op: &PostOp) -> &str {
+    match &op.kind {
+        PostOpKind::Assert { expected, .. } => expected,
+        other => panic!("not an assert op: {other:?}"),
+    }
+}
+
+/// 保存 / 重开都带着操作列表，且存的是原文；重开后发送一次，草稿里仍是原文。
 #[gpui_kit::test]
 fn saved_requests_keep_ops_and_raw_placeholders(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
@@ -2314,6 +2322,7 @@ fn saved_requests_keep_ops_and_raw_placeholders(cx: &mut TestAppContext) {
     let saved = read_request(&store, id).unwrap();
     assert_eq!(saved.draft.url, "https://{{host}}/x");
     assert_eq!(saved.draft.post_ops.len(), 1);
+    assert_eq!(assert_expected(&saved.draft.post_ops[0]), "{{code}}");
     // 重开：操作跟着回来
     cx.update(|window, cx| {
         ws.update(cx, |ws, cx| {
@@ -2321,10 +2330,49 @@ fn saved_requests_keep_ops_and_raw_placeholders(cx: &mut TestAppContext) {
             ws.open_saved(id, window, cx);
         })
     });
+    let reopened = cx.read(|app| ws.read(app).active_tab());
     cx.read(|app| {
-        let t = ws.read(app).active_tab();
-        assert_eq!(t.read(app).post_ops.len(), 1);
+        let t = reopened.read(app);
+        assert_eq!(t.post_ops.len(), 1);
+        assert_eq!(assert_expected(&t.post_ops[0]), "{{code}}");
     });
+
+    // 重开的 Tab 发送一次：host 指向拒绝连接的端口，code 有值
+    let refused = refused_url();
+    let host = refused
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string();
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals.push(Variable::new("host", host));
+            s.globals.push(Variable::new("code", "200"));
+        })
+    });
+    cx.update(|window, cx| reopened.update(cx, |t, cx| t.send(window, cx)));
+    wait_until(cx, |cx| {
+        cx.read(|app| !reopened.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = reopened.read(app);
+        // 执行用的是替换后的期望值……
+        match &t.response {
+            ResponseState::Failed {
+                ops: Some(report), ..
+            } => assert_eq!(assert_expected(&report.post.results[0].0), "200"),
+            _ => panic!("expected Failed with ops, got {:?}", t.response.error()),
+        }
+        // ……Tab 里仍是原文
+        assert_eq!(assert_expected(&t.draft(app).post_ops[0]), "{{code}}");
+    });
+    // 草稿文件也是原文
+    cx.update(|_, cx| reopened.update(cx, |t, cx| t.save_draft_now(cx)));
+    assert!(store.flush());
+    let tab_id = cx.read(|app| reopened.read(app).id);
+    assert_eq!(
+        assert_expected(&read_draft(&store, tab_id).unwrap().draft.post_ops[0]),
+        "{{code}}"
+    );
 }
 
 #[gpui_kit::test]
@@ -4252,7 +4300,14 @@ fn send_resolves_variables_and_keeps_the_draft_verbatim(cx: &mut TestAppContext)
     wait_until(cx, |cx| {
         cx.read(|app| !tab.read(app).response.is_in_flight())
     });
-    let received = rx.recv().unwrap();
+    // 先确认请求成功：失败时服务端收不到请求，直接 recv 会永远卡住而看不到原因
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.response.is_done(), "{:?}", t.response.error());
+    });
+    let received = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("echo server should have received the request");
     assert!(
         received.starts_with("GET /users/%7B%7Bmissing%7D%7D HTTP/1.1"),
         "{received}"
@@ -4263,7 +4318,6 @@ fn send_resolves_variables_and_keeps_the_draft_verbatim(cx: &mut TestAppContext)
     );
     cx.read(|app| {
         let t = tab.read(app);
-        assert!(t.response.is_done(), "{:?}", t.response.error());
         assert_eq!(
             t.unresolved_vars.iter().cloned().collect::<Vec<_>>(),
             vec!["missing".to_string()]
@@ -4306,7 +4360,13 @@ fn pre_ops_write_variables_before_the_request_goes_out(cx: &mut TestAppContext) 
     wait_until(cx, |cx| {
         cx.read(|app| !tab.read(app).response.is_in_flight())
     });
-    let received = rx.recv().unwrap();
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.response.is_done(), "{:?}", t.response.error());
+    });
+    let received = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("echo server should have received the request");
     assert!(received.starts_with("GET /hi/cat-"), "{received}");
     assert!(store.flush());
     let who = store
@@ -4652,4 +4712,90 @@ fn variables_persist_only_when_the_file_is_not_left_unreadable() {
         &path,
         &[err(&dir.path().join("settings.json"))]
     ));
+}
+
+/// 保存到分类的请求：后置提取到「分类」作用域，写进该分类的变量表并落盘。
+#[gpui_kit::test]
+fn post_ops_extract_into_the_saved_group(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, _rx) = echo_server(r#"{"data":{"token":"T"}}"#);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, &base, cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.post_ops = vec![PostOp {
+                enabled: true,
+                kind: PostOpKind::Extract {
+                    scope: VarScope::Group,
+                    key: "token".into(),
+                    source: ResponseSource::JsonPath {
+                        path: "$.data.token".into(),
+                    },
+                },
+            }];
+        })
+    });
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab.clone(), "login".into(), Some("g".into()), cx)
+        })
+    })
+    .unwrap();
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.send(window, cx)));
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        match &t.response {
+            ResponseState::Done {
+                ops: Some(report), ..
+            } => {
+                assert_eq!(report.post.results[0].1, OpOutcome::Passed);
+                assert_eq!(report.post.extracted.len(), 1);
+            }
+            _ => panic!("expected Done with ops, got {:?}", t.response.error()),
+        }
+        let sets = variables::variables(app);
+        assert_eq!(sets.group_vars(Some("g")), [Variable::new("token", "T")]);
+        assert!(sets.globals.is_empty());
+    });
+    assert!(store.flush());
+    let on_disk = store.load_all().variables.unwrap();
+    assert_eq!(on_disk.group_vars(Some("g")), [Variable::new("token", "T")]);
+}
+
+/// 改 URL / 重新载入草稿时，上一次发送留下的未定义变量提示与校验错误一起清掉。
+#[gpui_kit::test]
+fn url_edits_and_load_draft_clear_unresolved_vars(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let send_bad = |cx: &mut VisualTestContext| {
+        set_url_and_send(&tab, "ftp://{{nope}}/", cx);
+        cx.read(|app| {
+            let t = tab.read(app);
+            assert!(t.prepare_error.is_some());
+            assert!(t.unresolved_vars.contains("nope"));
+        });
+    };
+    send_bad(cx);
+    change_url(&tab, "https://api.test/", cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.prepare_error.is_none());
+        assert!(t.unresolved_vars.is_empty(), "{:?}", t.unresolved_vars);
+    });
+
+    send_bad(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.load_draft(&RequestDraft::default(), window, cx)
+        })
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.prepare_error.is_none());
+        assert!(t.unresolved_vars.is_empty(), "{:?}", t.unresolved_vars);
+    });
 }

@@ -1153,7 +1153,7 @@ impl Workspace {
         tab.update(cx, |t, cx| {
             t.saved_id = Some(id);
             t.saved_name = Some(name.into());
-            t.saved_group = group.clone();
+            t.saved_group = group;
             t.mark_clean(cx);
             t.save_draft_now(cx);
         });

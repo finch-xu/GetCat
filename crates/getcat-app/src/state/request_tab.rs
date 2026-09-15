@@ -265,7 +265,8 @@ pub struct RequestTab {
     /// 发送前校验失败的错误（URL 非法 / Header 非法 / 未选文件），显示在 URL 栏下方（spec §11）；
     /// 存错误本身，渲染时按当前语言翻译。
     pub prepare_error: Option<RequestError>,
-    /// 上一次发送时没能解析的变量名（URL 栏下方 warning）；每次发送重算。
+    /// 上一次发送时没能解析的变量名（URL 栏下方 warning）；每次发送重算，与 `prepare_error`
+    /// 同步清空（改 URL、载入草稿）。
     pub unresolved_vars: BTreeSet<String>,
     /// 前置 / 后置操作。计划 3 会换成表格实体；此时先做纯数据字段。
     pub pre_ops: Vec<PreOp>,
@@ -460,7 +461,9 @@ impl RequestTab {
                 let names = extract_path_params(&self.url.read(cx).value());
                 self.path_params
                     .update(cx, |t, cx| t.sync_keys(&names, window, cx));
+                // 上一次发送的校验错误与未定义变量提示都描述旧 URL，一起清掉
                 self.prepare_error = None;
+                self.unresolved_vars.clear();
                 self.mark_dirty(cx);
             }
             InputEvent::PressEnter { .. } => self.send(window, cx),
@@ -809,6 +812,7 @@ impl RequestTab {
         self.pre_ops = draft.pre_ops.clone();
         self.post_ops = draft.post_ops.clone();
         self.prepare_error = None;
+        self.unresolved_vars.clear();
         self.refresh_body_hint(cx);
         cx.notify();
     }
@@ -1020,7 +1024,9 @@ impl RequestTab {
                 let mut report = report;
                 if let Some(report) = report.as_mut() {
                     // generation 已在函数开头校验：过期回调不会走到这里，提取值也就不会写盘。
-                    // 必须在组装 OpsReport 之前调：写不进去的提取行在这里才被改写为「跳过」
+                    // 必须在组装 OpsReport 之前调：写不进去的提取行在这里才被改写为「跳过」。
+                    // 分类取响应到达时的 saved_group 是有意的：分类改名 / 解散会同步 Tab 的
+                    // saved_group，发送时的旧名可能已经不存在了
                     variables::apply_extracted(cx, self.saved_group.as_deref(), report);
                 }
                 let ops = (!pre.is_empty() || report.is_some()).then(|| OpsReport {
