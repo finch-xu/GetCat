@@ -244,17 +244,28 @@ pub mod json_path {
                 return Some(cur);
             }
             if let Some(after) = rest.strip_prefix('[') {
-                let end = after.find(']')?;
-                let inner = after[..end].trim();
-                let quoted = inner
-                    .strip_prefix('"')
-                    .and_then(|s| s.strip_suffix('"'))
-                    .or_else(|| inner.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')));
-                cur = match quoted {
-                    Some(key) => cur.get(key)?,
-                    None => cur.get(inner.parse::<usize>().ok()?)?,
+                // 引号内的 key 可能含 `]`，所以先按引号定界，不能先找 `]` 再判断是不是引号
+                // （那样会把引号内的 `]` 当成收尾，切断 key）。
+                let quote = match after.as_bytes().first() {
+                    Some(b'"') => Some('"'),
+                    Some(b'\'') => Some('\''),
+                    _ => None,
                 };
-                rest = &after[end + 1..];
+                if let Some(q) = quote {
+                    let body = &after[1..];
+                    let close = body.find(q)?;
+                    // 闭合引号后必须紧跟 `]`；不是就是畸形输入（未闭合、引号不匹配），返回 None。
+                    if body.as_bytes().get(close + 1) != Some(&b']') {
+                        return None;
+                    }
+                    cur = cur.get(&body[..close])?;
+                    rest = &body[close + 2..];
+                } else {
+                    let end = after.find(']')?;
+                    let inner = after[..end].trim();
+                    cur = cur.get(inner.parse::<usize>().ok()?)?;
+                    rest = &after[end + 1..];
+                }
             } else {
                 let end = rest.find(['.', '[']).unwrap_or(rest.len());
                 let name = &rest[..end];
@@ -332,7 +343,7 @@ mod tests {
     #[test]
     fn json_path_subset() {
         let v: serde_json::Value = serde_json::from_str(
-            r#"{"data":{"token":"T","items":[{"id":1},{"id":"two"}],"n":null,"ok":true,"k.v":3}}"#,
+            r#"{"data":{"token":"T","items":[{"id":1},{"id":"two"}],"n":null,"ok":true,"k.v":3,"x]y":4,"a'b":5}}"#,
         )
         .unwrap();
         let s = |p: &str| json_path::get(&v, p).map(json_path::value_to_string);
@@ -346,6 +357,13 @@ mod tests {
         assert_eq!(s("data['k.v']").as_deref(), Some("3"));
         assert_eq!(s("data.items[0]").as_deref(), Some(r#"{"id":1}"#));
         assert_eq!(s("$").as_deref().map(|x| x.starts_with('{')), Some(true));
+        // 引号内的 key 本身可以含 `]`：不能先找 `]` 再判断引号，否则会把 key 切断
+        assert_eq!(s(r#"data["x]y"]"#).as_deref(), Some("4"));
+        assert_eq!(s("data['x]y']").as_deref(), Some("4"));
+        assert_eq!(s(r#"data["a'b"]"#).as_deref(), Some("5"));
+        // 畸形输入：未闭合的引号 / 引号不匹配，都应返回 None 而不是 panic
+        assert_eq!(s(r#"data["x]y"#), None);
+        assert_eq!(s(r#"data["x]y']"#), None);
         assert_eq!(s("data.missing"), None);
         assert_eq!(s("data.items[9]"), None);
         assert_eq!(s("data.items[x]"), None);
