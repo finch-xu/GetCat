@@ -30,7 +30,7 @@ use getcat_core::tls::{CertWarning, CertificateInfo};
 use gpui_kit::base::TextSelection;
 use gpui_kit::component::{
     ActiveTheme, IndexPath, Root,
-    input::InputEvent,
+    input::{InputEvent, InputState},
     select::{SelectEvent, SelectState},
 };
 use gpui_kit::{
@@ -56,7 +56,7 @@ use crate::state::workspace::{
 };
 use crate::ui::body_view::{LINE_HEIGHT_PX, gutter_px};
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
-use crate::ui::ops_table::{OpsMode, OpsTable, PostRowKind};
+use crate::ui::ops_table::{OpsMode, OpsTable, OpsTableEvent, PostRowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 use crate::ui::tab_strip::{page_count, tabs_per_page};
 use getcat_core::model::{LanguagePref, MAX_TAB_ROWS};
@@ -2995,21 +2995,9 @@ fn ops_table_select_changes_after_removing_a_row_land_on_the_right_row(cx: &mut 
     cx.update(|window, cx| table.update(cx, |t, cx| t.remove_row(0, window, cx)));
     cx.read(|app| assert_eq!(table.read(app).post_ops(app), ops[1..].to_vec()));
 
-    // 与用户在下拉里选中一项走同一条路：改选中项并发出 Confirm，由表格的订阅处理
-    let pick =
-        |cx: &mut VisualTestContext, sel: Entity<SelectState<Vec<SharedString>>>, ix: usize| {
-            cx.update(|window, cx| {
-                sel.update(cx, |s, cx| {
-                    s.set_selected_index(Some(IndexPath::new(ix)), window, cx);
-                    let value = s.selected_value().cloned();
-                    cx.emit(SelectEvent::Confirm(value));
-                })
-            });
-        };
-
     // 第 0 行（原第 1 行）作用域 → 当前环境
     let scope_select = cx.read(|app| table.read(app).row_scope_select(0));
-    pick(cx, scope_select, VarScope::Environment.index());
+    pick_select(cx, &scope_select, VarScope::Environment.index());
     let row0_extract = PostOp {
         enabled: true,
         kind: PostOpKind::Extract {
@@ -3027,7 +3015,7 @@ fn ops_table_select_changes_after_removing_a_row_land_on_the_right_row(cx: &mut 
 
     // 第 1 行（原第 2 行）算子 → 包含
     let op_select = cx.read(|app| table.read(app).row_op_select(1));
-    pick(cx, op_select, AssertOp::Contains.index());
+    pick_select(cx, &op_select, AssertOp::Contains.index());
     let row1_contains = PostOp {
         enabled: true,
         kind: PostOpKind::Assert {
@@ -3045,7 +3033,7 @@ fn ops_table_select_changes_after_removing_a_row_land_on_the_right_row(cx: &mut 
 
     // 第 0 行类型 → 断言响应头：参数 A / B 原样沿用，第 1 行不受影响
     let kind_select = cx.read(|app| table.read(app).row_kind_select(0));
-    pick(cx, kind_select, PostRowKind::AssertHeader.index());
+    pick_select(cx, &kind_select, PostRowKind::AssertHeader.index());
     cx.read(|app| {
         assert_eq!(
             table.read(app).post_ops(app),
@@ -3063,6 +3051,169 @@ fn ops_table_select_changes_after_removing_a_row_land_on_the_right_row(cx: &mut 
         );
         assert_eq!(table.read(app).row_count(), 3);
     });
+}
+
+/// 与用户在下拉里选中一项走同一条路：改选中项并发出 Confirm，由表格的订阅处理。
+fn pick_select(
+    cx: &mut VisualTestContext,
+    sel: &Entity<SelectState<Vec<SharedString>>>,
+    ix: usize,
+) {
+    cx.update(|window, cx| {
+        sel.update(cx, |s, cx| {
+            s.set_selected_index(Some(IndexPath::new(ix)), window, cx);
+            let value = s.selected_value().cloned();
+            cx.emit(SelectEvent::Confirm(value));
+        })
+    });
+}
+
+/// 与用户打字走同一条路：`set_value` 本身不发事件，改完值再补发 Change，由表格的订阅处理。
+fn type_input(cx: &mut VisualTestContext, input: &Entity<InputState>, text: &str) {
+    let text = text.to_string();
+    cx.update(|window, cx| {
+        input.update(cx, |s, cx| {
+            s.set_value(text, window, cx);
+            cx.emit(InputEvent::Change);
+        })
+    });
+}
+
+/// 被禁用的输入框（Status 类型的参数 A）文字保留，但不参与判空与生成操作；切回来文字还在。
+#[gpui_kit::test]
+fn ops_table_disabled_source_input_keeps_text_but_produces_no_op(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let a = cx.read(|app| table.read(app).row_a_input(0));
+    type_input(cx, &a, "$.data.token");
+    cx.read(|app| {
+        assert_eq!(table.read(app).post_ops(app).len(), 1);
+        assert_eq!(table.read(app).row_count(), 2);
+    });
+
+    // 切到「断言状态码」：参数 A 禁用，这一行没有任何生效的输入 → 不产出操作
+    let kind_select = cx.read(|app| table.read(app).row_kind_select(0));
+    pick_select(cx, &kind_select, PostRowKind::AssertStatus.index());
+    cx.read(|app| {
+        assert!(table.read(app).post_ops(app).is_empty());
+        assert_eq!(a.read(app).value().as_ref(), "$.data.token");
+    });
+
+    // 切回「提取 JSON 路径」并填变量名：路径原样恢复，操作重新出现
+    pick_select(cx, &kind_select, PostRowKind::ExtractJson.index());
+    let b = cx.read(|app| table.read(app).row_b_input(0));
+    type_input(cx, &b, "tok");
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![PostOp {
+                enabled: true,
+                kind: PostOpKind::Extract {
+                    scope: VarScope::Global,
+                    key: "tok".into(),
+                    source: ResponseSource::JsonPath {
+                        path: "$.data.token".into()
+                    },
+                },
+            }]
+        )
+    });
+}
+
+/// 算子切到 Exists 后期望值输入框禁用：残留文字不进 `expected`，切回来又生效。
+#[gpui_kit::test]
+fn ops_table_exists_ignores_leftover_expected_value(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let assert_with = |op: AssertOp, expected: &str| PostOp {
+        enabled: true,
+        kind: PostOpKind::Assert {
+            subject: ResponseSource::JsonPath {
+                path: "$.ok".into(),
+            },
+            op,
+            expected: expected.into(),
+        },
+    };
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_post_ops(&[assert_with(AssertOp::Equals, "true")], window, cx)
+        })
+    });
+
+    let op_select = cx.read(|app| table.read(app).row_op_select(0));
+    pick_select(cx, &op_select, AssertOp::Exists.index());
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![assert_with(AssertOp::Exists, "")]
+        );
+        let b = table.read(app).row_b_input(0);
+        assert_eq!(b.read(app).value().as_ref(), "true");
+    });
+
+    pick_select(cx, &op_select, AssertOp::Equals.index());
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![assert_with(AssertOp::Equals, "true")]
+        )
+    });
+}
+
+/// 空行上挑下拉 / 删空行不影响 `post_ops()`，不该发 `Changed`（任务 3 会拿它置脏）；非空行上改下拉要发。
+#[gpui_kit::test]
+fn ops_table_only_emits_changed_when_ops_can_change(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let changed = Rc::new(Cell::new(0));
+    let _sub = cx.update(|_, cx| {
+        let changed = changed.clone();
+        cx.subscribe(&table, move |_, _: &OpsTableEvent, _| {
+            changed.set(changed.get() + 1)
+        })
+    });
+
+    // 末尾空行（第 0 行）上改三个下拉、再删掉它：都不发
+    let (kind_select, scope_select, op_select) = cx.read(|app| {
+        let t = table.read(app);
+        (
+            t.row_kind_select(0),
+            t.row_scope_select(0),
+            t.row_op_select(0),
+        )
+    });
+    pick_select(cx, &scope_select, VarScope::Environment.index());
+    pick_select(cx, &kind_select, PostRowKind::AssertHeader.index());
+    pick_select(cx, &op_select, AssertOp::Contains.index());
+    cx.update(|window, cx| table.update(cx, |t, cx| t.remove_row(0, window, cx)));
+    assert_eq!(changed.get(), 0);
+    cx.read(|app| {
+        assert!(table.read(app).post_ops(app).is_empty());
+        assert_eq!(table.read(app).row_count(), 1);
+    });
+
+    // 程序化载入一条非空行：不发
+    let op = PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Global,
+            key: "k".into(),
+            source: ResponseSource::Header { name: "h".into() },
+        },
+    };
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_post_ops(&[op], window, cx)));
+    assert_eq!(changed.get(), 0);
+
+    // 非空行（第 0 行）改作用域：发一次
+    let scope_select = cx.read(|app| table.read(app).row_scope_select(0));
+    pick_select(cx, &scope_select, VarScope::Group.index());
+    assert_eq!(changed.get(), 1);
+
+    // 新的末尾空行（第 1 行）改类型：不发
+    let kind_select = cx.read(|app| table.read(app).row_kind_select(1));
+    pick_select(cx, &kind_select, PostRowKind::AssertJson.index());
+    assert_eq!(changed.get(), 1);
 }
 
 #[gpui_kit::test]

@@ -185,6 +185,18 @@ pub(crate) fn build_post_op(
     PostOp { enabled, kind }
 }
 
+/// 一行里哪些输入框生效：`(参数 A, 参数 B)`。前置模式两个都生效；后置模式 Status 类型没有参数 A，
+/// Exists 断言没有期望值。失效的输入框禁用但文字保留（切回来还在），判空与生成操作时当作空串。
+fn active_inputs(mode: OpsMode, kind: PostRowKind, op: AssertOp) -> (bool, bool) {
+    match mode {
+        OpsMode::Pre => (true, true),
+        OpsMode::Post => (
+            kind.has_source_arg(),
+            !(kind.is_assert() && op == AssertOp::Exists),
+        ),
+    }
+}
+
 type LabelSelect = SelectState<Vec<SharedString>>;
 
 struct OpsRow {
@@ -307,34 +319,34 @@ impl OpsTable {
             cx.subscribe_in(
                 &scope_select,
                 window,
-                |this, sel, _: &SelectEvent<Vec<SharedString>>, _, cx| {
+                |this, sel, _: &SelectEvent<Vec<SharedString>>, window, cx| {
                     let scope = VarScope::from_index(selected_row(sel, cx));
-                    let Some(row) = this.rows.iter_mut().find(|r| r.scope_select == *sel) else {
+                    let Some(ix) = this.rows.iter().position(|r| r.scope_select == *sel) else {
                         return;
                     };
-                    if row.scope == scope {
+                    if this.rows[ix].scope == scope {
                         return;
                     }
-                    row.scope = scope;
-                    cx.emit(OpsTableEvent::Changed);
-                    cx.notify();
+                    let was_empty = this.row_is_empty_at(ix, cx);
+                    this.rows[ix].scope = scope;
+                    this.after_row_select_change(ix, was_empty, window, cx);
                 },
             ),
             cx.subscribe_in(
                 &op_select,
                 window,
-                |this, sel, _: &SelectEvent<Vec<SharedString>>, _, cx| {
+                |this, sel, _: &SelectEvent<Vec<SharedString>>, window, cx| {
                     let op = AssertOp::from_index(selected_row(sel, cx));
-                    let Some(row) = this.rows.iter_mut().find(|r| r.op_select == *sel) else {
+                    let Some(ix) = this.rows.iter().position(|r| r.op_select == *sel) else {
                         return;
                     };
-                    if row.op == op {
+                    if this.rows[ix].op == op {
                         return;
                     }
-                    // 算子决定期望值输入框是否禁用（Exists），需要重绘
-                    row.op = op;
-                    cx.emit(OpsTableEvent::Changed);
-                    cx.notify();
+                    // 算子决定期望值输入框是否生效（Exists），可能改变这一行是否为空
+                    let was_empty = this.row_is_empty_at(ix, cx);
+                    this.rows[ix].op = op;
+                    this.after_row_select_change(ix, was_empty, window, cx);
                 },
             ),
             cx.subscribe_in(&a_state, window, Self::on_input_event),
@@ -397,8 +409,45 @@ impl OpsTable {
         }
     }
 
+    /// 一行参与生成操作的两个文本 `(参数 A, 参数 B)`：失效的输入框当作空串。
+    fn active_texts(&self, r: &OpsRow, cx: &App) -> (SharedString, SharedString) {
+        let (a_on, b_on) = active_inputs(self.mode, r.kind, r.op);
+        let text = |on: bool, input: &Entity<InputState>| {
+            if on {
+                input.read(cx).value()
+            } else {
+                SharedString::default()
+            }
+        };
+        (text(a_on, &r.a), text(b_on, &r.b))
+    }
+
+    /// 生效的输入框全空即为空行（后置行一个生效输入框都没有时也算空，不产出操作）。
     fn row_is_empty(&self, r: &OpsRow, cx: &App) -> bool {
-        r.a.read(cx).value().is_empty() && r.b.read(cx).value().is_empty()
+        let (a, b) = self.active_texts(r, cx);
+        a.is_empty() && b.is_empty()
+    }
+
+    fn row_is_empty_at(&self, ix: usize, cx: &App) -> bool {
+        self.rows.get(ix).is_none_or(|r| self.row_is_empty(r, cx))
+    }
+
+    /// 下拉改完之后调用。改动前或改动后这一行不为空，才可能影响 `pre_ops` / `post_ops`，
+    /// 这时才发 `Changed`：空行上挑下拉不该把页签标成已修改。
+    /// 下拉可能让失效输入框里保留的文字重新生效，末尾行因此变成非空时要补新的空行。
+    fn after_row_select_change(
+        &mut self,
+        ix: usize,
+        was_empty: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let now_empty = self.row_is_empty_at(ix, cx);
+        self.ensure_trailing_empty_row(window, cx);
+        if !(was_empty && now_empty) {
+            cx.emit(OpsTableEvent::Changed);
+        }
+        cx.notify();
     }
 
     fn ensure_trailing_empty_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -421,35 +470,44 @@ impl OpsTable {
         cx: &mut Context<Self>,
     ) {
         let (a_ph, b_ph) = self.placeholders(kind);
-        let Some(row) = self.rows.get_mut(ix) else {
+        let Some(row) = self.rows.get(ix) else {
             return;
         };
         if row.kind == kind {
             return;
         }
+        let was_empty = self.row_is_empty(row, cx);
+        let row = &mut self.rows[ix];
         row.kind = kind;
         row.a
             .update(cx, |s, cx| s.set_placeholder(a_ph, window, cx));
         row.b
             .update(cx, |s, cx| s.set_placeholder(b_ph, window, cx));
-        cx.emit(OpsTableEvent::Changed);
-        cx.notify();
+        self.after_row_select_change(ix, was_empty, window, cx);
     }
 
+    /// 删掉空行不影响操作列表，不发 `Changed`。
     pub(crate) fn remove_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let was_empty = self.row_is_empty_at(ix, cx);
         if ix < self.rows.len() {
             self.rows.remove(ix);
         }
         self.ensure_trailing_empty_row(window, cx);
-        cx.emit(OpsTableEvent::Changed);
+        if !was_empty {
+            cx.emit(OpsTableEvent::Changed);
+        }
         cx.notify();
     }
 
+    /// 启用状态不影响判空；空行不进操作列表，勾选它不发 `Changed`。
     fn toggle_row(&mut self, ix: usize, checked: bool, cx: &mut Context<Self>) {
-        if let Some(r) = self.rows.get_mut(ix) {
-            r.enabled = checked;
+        let Some(r) = self.rows.get_mut(ix) else {
+            return;
+        };
+        r.enabled = checked;
+        if !self.row_is_empty_at(ix, cx) {
+            cx.emit(OpsTableEvent::Changed);
         }
-        cx.emit(OpsTableEvent::Changed);
         cx.notify();
     }
 
@@ -457,13 +515,16 @@ impl OpsTable {
         self.rows
             .iter()
             .filter(|r| !self.row_is_empty(r, cx))
-            .map(|r| PreOp {
-                enabled: r.enabled,
-                kind: PreOpKind::SetVariable {
-                    scope: r.scope,
-                    key: r.a.read(cx).value().to_string(),
-                    value: r.b.read(cx).value().to_string(),
-                },
+            .map(|r| {
+                let (key, value) = self.active_texts(r, cx);
+                PreOp {
+                    enabled: r.enabled,
+                    kind: PreOpKind::SetVariable {
+                        scope: r.scope,
+                        key: key.to_string(),
+                        value: value.to_string(),
+                    },
+                }
             })
             .collect()
     }
@@ -494,14 +555,8 @@ impl OpsTable {
             .iter()
             .filter(|r| !self.row_is_empty(r, cx))
             .map(|r| {
-                build_post_op(
-                    r.kind,
-                    r.enabled,
-                    &r.a.read(cx).value(),
-                    r.scope,
-                    r.op,
-                    &r.b.read(cx).value(),
-                )
+                let (a, b) = self.active_texts(r, cx);
+                build_post_op(r.kind, r.enabled, &a, r.scope, r.op, &b)
             })
             .collect()
     }
@@ -551,6 +606,16 @@ impl OpsTable {
     pub fn row_op_select(&self, ix: usize) -> Entity<LabelSelect> {
         self.rows[ix].op_select.clone()
     }
+
+    #[cfg(test)]
+    pub fn row_a_input(&self, ix: usize) -> Entity<InputState> {
+        self.rows[ix].a.clone()
+    }
+
+    #[cfg(test)]
+    pub fn row_b_input(&self, ix: usize) -> Entity<InputState> {
+        self.rows[ix].b.clone()
+    }
 }
 
 impl OpsTable {
@@ -561,8 +626,8 @@ impl OpsTable {
         let kind = row.kind;
         let hover_bg = cx.theme().table_hover;
         let is_assert_row = mode == OpsMode::Post && kind.is_assert();
-        let a_disabled = mode == OpsMode::Post && !kind.has_source_arg();
-        let b_disabled = is_assert_row && row.op == AssertOp::Exists;
+        let (a_on, b_on) = active_inputs(mode, kind, row.op);
+        let (a_disabled, b_disabled) = (!a_on, !b_on);
         let (a_ph, b_ph) = self.placeholders(kind);
         h_flex()
             .id(("ops-row", ix))
