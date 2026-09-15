@@ -207,6 +207,13 @@ impl Workspace {
                 cx.notify();
             }));
         }
+        // 变量表可能在别处被改（前置 / 后置操作写回、抽屉里切换 / 删除环境）：
+        // 标签栏的环境切换器直接读全局，不订阅就画面滞后到下一次任意重绘。
+        ws._subs.push(
+            cx.observe_global_in::<variables::VariablesHandle>(window, |_this, _window, cx| {
+                cx.notify()
+            }),
+        );
 
         let (drafts, active) = order_drafts(&state, drafts);
         let split = ws.split;
@@ -1559,6 +1566,29 @@ impl Workspace {
         self.code_sheet.update(cx, |sheet, cx| {
             sheet.load(draft, disabled, window, cx);
         });
+    }
+
+    /// 标签栏环境切换器的动作：`None` 表示「不用环境」。
+    pub fn select_environment(
+        &mut self,
+        id: Option<Ulid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        variables::set_active_environment(cx, id);
+        // 「生成代码」抽屉开着时，展开结果随环境变化，要立刻刷新，否则显示的是旧环境的请求
+        if self.open_tool == Some(ToolSection::CodeGen) {
+            self.refresh_code_sheet(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// 切换器按钮上的文字：当前环境名，没有则「无环境」。
+    pub fn environment_label(&self, cx: &App) -> SharedString {
+        variables::variables(cx)
+            .active_env()
+            .map(|e| SharedString::from(e.name.clone()))
+            .unwrap_or_else(|| tr!("env_switcher.none"))
     }
 }
 

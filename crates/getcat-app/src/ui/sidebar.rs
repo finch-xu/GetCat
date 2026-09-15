@@ -34,6 +34,7 @@ use crate::state::workspace::{SidebarSection, Workspace};
 use crate::templates::{self, TemplateGroup};
 use crate::ui::method_color;
 use crate::ui::text::theme_label;
+use crate::ui::variables_sheet::SheetScope;
 use crate::{OpenSettings, SaveRequest, ToggleSidebar};
 
 /// 列表行高：布局用 `h_11()`（2.75 rem），默认 rem 下等于 44 px；
@@ -413,8 +414,10 @@ impl Workspace {
                 let menu_ws = weak.clone();
                 row.context_menu(move |menu, _, _| {
                     let rename_ws = menu_ws.clone();
+                    let vars_ws = menu_ws.clone();
                     let dissolve_ws = menu_ws.clone();
                     let rename_name = name.clone();
+                    let vars_name = name.clone();
                     let dissolve_name = name.clone();
                     menu.item(
                         PopupMenuItem::new(tr!("sidebar.saved.menu_rename_group")).on_click(
@@ -422,6 +425,22 @@ impl Workspace {
                                 if let Some(ws) = rename_ws.upgrade() {
                                     ws.update(cx, |ws, cx| {
                                         ws.prompt_rename_group(rename_name.clone(), window, cx)
+                                    });
+                                }
+                            },
+                        ),
+                    )
+                    .item(
+                        PopupMenuItem::new(tr!("sidebar.saved.menu_group_vars")).on_click(
+                            move |_, window, cx| {
+                                if let Some(ws) = vars_ws.upgrade() {
+                                    ws.update(cx, |ws, cx| {
+                                        ws.open_variables_sheet(
+                                            SheetScope::Group,
+                                            Some(vars_name.clone()),
+                                            window,
+                                            cx,
+                                        )
                                     });
                                 }
                             },

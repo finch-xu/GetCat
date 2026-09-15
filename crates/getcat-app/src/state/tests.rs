@@ -4467,7 +4467,8 @@ fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_tab_rows(cx)));
     cx.read(|app| assert_eq!(ws.read(app).tab_rows(), MAX_TAB_ROWS));
 
-    // 画一帧，标签区才量得到可用宽度；900 px 下每行 4 个（TAB_WIDTH = 200）、每页 12 个
+    // 画一帧，标签区才量得到可用宽度（900 px 减去新建按钮与环境切换器等控件后还剩多少，
+    // 不摆死成常量——控件多一个 / 宽一点都不该让这条测试跟着改数字）
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
         ws_element.into_any_element()
@@ -4481,9 +4482,18 @@ fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
         );
     });
 
-    // 翻到下一页，再翻回来；两端都不该越界
+    // 翻到下一页，再翻回来；两端都不该越界。`toggle_tab_rows` 那一下是在布局量出来
+    // 之前调的 `reveal_active_tab`（`strip_width` 还是 0），算出来的页码本来就偏大，
+    // 所以这一步的期望值不是「+1」，而是「撞到量出真实宽度后的末页就停住」。
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.step_tabs(1, cx)));
-    cx.read(|app| assert_eq!(ws.read(app).tab_page(), 1));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        let pages = page_count(
+            ws.tab_count(),
+            tabs_per_page(ws.strip_width(), MAX_TAB_ROWS),
+        );
+        assert_eq!(ws.tab_page(), pages - 1, "翻到底就停住，不越界");
+    });
     cx.update(|_, cx| {
         ws.update(cx, |ws, cx| {
             for _ in 0..10 {
@@ -4990,6 +5000,43 @@ fn resolve_layers_environment_over_group_over_global(cx: &mut TestAppContext) {
         assert_eq!(
             variables::resolve(app, None, draft.clone()).draft.url,
             "http://h/status/200?x={{nope}}"
+        );
+    });
+}
+
+/// 切换器菜单动作：选环境 → 激活；选「无环境」→ 清空。`environment_label` 直接读全局，
+/// 但标签栏要跟着重绘，所以顺带断言 `Workspace` 在全局变化（哪怕不经 `select_environment`）
+/// 时也会被 `cx.notify()` 唤醒。
+#[gpui_kit::test]
+fn environment_switcher_activates_and_clears(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let id = cx.update(|_, app| {
+        let mut id = None;
+        variables::update(app, |s| {
+            let env = Environment::new("dev");
+            id = Some(env.id);
+            s.environments.push(env);
+        });
+        id.unwrap()
+    });
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.select_environment(Some(id), window, cx)));
+    cx.read(|app| {
+        assert_eq!(variables::variables(app).active_environment, Some(id));
+        assert_eq!(ws.read(app).environment_label(app).as_ref(), "dev");
+    });
+
+    // 不经 `select_environment`、直接改全局：`environment_label` 会读到新值，
+    // 前提是 Workspace 观察了 `VariablesHandle` 并在变化时 notify——否则标签栏就是
+    // 对的但画面还停在旧帧（下一次任意重绘才会顺带更新，属于可见的滞后）。
+    cx.update(|_, app| variables::set_active_environment(app, None));
+    cx.run_until_parked();
+    cx.read(|app| {
+        let _locale = crate::i18n::locale_test_lock();
+        assert_eq!(variables::variables(app).active_environment, None);
+        assert_eq!(
+            ws.read(app).environment_label(app).as_ref(),
+            "No environment"
         );
     });
 }

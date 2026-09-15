@@ -376,6 +376,10 @@ sidebar:
       en: Dissolve Category
       zh-CN: 解散分类
       ja: カテゴリを解除
+    menu_group_vars:
+      en: Category Variables…
+      zh-CN: 分类变量…
+      ja: カテゴリの変数…
   templates:
     title:
       en: Templates
@@ -471,6 +475,20 @@ tab:
     en: Request tabs
     zh-CN: 请求标签栏
     ja: リクエストタブバー
+
+env_switcher:
+  none:
+    en: No environment
+    zh-CN: 无环境
+    ja: 環境なし
+  aria:
+    en: "Environment: %{name}"
+    zh-CN: "环境：%{name}"
+    ja: "環境：%{name}"
+  manage:
+    en: Manage variables…
+    zh-CN: 管理变量…
+    ja: 変数を管理…
 
 url_bar:
   placeholder:

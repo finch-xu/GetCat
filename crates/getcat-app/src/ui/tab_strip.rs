@@ -26,7 +26,7 @@ use gpui_kit::component::{
     ActiveTheme, Disableable, ElementExt as _, Icon, IconName, Selectable, Sizable, ThemeStyled,
     button::{Button, ButtonVariants},
     h_flex,
-    menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -35,13 +35,15 @@ use gpui_kit::{
     ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, WeakEntity, div, px,
 };
 
-use getcat_core::model::{MAX_TAB_ROWS, Method};
+use getcat_core::model::{MAX_TAB_ROWS, Method, Ulid};
 
 use crate::NewTab;
 use crate::assets::ICON_ROWS_3;
 use crate::i18n::tr;
+use crate::state::variables;
 use crate::state::workspace::Workspace;
 use crate::ui::method_color;
+use crate::ui::variables_sheet::SheetScope;
 
 /// 标签宽度。单行模式下是上限（label 自己省略号截断），多行模式下是定值——
 /// 分页要靠它算每行装几个。
@@ -311,12 +313,15 @@ impl Workspace {
             (offset_x >= px(-0.5), offset_x <= -max_x + px(0.5))
         };
 
+        let switcher = self.render_env_switcher(cx);
+
         h_flex()
             .flex_none()
             .items_center()
             .gap_0p5()
             .px_1()
             .py_1()
+            .child(switcher)
             .when(show_arrows, |h| {
                 h.child(
                     Button::new("tabs-prev")
@@ -359,6 +364,87 @@ impl Workspace {
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_tab_rows(cx))),
             )
     }
+
+    /// 环境切换器：当前环境名 + 下拉菜单（选环境 / 「无环境」/「管理变量…」）。
+    ///
+    /// builder 里只握弱引用，不碰 `self`——同款约束：`dropdown_menu` 是 `Fn`，
+    /// 每帧都可能在本实体的 `render` 内部被重新求值。
+    fn render_env_switcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let owner = cx.entity().downgrade();
+        let full_label = self.environment_label(cx);
+        let aria = tr!("env_switcher.aria", name = full_label.clone());
+        let envs: Vec<(Ulid, SharedString)> = variables::variables(cx)
+            .environments
+            .iter()
+            .map(|e| (e.id, SharedString::from(e.name.clone())))
+            .collect();
+        let active = variables::variables(cx).active_environment;
+
+        Button::new("env-switcher")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Globe)
+            .label(truncate_env_label(&full_label))
+            .dropdown_caret(true)
+            .accessibility_label(aria.clone())
+            .tooltip(aria)
+            .dropdown_menu(move |menu, _, _| {
+                let mut menu = menu;
+                let none_owner = owner.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(tr!("env_switcher.none"))
+                        .checked(active.is_none())
+                        .on_click(move |_, window, cx| {
+                            if let Some(ws) = none_owner.upgrade() {
+                                ws.update(cx, |ws, cx| ws.select_environment(None, window, cx));
+                            }
+                        }),
+                );
+                for (id, name) in envs.clone() {
+                    let item_owner = owner.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(name)
+                            .checked(active == Some(id))
+                            .on_click(move |_, window, cx| {
+                                if let Some(ws) = item_owner.upgrade() {
+                                    ws.update(cx, |ws, cx| {
+                                        ws.select_environment(Some(id), window, cx)
+                                    });
+                                }
+                            }),
+                    );
+                }
+                let manage_owner = owner.clone();
+                menu.separator()
+                    .item(PopupMenuItem::new(tr!("env_switcher.manage")).on_click(
+                        move |_, window, cx| {
+                            if let Some(ws) = manage_owner.upgrade() {
+                                ws.update(cx, |ws, cx| {
+                                    ws.open_variables_sheet(
+                                        SheetScope::Environment,
+                                        None,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }
+                        },
+                    ))
+            })
+    }
+}
+
+/// 切换器按钮上的可见文字：过长的环境名截到这么多字符（`Button` 的 `text_ellipsis`
+/// 只在容器有宽度上限时才生效，而这个按钮的宽度就是内容撑出来的，所以自己先截）。
+/// 可访问名称与 tooltip 不受影响，仍是全名（[`Workspace::render_env_switcher`]）。
+const ENV_LABEL_MAX_CHARS: usize = 24;
+
+fn truncate_env_label(name: &str) -> SharedString {
+    if name.chars().count() <= ENV_LABEL_MAX_CHARS {
+        return SharedString::from(name.to_string());
+    }
+    let short: String = name.chars().take(ENV_LABEL_MAX_CHARS).collect();
+    SharedString::from(format!("{short}…"))
 }
 
 /// 标签的右键菜单。对象级命令：与行内的关闭按钮是同一组动作，
@@ -448,5 +534,20 @@ mod tests {
         assert_eq!(next_tab_rows(MAX_TAB_ROWS), 1);
         // 越界值一律当多行处理，切回单行
         assert_eq!(next_tab_rows(9), 1);
+    }
+
+    #[test]
+    fn env_label_truncates_only_past_the_limit() {
+        assert_eq!(truncate_env_label("dev").as_ref(), "dev");
+        let exactly = "a".repeat(ENV_LABEL_MAX_CHARS);
+        assert_eq!(truncate_env_label(&exactly).as_ref(), exactly);
+        let long = "a".repeat(ENV_LABEL_MAX_CHARS + 5);
+        let got = truncate_env_label(&long);
+        assert_eq!(
+            got.chars().count(),
+            ENV_LABEL_MAX_CHARS + 1,
+            "截断内容 + 一个省略号"
+        );
+        assert!(got.ends_with('…'));
     }
 }
