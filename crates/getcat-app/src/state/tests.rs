@@ -2860,6 +2860,36 @@ fn kv_table_form_fields_roundtrip_and_refresh_size(cx: &mut TestAppContext) {
     let _ = std::fs::remove_file(&file);
 }
 
+/// 变量表：secret 行掩码显示、往返保留 secret 标记、`$` 开头的 key 有提示。
+#[gpui_kit::test]
+fn kv_table_variables_round_trip_with_secret(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Variable, window, cx).secret_capable(true))
+    });
+    let vars = vec![
+        Variable::new("host", "h"),
+        Variable {
+            secret: true,
+            ..Variable::new("token", "t")
+        },
+    ];
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_variables(&vars, window, cx)));
+    cx.read(|app| {
+        let t = table.read(app);
+        assert_eq!(t.variables(app), vars);
+        assert!(!t.row_secret(0));
+        assert!(t.row_secret(1));
+        assert!(t.row_value_masked(1, app));
+    });
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_row_secret(0, true, window, cx)));
+    cx.read(|app| {
+        let t = table.read(app);
+        assert!(t.variables(app)[0].secret);
+        assert!(t.row_value_masked(0, app));
+    });
+}
+
 #[gpui_kit::test]
 fn kv_table_choose_row_file_sets_path_and_switching_back_drops_it(cx: &mut TestAppContext) {
     let cx = init(cx);

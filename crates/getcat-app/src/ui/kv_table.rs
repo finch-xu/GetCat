@@ -3,12 +3,13 @@
 use std::path::PathBuf;
 
 use getcat_core::http::guess_content_type;
-use getcat_core::model::{FormField, FormValue, KeyValue};
+use getcat_core::model::{FormField, FormValue, KeyValue, Variable};
+use getcat_core::vars::is_dynamic;
 use gpui_kit::prelude::FluentBuilder as _;
 // 显式导入而非 `use gpui_kit::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
 // `#[test]` 属性宏并与标准库同名冲突。编译器报"找不到 X"时把 X 加进这里，不要改回通配符。
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, Size,
+    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, Size,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     h_flex,
@@ -22,6 +23,7 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px, relative,
 };
 
+use crate::assets::{ICON_LOCK, ICON_LOCK_OPEN};
 use crate::i18n::{Locale, tr};
 use crate::ui::format_bytes;
 
@@ -39,6 +41,9 @@ pub enum KvPlaceholder {
     Header,
     /// 表单字段（urlencoded / form-data）
     Field,
+    /// 变量（全局 / 分类 / 环境）；计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用
+    #[allow(dead_code)]
+    Variable,
 }
 
 impl KvPlaceholder {
@@ -47,6 +52,7 @@ impl KvPlaceholder {
             KvPlaceholder::Param => tr!("kv.param_key"),
             KvPlaceholder::Header => tr!("kv.header_key"),
             KvPlaceholder::Field => tr!("kv.field_key"),
+            KvPlaceholder::Variable => tr!("kv.variable_key"),
         }
     }
 
@@ -94,6 +100,8 @@ struct KvRow {
     enabled: bool,
     kind: RowKind,
     file: Option<FileCell>,
+    /// 变量表专用：是否为敏感值（值输入框掩码显示）。非变量表恒为 false。
+    secret: bool,
     _subs: Vec<Subscription>,
 }
 
@@ -143,6 +151,8 @@ pub struct KvTable {
     locked_keys: bool,
     /// form-data 模式：每行可在 Text / File 间切换。
     file_capable: bool,
+    /// 变量表模式：每行可标记为敏感值，值输入框掩码显示（与 `file_capable` 互斥）。
+    secret_capable: bool,
     /// 三列占可变区域的比例，和为 1；拖表头分隔线改。按比例而不是像素记，
     /// 请求区被拖宽拖窄时各列跟着等比缩放。
     column_fractions: [f32; COLUMNS],
@@ -160,10 +170,11 @@ impl KvTable {
             rows: Vec::new(),
             locked_keys: false,
             file_capable: false,
+            secret_capable: false,
             column_fractions: DEFAULT_COLUMN_FRACTIONS,
             _locale_sub: locale_sub,
         };
-        this.push_row("", "", "", true, window, cx);
+        this.push_row("", "", "", true, false, window, cx);
         this
     }
 
@@ -197,12 +208,24 @@ impl KvTable {
         self
     }
 
+    /// 变量表：每行可标记为敏感值，值输入框掩码显示。
+    /// 计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用。
+    #[allow(dead_code)]
+    pub fn secret_capable(mut self, yes: bool) -> Self {
+        self.secret_capable = yes;
+        self
+    }
+
+    // 私有构造器，逐个字段传参比临时建一个只用一次的参数结构体更直观；
+    // 新增 `secret` 参数超过了 clippy 默认的 7 个上限，放行。
+    #[allow(clippy::too_many_arguments)]
     fn push_row(
         &mut self,
         key: &str,
         value: &str,
         description: &str,
         enabled: bool,
+        secret: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -217,6 +240,7 @@ impl KvTable {
             InputState::new(window, cx)
                 .placeholder(value_ph)
                 .default_value(value.to_string())
+                .masked(secret)
         });
         let description_state = cx.new(|cx| {
             InputState::new(window, cx)
@@ -235,6 +259,7 @@ impl KvTable {
             enabled,
             kind: RowKind::Text,
             file: None,
+            secret,
             _subs: subs,
         });
     }
@@ -272,7 +297,7 @@ impl KvTable {
             .map(|r| self.row_is_empty(r, cx))
             .unwrap_or(false);
         if !last_is_empty {
-            self.push_row("", "", "", true, window, cx);
+            self.push_row("", "", "", true, false, window, cx);
             cx.notify();
         }
     }
@@ -301,10 +326,18 @@ impl KvTable {
     pub fn set_values(&mut self, values: &[KeyValue], window: &mut Window, cx: &mut Context<Self>) {
         self.rows.clear();
         for kv in values {
-            self.push_row(&kv.key, &kv.value, &kv.description, kv.enabled, window, cx);
+            self.push_row(
+                &kv.key,
+                &kv.value,
+                &kv.description,
+                kv.enabled,
+                false,
+                window,
+                cx,
+            );
         }
         if !self.locked_keys {
-            self.push_row("", "", "", true, window, cx);
+            self.push_row("", "", "", true, false, window, cx);
         }
         cx.notify();
     }
@@ -347,10 +380,10 @@ impl KvTable {
         for f in fields {
             match &f.value {
                 FormValue::Text { value } => {
-                    self.push_row(&f.key, value, &f.description, f.enabled, window, cx);
+                    self.push_row(&f.key, value, &f.description, f.enabled, false, window, cx);
                 }
                 FormValue::File { path, content_type } => {
-                    self.push_row(&f.key, "", &f.description, f.enabled, window, cx);
+                    self.push_row(&f.key, "", &f.description, f.enabled, false, window, cx);
                     let has_path = !path.as_os_str().is_empty();
                     let row = self.rows.last_mut().expect("just pushed");
                     row.kind = RowKind::File;
@@ -365,7 +398,7 @@ impl KvTable {
                 }
             }
         }
-        self.push_row("", "", "", true, window, cx);
+        self.push_row("", "", "", true, false, window, cx);
         cx.notify();
     }
 
@@ -495,20 +528,98 @@ impl KvTable {
                 .find(|(k, _, _, _)| k == name)
                 .map(|(_, v, d, e)| (v.clone(), d.clone(), *e))
                 .unwrap_or_else(|| (String::new(), String::new(), true));
-            self.push_row(name, &value, &description, enabled, window, cx);
+            self.push_row(name, &value, &description, enabled, false, window, cx);
         }
         cx.emit(KvTableEvent::Changed);
         cx.notify();
     }
 
+    /// 读出当前行内容为变量列表（过滤空行）。
+    /// 计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用。
+    #[allow(dead_code)]
+    pub fn variables(&self, cx: &App) -> Vec<Variable> {
+        self.rows
+            .iter()
+            .filter(|r| !self.row_is_empty(r, cx))
+            .map(|r| Variable {
+                key: r.key.read(cx).value().to_string(),
+                value: r.value.read(cx).value().to_string(),
+                enabled: r.enabled,
+                secret: r.secret,
+                description: r.description.read(cx).value().to_string(),
+            })
+            .collect()
+    }
+
+    /// 程序化载入（不发 `Changed`）；末尾补空行。
+    /// 计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用。
+    #[allow(dead_code)]
+    pub fn set_variables(
+        &mut self,
+        vars: &[Variable],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.rows.clear();
+        for v in vars {
+            self.push_row(
+                &v.key,
+                &v.value,
+                &v.description,
+                v.enabled,
+                v.secret,
+                window,
+                cx,
+            );
+        }
+        self.push_row("", "", "", true, false, window, cx);
+        cx.notify();
+    }
+
+    /// 切换某一行是否为敏感值：值输入框同步掩码显示。测试与眼睛按钮共用。
+    pub fn set_row_secret(
+        &mut self,
+        ix: usize,
+        secret: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = self.rows.get_mut(ix) else {
+            return;
+        };
+        if row.secret == secret {
+            return;
+        }
+        row.secret = secret;
+        row.value
+            .update(cx, |s, cx| s.set_masked(secret, window, cx));
+        cx.emit(KvTableEvent::Changed);
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn row_secret(&self, ix: usize) -> bool {
+        self.rows[ix].secret
+    }
+
+    #[cfg(test)]
+    pub fn row_value_masked(&self, ix: usize, cx: &App) -> bool {
+        self.rows[ix].value.read(cx).presentation().is_masked()
+    }
+
     fn render_value_cell(&self, ix: usize, row: &KvRow, cx: &mut Context<Self>) -> AnyElement {
         if row.kind == RowKind::Text {
-            return Input::new(&row.value)
+            let input = Input::new(&row.value)
                 .small()
                 .appearance(false)
                 .w_full()
-                .aria_label(row_aria_label(ix, &self.placeholder.value_text()))
-                .into_any_element();
+                .aria_label(row_aria_label(ix, &self.placeholder.value_text()));
+            return if self.secret_capable && row.secret {
+                // mask_toggle 自带一个眼睛按钮，点击可临时显示 / 隐藏当前值
+                input.mask_toggle().into_any_element()
+            } else {
+                input.into_any_element()
+            };
         }
         let muted = cx.theme().muted_foreground;
         h_flex()
@@ -685,6 +796,7 @@ impl KvTable {
     fn render_row(&self, ix: usize, row: &KvRow, cx: &mut Context<Self>) -> AnyElement {
         let locked = self.locked_keys;
         let file_capable = self.file_capable;
+        let secret_capable = self.secret_capable;
         let hover_bg = cx.theme().table_hover;
         h_flex()
             .id(("kv-row", ix))
@@ -749,6 +861,33 @@ impl KvTable {
                                     ),
                                 )
                             })
+                            .when(secret_capable, |d| {
+                                let secret = row.secret;
+                                d.child(
+                                    div().pl_1().flex_none().child(
+                                        Button::new(("kv-secret", ix))
+                                            .ghost()
+                                            .xsmall()
+                                            .icon(Icon::empty().path(if secret {
+                                                ICON_LOCK
+                                            } else {
+                                                ICON_LOCK_OPEN
+                                            }))
+                                            .selected(secret)
+                                            .tooltip(row_aria_label(
+                                                ix,
+                                                &if secret {
+                                                    tr!("kv.secret_on")
+                                                } else {
+                                                    tr!("kv.secret_off")
+                                                },
+                                            ))
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.set_row_secret(ix, !secret, window, cx)
+                                            })),
+                                    ),
+                                )
+                            })
                             .child(
                                 div()
                                     .flex_1()
@@ -793,6 +932,13 @@ impl KvTable {
 impl Render for KvTable {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let locked = self.locked_keys;
+        // 变量名以 `$` 开头是内置动态变量的命名空间，用户填了这样的 key 提前提示，
+        // 免得发送时才发现这条变量被内置值盖住（vars::is_dynamic 与替换逻辑同一个判断）。
+        let has_builtin_name_clash = self.secret_capable
+            && self
+                .rows
+                .iter()
+                .any(|r| is_dynamic(r.key.read(cx).value().trim()));
         v_flex()
             .w_full()
             .rounded(cx.theme().radius)
@@ -818,6 +964,16 @@ impl Render for KvTable {
                     .map(|(ix, row)| self.render_row(ix, row, cx))
                     .collect::<Vec<_>>(),
             )
+            .when(has_builtin_name_clash, |v| {
+                v.child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .text_xs()
+                        .text_color(cx.theme().warning)
+                        .child(tr!("kv.builtin_name_hint")),
+                )
+            })
     }
 }
 

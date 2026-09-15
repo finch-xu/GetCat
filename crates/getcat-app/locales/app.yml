@@ -481,6 +481,10 @@ kv:
     en: Field
     zh-CN: 字段名
     ja: フィールド名
+  variable_key:
+    en: Variable
+    zh-CN: 变量名
+    ja: 変数名
   value:
     en: Value
     zh-CN: 值
@@ -517,6 +521,18 @@ kv:
     en: "The URL has no {name}-style path parameters"
     zh-CN: "URL 中没有 {name} 形式的 Path 参数"
     ja: "URL に {name} 形式のパスパラメータはありません"
+  secret_on:
+    en: "Secret: value is masked (click to reveal)"
+    zh-CN: "敏感值：已掩码（点击显示）"
+    ja: "秘密の値：マスク表示中（クリックで表示）"
+  secret_off:
+    en: "Mark as secret (mask the value)"
+    zh-CN: "标记为敏感值（掩码显示）"
+    ja: "秘密の値として設定（マスク表示）"
+  builtin_name_hint:
+    en: "Names starting with $ are built-in dynamic variables and can’t be overridden"
+    zh-CN: "以 $ 开头的是内置动态变量，不能被覆盖"
+    ja: "$ で始まる名前は組み込みの動的変数で、上書きできません"
 
 response:
   idle_prefix:
