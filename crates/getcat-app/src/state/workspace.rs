@@ -156,6 +156,8 @@ impl Workspace {
             workspace: state,
             // 设置在开窗前已由 main 取走安装；这里不再用
             settings: _,
+            // 变量由全局句柄管理，这里不用
+            variables: _,
             drafts,
             requests,
             errors: _,
