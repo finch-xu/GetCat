@@ -5,6 +5,8 @@
 //! - 后置：响应完成后在**后台线程**执行（解析 JSON 是 O(n)）；结果与提取出的变量由
 //!   app 层在 generation 校验通过后用 [`apply_extracted`] 写回。断言的期望值在发送时已替换完。
 
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 
 use crate::model::{
@@ -21,6 +23,8 @@ pub const OPS_JSON_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub enum OpSkip {
     NoActiveEnvironment,
     NoGroup,
+    /// 请求没拿到响应（网络错误、后台处理异常），后置操作没有执行。见 [`skip_all`]。
+    RequestFailed,
 }
 
 /// 执行了但没成功。载荷是原文（路径、头名、实际值），界面按变体翻译种类。
@@ -107,13 +111,18 @@ fn check_key(key: &str) -> Result<&str, OpFailure> {
     }
 }
 
+/// 前置操作的执行结果。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PreReport {
+    /// 每条启用的操作一行（停用的不出现）。
+    pub results: Vec<(PreOp, OpOutcome)>,
+    /// 各条操作的值里没能解析的变量名（按名字排序去重）；app 层把它并进 URL 栏的「未定义变量」提示。
+    pub unresolved: BTreeSet<String>,
+}
+
 /// 前置操作：逐条替换值并写入；每条都按**当时**的变量表替换，所以后一条能引用前一条。
-pub fn run_pre_ops(
-    ops: &[PreOp],
-    sets: &mut VariableSets,
-    group: Option<&str>,
-) -> Vec<(PreOp, OpOutcome)> {
-    let mut results = Vec::new();
+pub fn run_pre_ops(ops: &[PreOp], sets: &mut VariableSets, group: Option<&str>) -> PreReport {
+    let mut report = PreReport::default();
     for op in ops.iter().filter(|o| o.enabled) {
         let outcome = match &op.kind {
             PreOpKind::SetVariable { scope, key, value } => match check_key(key) {
@@ -121,7 +130,10 @@ pub fn run_pre_ops(
                 Ok(key) => {
                     let value = {
                         let ctx = sets.context(group);
-                        Resolver::new(&ctx).resolve(value).into_owned()
+                        let mut resolver = Resolver::new(&ctx);
+                        let value = resolver.resolve(value).into_owned();
+                        report.unresolved.extend(resolver.finish());
+                        value
                     };
                     if sets.set_var(*scope, group, key, &value) {
                         OpOutcome::Passed
@@ -131,9 +143,22 @@ pub fn run_pre_ops(
                 }
             },
         };
-        results.push((op.clone(), outcome));
+        report.results.push((op.clone(), outcome));
     }
-    results
+    report
+}
+
+/// 请求失败（没拿到响应）时的后置报告：每条启用的后置操作记为 `Skipped(RequestFailed)`，
+/// 没有提取。没有启用的后置操作时 `results` 为空。
+pub fn skip_all(ops: &[PostOp]) -> PostReport {
+    PostReport {
+        results: ops
+            .iter()
+            .filter(|o| o.enabled)
+            .map(|op| (op.clone(), OpOutcome::Skipped(OpSkip::RequestFailed)))
+            .collect(),
+        extracted: Vec::new(),
+    }
 }
 
 /// 把后置提取写回变量表（app 层在 generation 校验通过后调用）。
@@ -457,7 +482,9 @@ mod tests {
             set_variable(VarScope::Group, "g", "x"),
             set_variable(VarScope::Global, "  ", "x"),
         ];
-        let results = run_pre_ops(&ops, &mut sets, None);
+        let report = run_pre_ops(&ops, &mut sets, None);
+        assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
+        let results = report.results;
         assert_eq!(results.len(), 5, "禁用的不出现在结果里");
         assert_eq!(results[0].1, OpOutcome::Passed);
         assert_eq!(results[1].1, OpOutcome::Passed);
@@ -481,10 +508,61 @@ mod tests {
         let env = Environment::new("dev");
         sets.active_environment = Some(env.id);
         sets.environments.push(env);
-        let results = run_pre_ops(&ops[3..5], &mut sets, Some("grp"));
+        let results = run_pre_ops(&ops[3..5], &mut sets, Some("grp")).results;
         assert!(results.iter().all(|(_, o)| *o == OpOutcome::Passed));
         assert_eq!(sets.active_env().unwrap().variables[0].key, "e");
         assert_eq!(sets.group_vars(Some("grp"))[0].key, "g");
+    }
+
+    /// 前置值里的未定义变量要报出来；停用的、key 非法的不参与替换。
+    #[test]
+    fn pre_ops_report_unresolved_names_in_values() {
+        let mut sets = VariableSets::default();
+        let ops = vec![
+            set_variable(VarScope::Global, "a", "{{missing}}-{{$timestamp}}"),
+            // 引用上一条刚设的值：已定义，不算未解析
+            set_variable(VarScope::Global, "b", "{{a}}"),
+            PreOp {
+                enabled: false,
+                ..set_variable(VarScope::Global, "off", "{{disabled_ref}}")
+            },
+            set_variable(VarScope::Global, "$bad", "{{bad_key_ref}}"),
+            set_variable(VarScope::Global, "c", "{{ other }}"),
+        ];
+        let report = run_pre_ops(&ops, &mut sets, None);
+        assert_eq!(
+            report.unresolved.into_iter().collect::<Vec<_>>(),
+            vec!["missing".to_string(), "other".to_string()]
+        );
+        assert_eq!(report.results.len(), 4);
+        // 未解析的占位符原样写入
+        assert!(sets.globals[0].value.starts_with("{{missing}}-"));
+    }
+
+    /// 请求失败：每条启用的后置操作记为「请求失败，未执行」，没有提取。
+    #[test]
+    fn skip_all_marks_enabled_post_ops_request_failed() {
+        let ops = vec![
+            extract(VarScope::Global, "token", json("$.data.token")),
+            PostOp {
+                enabled: false,
+                ..assert_op(ResponseSource::Status, AssertOp::Equals, "200")
+            },
+            assert_op(header("x-a"), AssertOp::Exists, ""),
+        ];
+        let report = skip_all(&ops);
+        assert_eq!(
+            report.results,
+            vec![
+                (ops[0].clone(), OpOutcome::Skipped(OpSkip::RequestFailed)),
+                (ops[2].clone(), OpOutcome::Skipped(OpSkip::RequestFailed)),
+            ]
+        );
+        assert!(report.extracted.is_empty());
+        assert_eq!(report.passed(), 0);
+        // 没有启用的后置操作：results 为空
+        assert_eq!(skip_all(&ops[1..2]), PostReport::default());
+        assert_eq!(skip_all(&[]), PostReport::default());
     }
 
     #[test]
@@ -681,7 +759,8 @@ mod tests {
             ],
             &mut sets,
             None,
-        );
+        )
+        .results;
         let outcomes: Vec<&OpOutcome> = results.iter().map(|(_, o)| o).collect();
         assert_eq!(
             outcomes,

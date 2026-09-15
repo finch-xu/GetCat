@@ -74,7 +74,9 @@ pub fn run_pre_ops(
         return Vec::new();
     }
     let mut results = Vec::new();
-    update(cx, |sets| results = ops::run_pre_ops(pre_ops, sets, group));
+    update(cx, |sets| {
+        results = ops::run_pre_ops(pre_ops, sets, group).results
+    });
     results
 }
 
