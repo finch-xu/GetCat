@@ -5026,11 +5026,18 @@ fn environment_switcher_activates_and_clears(cx: &mut TestAppContext) {
         assert_eq!(ws.read(app).environment_label(app).as_ref(), "dev");
     });
 
-    // 不经 `select_environment`、直接改全局：`environment_label` 会读到新值，
-    // 前提是 Workspace 观察了 `VariablesHandle` 并在变化时 notify——否则标签栏就是
-    // 对的但画面还停在旧帧（下一次任意重绘才会顺带更新，属于可见的滞后）。
+    // 不经 `select_environment`、直接改全局：`environment_label` 自己读全局，不管有没有
+    // 订阅都会返回新值，所以真正要钉住的是「标签栏会不会重绘」——数一数 `Workspace` 收到
+    // 几次 `cx.notify()`，而不是再读一遍 `environment_label`（那样订阅摘掉测试也照样绿）。
+    let notified = Rc::new(Cell::new(0));
+    let counter = notified.clone();
+    let _sub = cx.update(|_, cx| cx.observe(&ws, move |_, _| counter.set(counter.get() + 1)));
     cx.update(|_, app| variables::set_active_environment(app, None));
     cx.run_until_parked();
+    assert!(
+        notified.get() > 0,
+        "Workspace 必须观察 VariablesHandle 并在它变化时 notify，标签栏才会跟着重绘"
+    );
     cx.read(|app| {
         let _locale = crate::i18n::locale_test_lock();
         assert_eq!(variables::variables(app).active_environment, None);
@@ -5039,6 +5046,62 @@ fn environment_switcher_activates_and_clears(cx: &mut TestAppContext) {
             "No environment"
         );
     });
+}
+
+/// `select_environment` 在「生成代码」抽屉开着时要立刻刷新，否则抽屉里显示的还是切换前
+/// 那个环境展开出来的请求（`refresh_code_sheet` 本身只在 `open_tool == CodeGen` 时才调用，
+/// 见 `Workspace::select_environment`）。
+#[gpui_kit::test]
+fn select_environment_refreshes_the_open_code_sheet(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let (_dev_id, prod_id) = cx.update(|_, app| {
+        let mut dev = Environment::new("dev");
+        dev.variables.push(Variable::new("host", "dev.test"));
+        let mut prod = Environment::new("prod");
+        prod.variables.push(Variable::new("host", "prod.test"));
+        let (dev_id, prod_id) = (dev.id, prod.id);
+        variables::update(app, |s| {
+            s.active_environment = Some(dev_id);
+            s.environments = vec![dev, prod];
+        });
+        (dev_id, prod_id)
+    });
+
+    // `open_code_sheet` 走 `window.open_sheet`，落到 `Root::update`——没有 `Root` 的裸测试
+    // 窗口会直接 panic，所以这里要跟变量抽屉的测试一样套一层 `Root`。
+    let slot: Rc<RefCell<Option<Entity<Workspace>>>> = Rc::new(RefCell::new(None));
+    let slot_for_root = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let ws = cx.new(|cx| Workspace::new(window, cx));
+        *slot_for_root.borrow_mut() = Some(ws.clone());
+        Root::new(ws, window, cx)
+    });
+    let ws = slot
+        .borrow_mut()
+        .take()
+        .expect("workspace created inside the root view");
+
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://{{host}}/v1", cx);
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_tool_section(ToolSection::CodeGen, window, cx)
+        })
+    });
+    let code_sheet = cx.read(|app| ws.read(app).code_sheet.clone());
+    let code_text = |cx: &mut VisualTestContext| cx.read(|app| code_sheet.read(app).text().clone());
+    let before = code_text(cx);
+    assert!(before.contains("dev.test"), "{before}");
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.select_environment(Some(prod_id), window, cx)
+        })
+    });
+    let after = code_text(cx);
+    assert!(after.contains("prod.test"), "{after}");
+    assert!(!after.contains("dev.test"), "{after}");
 }
 
 /// Tab 记住自己所属分类：保存 / 打开 / 改名 / 解散 / 删除都要同步，变量表也跟着联动。
