@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 
 use getcat_core::model::{Environment, Ulid, Variable, VariableSets};
-use getcat_core::postman_env::{self, PostmanEnvError, PostmanScope};
+use getcat_core::postman_env::{self, PostmanEnv, PostmanEnvError, PostmanScope};
 use gpui_kit::component::{
     ActiveTheme, Disableable, IndexPath, Sizable, WindowExt,
     alert::Alert,
@@ -36,6 +36,7 @@ use gpui_kit::{
 use crate::i18n::{Locale, tr};
 use crate::state::variables::{self, VariablesHandle};
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
+use crate::ui::text::postman_env_error_line;
 
 /// 抽屉的起始宽度：三列变量表加一排环境工具按钮，`Sheet` 默认的 350 px 放不下。
 pub const VARIABLES_SHEET_WIDTH: f32 = 640.;
@@ -73,11 +74,19 @@ impl SheetScope {
     }
 }
 
+/// 导入失败的原因。
+enum ImportError {
+    /// 文件读出来了，但不是 Postman environment / globals：种类走翻译（见 [`postman_env_error_line`]）。
+    Postman(PostmanEnvError),
+    /// 读文件失败：io 原话（技术细节）保留。
+    Io(String),
+}
+
 /// 一行提示（导入 / 导出结果），下一次打开抽屉时清掉。
 /// 存数据而不是译好的文案：切换界面语言后在渲染时重新翻译。
 enum Notice {
     Imported(usize),
-    ImportFailed(String),
+    ImportFailed(ImportError),
     Exported(PathBuf),
     ExportFailed(String),
 }
@@ -90,7 +99,10 @@ impl Notice {
     fn text(&self) -> SharedString {
         match self {
             Notice::Imported(count) => tr!("variables.imported", count = count),
-            Notice::ImportFailed(error) => tr!("variables.import_failed", error = error),
+            Notice::ImportFailed(ImportError::Postman(error)) => postman_env_error_line(error),
+            Notice::ImportFailed(ImportError::Io(error)) => {
+                tr!("variables.import_failed", error = error)
+            }
             Notice::Exported(path) => tr!("variables.exported", path = path.display()),
             Notice::ExportFailed(error) => tr!("variables.export_failed", error = error),
         }
@@ -411,6 +423,23 @@ impl VariablesSheet {
         self.activate_env(cx);
     }
 
+    /// 测试用：导入 / 导出按钮的点击回调走的是 `cx.listener`；文件对话框由测试平台模拟应答。
+    #[cfg(test)]
+    pub fn import_file_for_test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.import_file(window, cx);
+    }
+
+    #[cfg(test)]
+    pub fn export_file_for_test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.export_file(window, cx);
+    }
+
+    /// 测试用：当前提示条的文案（按当前界面语言翻译）。
+    #[cfg(test)]
+    pub fn notice_text(&self) -> Option<SharedString> {
+        self.notice.as_ref().map(Notice::text)
+    }
+
     /// 测试用：「删除」按钮的点击回调走的是 `cx.listener`。
     #[cfg(test)]
     pub fn confirm_delete_env_for_test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -487,22 +516,37 @@ impl VariablesSheet {
         self.fill_table(window, cx);
     }
 
-    /// 导入一份 Postman environment / globals：environment → 新环境（重名加后缀）并激活；
-    /// globals → 合并进全局，同 key 覆盖。解析失败时不改任何变量。测试与文件对话框共用。
+    /// 测试用：同步解析一段文本再走与文件对话框相同的落地步骤（生产路径在后台线程解析，见 [`Self::import_file`]）。
+    #[cfg(test)]
     pub fn import_from_text(
         &mut self,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<usize, PostmanEnvError> {
-        let parsed = match postman_env::parse(text) {
-            Ok(parsed) => parsed,
+        match postman_env::parse(text) {
+            Ok(parsed) => Ok(self.apply_import(parsed, window, cx)),
             Err(e) => {
-                self.notice = Some(Notice::ImportFailed(e.to_string()));
-                cx.notify();
-                return Err(e);
+                self.fail_import(ImportError::Postman(e.clone()), cx);
+                Err(e)
             }
-        };
+        }
+    }
+
+    /// 导入失败：只记提示，不改任何变量。
+    fn fail_import(&mut self, error: ImportError, cx: &mut Context<Self>) {
+        self.notice = Some(Notice::ImportFailed(error));
+        cx.notify();
+    }
+
+    /// 把解析好的 Postman environment / globals 落进变量表，返回导入的变量数：
+    /// environment → 新环境（重名加后缀）并激活；globals → 合并进全局，同 key 覆盖。
+    fn apply_import(
+        &mut self,
+        parsed: PostmanEnv,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> usize {
         let count = parsed.variables.len();
         match parsed.scope {
             PostmanScope::Environment => {
@@ -536,7 +580,7 @@ impl VariablesSheet {
         }
         self.notice = Some(Notice::Imported(count));
         self.fill_table(window, cx);
-        Ok(count)
+        count
     }
 
     /// 当前页能不能导出（与 [`Self::export_text`] 返回 Some 同条件）。渲染期用它决定按钮置灰：
@@ -608,18 +652,19 @@ impl VariablesSheet {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
-            let text = cx
-                .background_spawn(async move { std::fs::read_to_string(&path) })
+            // 读文件与解析都在后台线程：导入的文件多大都不卡主线程，回到实体上只做落地
+            let parsed = cx
+                .background_spawn(async move {
+                    let text = std::fs::read_to_string(&path)
+                        .map_err(|e| ImportError::Io(e.to_string()))?;
+                    postman_env::parse(&text).map_err(ImportError::Postman)
+                })
                 .await;
-            let _ = this.update_in(cx, |this, window, cx| match text {
-                Ok(text) => {
-                    // 失败已经写进 notice，这里不用再处理
-                    let _ = this.import_from_text(&text, window, cx);
+            let _ = this.update_in(cx, |this, window, cx| match parsed {
+                Ok(parsed) => {
+                    this.apply_import(parsed, window, cx);
                 }
-                Err(e) => {
-                    this.notice = Some(Notice::ImportFailed(e.to_string()));
-                    cx.notify();
-                }
+                Err(error) => this.fail_import(error, cx),
             });
         })
         .detach();

@@ -11,6 +11,7 @@ use getcat_core::detect::ContentKind;
 use getcat_core::http::{MAX_BODY_BYTES, RequestError};
 use getcat_core::model::{LanguagePref, ThemePref, UpdateSourcePref};
 use getcat_core::ops::{OPS_JSON_MAX_BYTES, OpFailure, OpOutcome, OpSkip};
+use getcat_core::postman_env::PostmanEnvError;
 use getcat_core::tls::CertWarning;
 use gpui_kit::SharedString;
 
@@ -175,6 +176,14 @@ pub fn op_detail(outcome: &OpOutcome) -> Option<SharedString> {
     })
 }
 
+/// Postman environment / globals 导入失败的原因：种类翻译，serde 给出的 JSON 细节原文保留。
+pub fn postman_env_error_line(error: &PostmanEnvError) -> SharedString {
+    match error {
+        PostmanEnvError::NotEnvironment => tr!("variables.import_not_environment"),
+        PostmanEnvError::Json(detail) => tr!("variables.import_invalid_json", detail = detail),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,6 +289,35 @@ mod tests {
                 "{locale}"
             );
         }
+    }
+
+    /// Postman 导入失败：原因的种类翻译，serde 的技术细节原文保留；不能漏出 core 的英文 Display。
+    #[test]
+    fn postman_env_errors_translate_the_kind_and_keep_the_detail() {
+        let _locale = crate::i18n::locale_test_lock();
+        assert_eq!(
+            postman_env_error_line(&PostmanEnvError::NotEnvironment).as_ref(),
+            "This file isn't a Postman environment or globals export"
+        );
+        let detail = "EOF while parsing an object at line 1 column 1";
+        assert_eq!(
+            postman_env_error_line(&PostmanEnvError::Json(detail.into())).as_ref(),
+            format!("The file isn't valid JSON: {detail}")
+        );
+        // 另两种界面语言也有译文
+        assert_eq!(
+            rust_i18n::t!("variables.import_not_environment", locale = "zh-CN").as_ref(),
+            "这不是 Postman 的 environment / globals 导出文件"
+        );
+        assert_eq!(
+            rust_i18n::t!(
+                "variables.import_invalid_json",
+                locale = "ja",
+                detail = detail
+            )
+            .as_ref(),
+            format!("ファイルが正しい JSON ではありません：{detail}")
+        );
     }
 
     #[test]

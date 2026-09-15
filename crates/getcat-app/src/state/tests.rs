@@ -2410,6 +2410,69 @@ fn variables_sheet_edits_import_and_export(cx: &mut TestAppContext) {
     assert!(store.flush());
 }
 
+/// 文件对话框路径：读文件与解析都在后台线程，结果回到抽屉；文件不对 / 读不出来时提示翻译过的原因；
+/// 导出写出的文件能被 parse 读回。
+#[gpui_kit::test]
+fn variables_sheet_imports_and_exports_through_file_dialogs(cx: &mut TestAppContext) {
+    let _locale = crate::i18n::locale_test_lock();
+    let (cx, _store, dir) = init_with_store(cx);
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Global, None, vec![], window, cx)
+        })
+    });
+    let good = dir.path().join("dev.postman_environment.json");
+    std::fs::write(
+        &good,
+        r#"{"name":"Dev","values":[{"key":"code","value":"200","type":"secret"}]}"#,
+    )
+    .unwrap();
+    let collection = dir.path().join("collection.json");
+    std::fs::write(&collection, r#"{"info":{"name":"not an environment"}}"#).unwrap();
+    let import = |cx: &mut VisualTestContext, path: PathBuf| {
+        cx.update(|window, cx| sheet.update(cx, |s, cx| s.import_file_for_test(window, cx)));
+        assert!(cx.did_prompt_for_paths());
+        cx.simulate_path_prompt_response(move |_| Some(vec![path]));
+    };
+    let notice_is = |cx: &mut VisualTestContext, pred: &dyn Fn(&str) -> bool| {
+        cx.read(|app| sheet.read(app).notice_text().is_some_and(|t| pred(&t)))
+    };
+
+    import(cx, good);
+    wait_until(cx, |cx| notice_is(cx, &|t| t == "Variables imported: 1"));
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments[0].name, "Dev");
+        assert!(sets.environments[0].variables[0].secret);
+    });
+
+    // 不是 environment 的 JSON：原因走翻译，不漏 core 的英文 Display
+    import(cx, collection);
+    wait_until(cx, |cx| {
+        notice_is(cx, &|t| {
+            t == "This file isn't a Postman environment or globals export"
+        })
+    });
+    // 读不出来：io 原话保留在 import_failed 里
+    import(cx, dir.path().join("missing.json"));
+    wait_until(cx, |cx| {
+        notice_is(cx, &|t| t.starts_with("Import failed: "))
+    });
+    cx.read(|app| assert_eq!(variables::variables(app).environments.len(), 1));
+
+    // 导出当前页（导入后抽屉停在 Dev 环境页）
+    let dest = dir.path().join("out.postman_environment.json");
+    cx.update(|window, cx| sheet.update(cx, |s, cx| s.export_file_for_test(window, cx)));
+    assert!(cx.did_prompt_for_new_path());
+    let chosen = dest.clone();
+    cx.simulate_new_path_selection(move |_| Some(chosen));
+    wait_until(cx, |cx| notice_is(cx, &|t| t.starts_with("Exported to ")));
+    let parsed = getcat_core::postman_env::parse(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+    assert_eq!(parsed.name, "Dev");
+    assert!(parsed.variables[0].secret);
+}
+
 /// 抽屉：下拉切环境换表；改名边打字边写回，观察者不会把输入框重置（尾随空格不被吃掉）；
 /// 分类页写回该分类，清空后不留空条目。
 #[gpui_kit::test]
@@ -2451,6 +2514,22 @@ fn variables_sheet_switches_renames_and_edits_groups(cx: &mut TestAppContext) {
     pick_select(cx, &env_select, 0);
     cx.run_until_parked();
     assert_eq!(table_values(cx), vec![("k".to_string(), "a".to_string())]);
+
+    // 真实写回路径：表格自己发 `Changed`，经抽屉的订阅写回当前环境（不走 commit_table_for_test）
+    let table = cx.read(|app| sheet.read(app).table().clone());
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_row_secret(0, true, window, cx)));
+    cx.run_until_parked();
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert!(
+            sets.environments[0].variables[0].secret,
+            "选中的环境 A 被写回"
+        );
+        assert!(
+            !sets.environments[1].variables[0].secret,
+            "激活环境 B 不受影响"
+        );
+    });
 
     // 改名：中间态 "Alpha " 存为 "Alpha"，但输入框里的尾随空格保留，接着打字不受影响
     let name_input = cx.read(|app| sheet.read(app).env_name().clone());

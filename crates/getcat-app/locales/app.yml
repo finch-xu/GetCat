@@ -258,13 +258,21 @@ variables:
     zh-CN: 导出为 Postman environment JSON（敏感值以明文写入）
     ja: Postman environment JSON としてエクスポート（秘密の値は平文で書き込まれます）
   imported:
-    en: "Imported %{count} variables"
-    zh-CN: "已导入 %{count} 个变量"
-    ja: "%{count} 個の変数をインポートしました"
+    en: "Variables imported: %{count}"
+    zh-CN: "已导入变量：%{count} 个"
+    ja: "インポートした変数：%{count} 件"
   import_failed:
     en: "Import failed: %{error}"
     zh-CN: "导入失败：%{error}"
     ja: "インポートに失敗しました：%{error}"
+  import_not_environment:
+    en: This file isn't a Postman environment or globals export
+    zh-CN: 这不是 Postman 的 environment / globals 导出文件
+    ja: Postman の environment / globals のエクスポートファイルではありません
+  import_invalid_json:
+    en: "The file isn't valid JSON: %{detail}"
+    zh-CN: "文件不是合法的 JSON：%{detail}"
+    ja: "ファイルが正しい JSON ではありません：%{detail}"
   exported:
     en: "Exported to %{path}"
     zh-CN: "已导出到 %{path}"
