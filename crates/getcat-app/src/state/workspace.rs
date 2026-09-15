@@ -40,6 +40,7 @@ use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::settings;
 use crate::state::store::{banner, store};
 use crate::state::update;
+use crate::state::variables;
 use crate::templates;
 use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
 use crate::ui::curl_sheet::{CURL_SHEET_WIDTH, CurlSheet, import_button};
@@ -201,10 +202,12 @@ impl Workspace {
         let (drafts, active) = order_drafts(&state, drafts);
         let split = ws.split;
         for d in drafts {
-            let saved_name: Option<SharedString> = d
+            let saved = d
                 .saved_id
-                .and_then(|id| ws.saved.iter().find(|r| r.id == id))
-                .map(|r| SharedString::from(r.name.clone()));
+                .and_then(|id| ws.saved.iter().find(|r| r.id == id));
+            let saved_name: Option<SharedString> =
+                saved.map(|r| SharedString::from(r.name.clone()));
+            let saved_group = saved.and_then(|r| r.group.clone());
             let still_saved = saved_name.is_some();
             let tab = cx.new(|cx| {
                 let mut tab = RequestTab::new(d.id, window, cx);
@@ -213,6 +216,7 @@ impl Workspace {
                 // 对应的已保存请求文件已不存在（被手工删除）：退化为有改动的未保存 Tab
                 tab.saved_id = d.saved_id.filter(|_| still_saved);
                 tab.saved_name = saved_name;
+                tab.saved_group = saved_group;
                 tab.dirty = d.dirty || (d.saved_id.is_some() && !still_saved);
                 tab
             });
@@ -763,6 +767,17 @@ impl Workspace {
         if changed.is_empty() {
             return;
         }
+        for request in &changed {
+            for tab in &self.tabs {
+                if tab.read(cx).saved_id == Some(request.id) {
+                    let group = request.group.clone();
+                    tab.update(cx, |t, cx| {
+                        t.saved_group = group;
+                        cx.notify();
+                    });
+                }
+            }
+        }
         if let Some(store) = store(cx) {
             for request in changed {
                 store.write_request(request);
@@ -794,11 +809,13 @@ impl Workspace {
             |r| (r.group.as_deref() == Some(from)).then(|| Some(to.clone())),
             cx,
         );
+        variables::update(cx, |s| s.rename_group(from, &to));
     }
 
     /// 解散分类：成员回未分类，请求本身不删。
     pub fn dissolve_group(&mut self, name: &str, cx: &mut Context<Self>) {
         self.retag_saved(|r| (r.group.as_deref() == Some(name)).then_some(None), cx);
+        variables::update(cx, |s| s.remove_group(name));
     }
 
     /// 选中的分类没有成员了（删光/解散/合并走）→ 回退「全部」。
@@ -827,6 +844,7 @@ impl Workspace {
             t.load_draft(&request.draft, window, cx);
             t.saved_id = Some(id);
             t.saved_name = Some(request.name.clone().into());
+            t.saved_group = request.group.clone();
             t.dirty = false;
             t.save_draft_now(cx);
             cx.notify();
@@ -872,6 +890,7 @@ impl Workspace {
                 tab.update(cx, |t, cx| {
                     t.saved_id = None;
                     t.saved_name = None;
+                    t.saved_group = None;
                     t.dirty = true;
                     t.save_draft_now(cx);
                     cx.notify();
@@ -1096,9 +1115,11 @@ impl Workspace {
             ..existing
         };
         let name: SharedString = request.name.clone().into();
+        let group = request.group.clone();
         self.upsert_saved(request, cx);
         tab.update(cx, |t, cx| {
             t.saved_name = Some(name);
+            t.saved_group = group;
             t.mark_clean(cx);
             t.save_draft_now(cx);
         });
@@ -1127,10 +1148,12 @@ impl Workspace {
         let mut request = SavedRequest::new(name.clone(), tab.read(cx).draft(cx));
         request.group = group.and_then(|g| saved_filter::normalize_group(&g));
         let id = request.id;
+        let group = request.group.clone();
         self.upsert_saved(request, cx);
         tab.update(cx, |t, cx| {
             t.saved_id = Some(id);
             t.saved_name = Some(name.into());
+            t.saved_group = group.clone();
             t.mark_clean(cx);
             t.save_draft_now(cx);
         });

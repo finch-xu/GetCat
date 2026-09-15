@@ -249,6 +249,10 @@ pub struct RequestTab {
     pub saved_id: Option<Ulid>,
     /// 已保存请求的名字：有则作为 Tab 标题。
     pub saved_name: Option<SharedString>,
+    /// 对应已保存请求的分类（分类级变量按它取）；未保存 / 未分类为 None。
+    /// 缓存在 Tab 上是因为 ⌘⏎ 的 listener 在 `Workspace::update` 内部 `update` 本实体，
+    /// 这里没法回读 Workspace（重入会 panic）。同步点与 `saved_name` 相同。
+    pub saved_group: Option<String>,
     /// 自上次保存以来是否有改动；Tab 标题前显示圆点。
     pub dirty: bool,
     pub method: Entity<SelectState<Vec<&'static str>>>,
@@ -387,6 +391,7 @@ impl RequestTab {
             id,
             saved_id: None,
             saved_name: None,
+            saved_group: None,
             dirty: false,
             method,
             url,

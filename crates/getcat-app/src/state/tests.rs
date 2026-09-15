@@ -4049,3 +4049,67 @@ fn resolve_layers_environment_over_group_over_global(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// Tab 记住自己所属分类：保存 / 打开 / 改名 / 解散 / 删除都要同步，变量表也跟着联动。
+#[gpui_kit::test]
+fn saved_group_follows_the_request_and_variables_follow_the_group(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/a", cx);
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "a".into(), Some("订单".into()), cx)
+            })
+        })
+        .unwrap();
+    cx.read(|app| assert_eq!(tab.read(app).saved_group.as_deref(), Some("订单")));
+
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.groups
+                .insert("订单".into(), vec![Variable::new("code", "418")]);
+        });
+    });
+    // 改名：Tab 与变量表一起搬
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.rename_group("订单", "订单2", cx)));
+    cx.read(|app| {
+        assert_eq!(tab.read(app).saved_group.as_deref(), Some("订单2"));
+        let sets = variables::variables(app);
+        assert!(!sets.groups.contains_key("订单"));
+        assert_eq!(sets.group_vars(Some("订单2"))[0].value, "418");
+    });
+    // 移动到未分类
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.move_saved_to_group(id, None, cx)));
+    cx.read(|app| assert_eq!(tab.read(app).saved_group, None));
+    // 分类变量在成员走光后仍保留
+    cx.read(|app| assert_eq!(variables::variables(app).group_vars(Some("订单2")).len(), 1));
+    // 解散：变量删除
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(id, Some("订单2".into()), cx)
+        })
+    });
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.dissolve_group("订单2", cx)));
+    cx.read(|app| {
+        assert_eq!(tab.read(app).saved_group, None);
+        assert!(variables::variables(app).groups.is_empty());
+    });
+    // 重启恢复：从已保存请求反查
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(id, Some("g".into()), cx)
+        })
+    });
+    assert!(store.flush());
+    let loaded = store.load_all();
+    let ws2 = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.read(|app| {
+        let t = ws2.read(app).active_tab();
+        assert_eq!(t.read(app).saved_group.as_deref(), Some("g"));
+    });
+    // 删除已保存请求：分类清空
+    cx.update(|_, cx| ws2.update(cx, |ws, cx| ws.delete_saved(id, cx)));
+    cx.read(|app| assert_eq!(ws2.read(app).active_tab().read(app).saved_group, None));
+}
