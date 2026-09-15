@@ -391,6 +391,86 @@ impl VariableSets {
     }
 }
 
+/// 前置操作：发送前把一个值写进变量（值本身先做 `{{}}` 替换，所以能写 `{{$timestamp}}`）。
+/// 目前只有「设置变量」一种，所以直接是结构体；以后加种类时补一个带默认值的 `kind` 字段即可。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreOp {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub scope: VarScope,
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+/// 后置操作读取响应的哪一部分。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResponseSource {
+    Status,
+    /// 响应头，名字不区分大小写；多值取第一个。
+    Header {
+        name: String,
+    },
+    /// JSON 路径子集 `a.b[0].c`，可带前导 `$.`。
+    JsonPath {
+        path: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssertOp {
+    Equals,
+    NotEquals,
+    Contains,
+    Exists,
+}
+
+impl AssertOp {
+    pub const ALL: [AssertOp; 4] = [
+        AssertOp::Equals,
+        AssertOp::NotEquals,
+        AssertOp::Contains,
+        AssertOp::Exists,
+    ];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|o| *o == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(AssertOp::Equals)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PostOpKind {
+    /// 把响应的一部分写进变量。
+    Extract {
+        scope: VarScope,
+        key: String,
+        source: ResponseSource,
+    },
+    /// 断言；`expected` 在发送时做 `{{}}` 替换。
+    Assert {
+        subject: ResponseSource,
+        op: AssertOp,
+        #[serde(default)]
+        expected: String,
+    },
+}
+
+/// 后置操作：响应完成后在后台线程执行。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostOp {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub kind: PostOpKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RequestDraft {
     pub method: Method,
@@ -404,6 +484,12 @@ pub struct RequestDraft {
     pub headers: Vec<KeyValue>,
     #[serde(default)]
     pub body: BodyKind,
+    /// 前置操作（发送前依次执行）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_ops: Vec<PreOp>,
+    /// 后置操作（响应完成后执行）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_ops: Vec<PostOp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -822,10 +908,61 @@ mod tests {
                 format: RawFormat::Json,
                 text: "{}".into(),
             },
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
         };
         let json = serde_json::to_string(&d).unwrap();
         let back: RequestDraft = serde_json::from_str(&json).unwrap();
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn ops_serde_round_trip_and_legacy_drafts_have_no_ops() {
+        let legacy: RequestDraft =
+            serde_json::from_str(r#"{"method":"GET","url":"https://x"}"#).unwrap();
+        assert!(legacy.pre_ops.is_empty() && legacy.post_ops.is_empty());
+
+        let d = RequestDraft {
+            pre_ops: vec![PreOp {
+                enabled: true,
+                scope: VarScope::Environment,
+                key: "ts".into(),
+                value: "{{$timestamp}}".into(),
+            }],
+            post_ops: vec![
+                PostOp {
+                    enabled: true,
+                    kind: PostOpKind::Extract {
+                        scope: VarScope::Global,
+                        key: "token".into(),
+                        source: ResponseSource::JsonPath {
+                            path: "$.data.token".into(),
+                        },
+                    },
+                },
+                PostOp {
+                    enabled: false,
+                    kind: PostOpKind::Assert {
+                        subject: ResponseSource::Status,
+                        op: AssertOp::Equals,
+                        expected: "200".into(),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""kind":"extract""#), "{json}");
+        assert!(json.contains(r#""kind":"json_path""#), "{json}");
+        assert!(json.contains(r#""op":"equals""#), "{json}");
+        let back: RequestDraft = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, d);
+        // 缺 enabled 时默认启用
+        let op: PostOp = serde_json::from_str(
+            r#"{"kind":"assert","subject":{"kind":"status"},"op":"exists","expected":""}"#,
+        )
+        .unwrap();
+        assert!(op.enabled);
     }
 
     #[test]

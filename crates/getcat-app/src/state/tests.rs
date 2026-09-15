@@ -1320,6 +1320,8 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
                 format: RawFormat::Xml,
                 text: "<a/>".into(),
             },
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
         },
         RequestDraft {
             method: Method::Put,

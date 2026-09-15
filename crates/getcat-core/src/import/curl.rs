@@ -244,6 +244,8 @@ impl Collected {
                 params,
                 headers: self.headers,
                 body,
+                pre_ops: Vec::new(),
+                post_ops: Vec::new(),
             },
             warnings: self.warnings,
         })

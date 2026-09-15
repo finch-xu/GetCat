@@ -175,6 +175,8 @@ mod tests {
                 format: RawFormat::Json,
                 text: "{\n  \"name\": \"cat\"\n}".into(),
             },
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
         }
     }
 

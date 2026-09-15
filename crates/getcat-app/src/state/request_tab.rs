@@ -590,6 +590,8 @@ impl RequestTab {
             params: self.params.read(cx).values(cx),
             headers: self.headers.read(cx).values(cx),
             body,
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
         }
     }
 
