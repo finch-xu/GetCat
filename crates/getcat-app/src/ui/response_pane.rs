@@ -108,22 +108,34 @@ fn notice_bar(text: impl Into<SharedString>) -> AnyElement {
         .into_any_element()
 }
 
-/// 断言失败详情里可能夹带 secret 变量的明文（期望值是发送时用 `{{secret_var}}` 替换出来的）：
-/// 把全局 / 每个环境 / 每个分类里任意非空的 secret 变量值，在文本里出现的地方都换成掩码。
-/// 不按当前作用域收窄——失败详情里的值可能来自其中任何一层，宁可多扫一遍。
-fn mask_secrets(text: &str, cx: &App) -> String {
-    let sets = variables::variables(cx);
-    let secret_values = sets
+/// 全局 / 每个环境 / 每个分类里所有非空的 secret 变量值，去重后按字节长度**降序**排列。
+///
+/// 长度必须降序：如果 secret A = "abc"、secret B = "abcXYZ" 同时存在，先换 A 会把 B 切掉
+/// 一角——"abcXYZ" 变成 "••••••XYZ"，"XYZ" 这部分本属于 B、却没被掩码，明文露了出来。
+/// 从最长的开始替换就不会有这个问题：位置上如果两个 secret 都能匹配，长的一定先被处理。
+fn secret_values(sets: &VariableSets) -> Vec<String> {
+    // 用 BTreeSet 去重（`dedup()` 只去掉相邻重复，排序后长度相同的重复值不一定相邻）
+    let unique: std::collections::BTreeSet<String> = sets
         .globals
         .iter()
         .chain(sets.environments.iter().flat_map(|e| e.variables.iter()))
         .chain(sets.groups.values().flat_map(|vars| vars.iter()))
         .filter(|v| v.secret && !v.value.is_empty())
-        .map(|v| v.value.as_str());
+        .map(|v| v.value.clone())
+        .collect();
+    let mut values: Vec<String> = unique.into_iter().collect();
+    values.sort_by_key(|v| std::cmp::Reverse(v.len()));
+    values
+}
+
+/// 把 `secrets`（须已按 [`secret_values`] 的长度降序排列）里在 `text` 中出现的子串
+/// 依次换成掩码。断言失败详情里的载荷（如 `Mismatch` 的 actual/expected）可能夹带
+/// 发送时用 `{{secret_var}}` 替换出来的明文，渲染前统一在这里掩掉。
+fn mask_with(text: &str, secrets: &[String]) -> String {
     let mut masked = text.to_string();
-    for value in secret_values {
-        if masked.contains(value) {
-            masked = masked.replace(value, "••••••");
+    for value in secrets {
+        if masked.contains(value.as_str()) {
+            masked = masked.replace(value.as_str(), "••••••");
         }
     }
     masked
@@ -150,6 +162,8 @@ fn is_extracted_var_secret(
 /// 「操作」页签：前置在前、后置在后，每条一行：状态色圆点 + 操作描述 + 原因 / 提取值。
 fn render_ops_report(report: &OpsReport, group: Option<&str>, cx: &App) -> AnyElement {
     let sets = variables::variables(cx);
+    // 每次渲染只算一遍、排一次序，逐行复用——secret 列表与行数无关
+    let secrets = secret_values(sets);
     let line =
         |ix: usize, title: SharedString, outcome: &OpOutcome, extra: Option<SharedString>| {
             let color = match outcome {
@@ -157,8 +171,8 @@ fn render_ops_report(report: &OpsReport, group: Option<&str>, cx: &App) -> AnyEl
                 OpOutcome::Failed(_) => cx.theme().danger,
                 OpOutcome::Skipped(_) => cx.theme().warning,
             };
-            // 失败详情里的载荷（如 Mismatch 的 actual/expected）可能是替换出来的 secret 明文
-            let detail = op_detail(outcome).map(|text| SharedString::from(mask_secrets(&text, cx)));
+            let detail =
+                op_detail(outcome).map(|text| SharedString::from(mask_with(&text, &secrets)));
             v_flex()
                 .id(("op-result", ix))
                 .py_1()
@@ -904,26 +918,66 @@ impl RequestTab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use getcat_core::model::Variable;
-    use gpui_kit::TestAppContext;
+    use getcat_core::model::{Environment, Variable};
 
-    /// 断言失败详情里可能带出 secret 变量的明文；渲染前统一掩码。
-    #[gpui_kit::test]
-    fn mask_secrets_redacts_secret_variable_values(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            let mut sets = VariableSets::default();
-            let mut token = Variable::new("token", "T0K");
-            token.secret = true;
-            sets.globals.push(token);
-            sets.globals.push(Variable::new("plain", "P"));
-            variables::install(cx, Some(sets), false);
+    fn secret(key: &str, value: &str) -> Variable {
+        let mut v = Variable::new(key, value);
+        v.secret = true;
+        v
+    }
 
-            assert_eq!(
-                mask_secrets("Expected 200, got T0K", cx),
-                "Expected 200, got ••••••"
-            );
-            // 非 secret 的值原样保留
-            assert_eq!(mask_secrets("value is P", cx), "value is P");
-        });
+    /// 短 secret 是长 secret 的前缀时，必须先换长的，否则长值被切掉一角、
+    /// 残留的后半截（这里是 "XYZ"）会露在外面。
+    #[test]
+    fn secret_values_sort_longer_first_so_substrings_dont_leak() {
+        let mut sets = VariableSets::default();
+        sets.globals.push(secret("short", "abc"));
+        let mut env = Environment::new("dev");
+        env.variables.push(secret("long", "abcXYZ"));
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+
+        let values = secret_values(&sets);
+        assert_eq!(values, vec!["abcXYZ".to_string(), "abc".to_string()]);
+        assert_eq!(
+            mask_with("got abcXYZ and abc", &values),
+            "got •••••• and ••••••"
+        );
+    }
+
+    /// 环境作用域与分类作用域的 secret 都要认得到、都能掩码。
+    #[test]
+    fn secret_values_cover_environment_and_group_scopes() {
+        let mut sets = VariableSets::default();
+        let mut env = Environment::new("dev");
+        env.variables.push(secret("env_token", "ENVSECRET"));
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+        sets.groups
+            .insert("g".into(), vec![secret("grp_token", "GRPSECRET")]);
+
+        let values = secret_values(&sets);
+        assert!(values.contains(&"ENVSECRET".to_string()));
+        assert!(values.contains(&"GRPSECRET".to_string()));
+        assert_eq!(
+            mask_with("env=ENVSECRET grp=GRPSECRET", &values),
+            "env=•••••• grp=••••••"
+        );
+    }
+
+    /// 既有场景：全局 secret 被掩码，非 secret 值原样保留。
+    #[test]
+    fn mask_with_redacts_secret_variable_values() {
+        let mut sets = VariableSets::default();
+        sets.globals.push(secret("token", "T0K"));
+        sets.globals.push(Variable::new("plain", "P"));
+        let values = secret_values(&sets);
+
+        assert_eq!(
+            mask_with("Expected 200, got T0K", &values),
+            "Expected 200, got ••••••"
+        );
+        // 非 secret 的值原样保留
+        assert_eq!(mask_with("value is P", &values), "value is P");
     }
 }
