@@ -2249,6 +2249,41 @@ fn disabling_a_default_header_shows_up_in_the_generated_code(cx: &mut TestAppCon
     assert!(code.contains("Accept"), "其余默认头还在：{code}");
 }
 
+/// 生成的 curl 必须等于真正发出去的请求：变量已展开，但不执行前置操作。
+#[gpui_kit::test]
+fn code_sheet_uses_resolved_variables_without_running_pre_ops(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| s.globals.push(Variable::new("host", "api.test")))
+    });
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://{{host}}/v1", cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.pre_ops = vec![PreOp {
+                enabled: true,
+                kind: PreOpKind::SetVariable {
+                    scope: VarScope::Global,
+                    key: "side_effect".into(),
+                    value: "1".into(),
+                },
+            }];
+        })
+    });
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_sheet.read(app).text().clone());
+    assert!(code.contains("'https://api.test/v1'"), "{code}");
+    cx.read(|app| {
+        assert!(
+            variables::variables(app)
+                .globals
+                .iter()
+                .all(|v| v.key != "side_effect")
+        )
+    });
+}
+
 #[gpui_kit::test]
 fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);

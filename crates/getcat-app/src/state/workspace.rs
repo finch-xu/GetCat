@@ -1497,7 +1497,13 @@ impl Workspace {
     /// 默认请求头的开关是全局设置，所以每次都现取——用户刚在设置里关掉 User-Agent，
     /// 下一次打开抽屉就该看到它消失。
     pub(crate) fn refresh_code_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let draft = self.active_tab().read(cx).draft(cx);
+        let tab = self.active_tab();
+        let (draft, group) = {
+            let tab = tab.read(cx);
+            (tab.draft(cx), tab.saved_group.clone())
+        };
+        // 生成的代码要等于真正发出去的请求：变量展开，但前置操作不在这里跑（它有副作用）
+        let draft = variables::resolve(cx, group.as_deref(), draft).draft;
         let disabled = settings::settings(cx).request.disabled_default_headers;
         self.code_sheet.update(cx, |sheet, cx| {
             sheet.load(draft, disabled, window, cx);
