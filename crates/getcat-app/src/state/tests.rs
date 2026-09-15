@@ -4603,3 +4603,53 @@ fn cancel_discards_the_ops_report(cx: &mut TestAppContext) {
         ));
     });
 }
+
+/// `persist == false`（variables.json 在但读不出来）时只改内存、不写盘；正常安装照常写。
+#[gpui_kit::test]
+fn variables_installed_without_persist_never_write(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let writes = store.write_count();
+    cx.update(|_, app| {
+        variables::install(app, None, false);
+        variables::update(app, |s| s.globals.push(Variable::new("a", "1")));
+    });
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes, "不可写时不该写盘");
+    cx.read(|app| assert_eq!(variables::variables(app).globals[0].value, "1"));
+    // 后续改动也保持不写
+    cx.update(|_, app| variables::update(app, |s| s.globals[0].value = "2".into()));
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes);
+
+    cx.update(|_, app| {
+        variables::install(app, None, true);
+        variables::update(app, |s| s.globals.push(Variable::new("b", "2")));
+    });
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes + 1);
+    assert_eq!(store.load_all().variables.unwrap().globals[0].key, "b");
+}
+
+/// 读取失败且文件仍在原处 → 不落盘；隔离改名后的损坏文件、别的文件出错 → 照常落盘。
+#[test]
+fn variables_persist_only_when_the_file_is_not_left_unreadable() {
+    use getcat_core::store::LoadError;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("variables.json");
+    let err = |p: &std::path::Path| LoadError {
+        path: p.to_path_buf(),
+        message: "Couldn't read file".into(),
+    };
+    // 没有错误
+    assert!(variables::should_persist(&path, &[]));
+    // 出错但文件已不在原处（损坏文件被改名隔离）
+    assert!(variables::should_persist(&path, &[err(&path)]));
+    std::fs::write(&path, b"{}").unwrap();
+    // 文件在、但读取失败
+    assert!(!variables::should_persist(&path, &[err(&path)]));
+    // 出错的是别的文件
+    assert!(variables::should_persist(
+        &path,
+        &[err(&dir.path().join("settings.json"))]
+    ));
+}
