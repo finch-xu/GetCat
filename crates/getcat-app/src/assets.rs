@@ -29,11 +29,13 @@ pub const ICON_ROWS_3: &str = "icons/rows-3.svg";
 pub const ICON_LOCK_OPEN: &str = "icons/lock-open.svg";
 /// 变量表「标记为敏感值」按钮：已锁（已掩码）状态。
 pub const ICON_LOCK: &str = "icons/lock.svg";
+/// 右侧图标栏「变量」的图标（`{}` 呼应 `{{var}}` 占位符）。
+pub const ICON_BRACES: &str = "icons/braces.svg";
 
 /// 应用自带的资源表。上游 `gpui-component-assets` 没有的图标补在这里——
 /// 都取自 Lucide（ISC），与上游图标集同源，风格与 24px 网格自然一致。
 ///
-/// 补图标而不是拿现成的凑：`wrap-text` / `file-input` / `rows-3` / `lock` / `lock-open`
+/// 补图标而不是拿现成的凑：`wrap-text` / `file-input` / `rows-3` / `lock` / `lock-open` / `braces`
 /// 各自都是一眼能认出语义的标准图形，用意思相近的替代只会让按钮更难懂。
 const ASSETS: &[(&str, &[u8])] = &[
     (LOGO_PATH, LOGO_PNG),
@@ -51,6 +53,7 @@ const ASSETS: &[(&str, &[u8])] = &[
         include_bytes!("../assets/icons/lock-open.svg"),
     ),
     (ICON_LOCK, include_bytes!("../assets/icons/lock.svg")),
+    (ICON_BRACES, include_bytes!("../assets/icons/braces.svg")),
 ];
 
 pub struct AppAssets;
@@ -94,6 +97,7 @@ mod tests {
             ICON_ROWS_3,
             ICON_LOCK_OPEN,
             ICON_LOCK,
+            ICON_BRACES,
         ] {
             let bytes = AppAssets
                 .load(path)

@@ -46,6 +46,7 @@ use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
 use crate::ui::curl_sheet::{CURL_SHEET_WIDTH, CurlSheet, import_button};
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
 use crate::ui::tab_strip::{next_tab_rows, page_count, tabs_per_page};
+use crate::ui::variables_sheet::{SheetScope, VARIABLES_SHEET_WIDTH, VariablesSheet};
 use crate::{
     CloseTab, DuplicateTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest,
     ToggleSidebar,
@@ -83,10 +84,15 @@ pub enum ToolSection {
     #[default]
     CodeGen,
     ImportCurl,
+    Variables,
 }
 
 impl ToolSection {
-    pub const ALL: [ToolSection; 2] = [ToolSection::CodeGen, ToolSection::ImportCurl];
+    pub const ALL: [ToolSection; 3] = [
+        ToolSection::CodeGen,
+        ToolSection::ImportCurl,
+        ToolSection::Variables,
+    ];
 }
 
 pub struct Workspace {
@@ -135,6 +141,8 @@ pub struct Workspace {
     pub(crate) code_sheet: Entity<CodeSheet>,
     /// 「导入 cURL」抽屉的正文。与 `code_sheet` 同样的约束：必须是独立实体。
     pub(crate) curl_sheet: Entity<CurlSheet>,
+    /// 「变量」抽屉的正文。同上：必须是独立实体。
+    pub(crate) variables_sheet: Entity<VariablesSheet>,
     /// 当前打开着的是哪个抽屉。`Sheet` 是窗口级单例，只靠 `has_active_sheet`
     /// 分不清「点的是同一个（该收起）」还是「点的是另一个（该换内容）」。
     open_tool: Option<ToolSection>,
@@ -187,6 +195,7 @@ impl Workspace {
             update_status: update::status(cx),
             code_sheet: cx.new(|cx| CodeSheet::new(window, cx)),
             curl_sheet: cx.new(|cx| CurlSheet::new(window, cx)),
+            variables_sheet: cx.new(|cx| VariablesSheet::new(window, cx)),
             open_tool: None,
             _subs: Vec::new(),
         };
@@ -1402,6 +1411,9 @@ impl Workspace {
         match section {
             ToolSection::CodeGen => self.open_code_sheet(window, cx),
             ToolSection::ImportCurl => self.open_curl_sheet(window, cx),
+            ToolSection::Variables => {
+                self.open_variables_sheet(SheetScope::Global, None, window, cx)
+            }
         }
     }
 
@@ -1467,6 +1479,45 @@ impl Workspace {
             sheet.update(cx, |sheet, cx| sheet.focus(window, cx));
         });
         cx.notify();
+    }
+
+    /// 打开「变量」抽屉，定位到某一页（`group` 只对分类页有意义，None 取第一个分类）。
+    ///
+    /// builder 里只放 `Entity<VariablesSheet>`，**绝不碰 `self`**：它是 `Fn`、每帧在本实体的
+    /// `render` 内部执行，动一下就二次借用 panic。抽屉的写入全部直接走全局变量句柄，不回调宿主。
+    pub fn open_variables_sheet(
+        &mut self,
+        scope: SheetScope,
+        group: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let groups = self.variable_group_names(cx);
+        self.variables_sheet
+            .update(cx, |s, cx| s.load(scope, group, groups, window, cx));
+        self.open_tool = Some(ToolSection::Variables);
+        let sheet = self.variables_sheet.clone();
+        window.open_sheet(cx, move |sh, _, _| {
+            sh.size(px(VARIABLES_SHEET_WIDTH))
+                .title(div().child(tr!("tools.variables.title")))
+                .child(sheet.clone())
+        });
+        cx.notify();
+    }
+
+    /// 变量抽屉分类页的候选 = 已保存请求推导出的分类 ∪ 变量表里挂着变量的分类名。
+    /// spec 规定分类因成员移走而自然消失时变量保留——只列前者的话，这些变量既看不到也删不掉。
+    pub(crate) fn variable_group_names(&self, cx: &App) -> Vec<String> {
+        let mut groups: Vec<String> = saved_filter::derive_groups(&self.saved)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        for name in variables::variables(cx).groups.keys() {
+            if !groups.contains(name) {
+                groups.push(name.clone());
+            }
+        }
+        groups
     }
 
     /// 把抽屉里解析好的草稿开成一个新 Tab。

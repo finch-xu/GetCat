@@ -14,6 +14,7 @@ pub mod tab_strip;
 pub mod text;
 pub mod tool_rail;
 pub mod url_bar;
+pub mod variables_sheet;
 
 use std::time::Duration;
 

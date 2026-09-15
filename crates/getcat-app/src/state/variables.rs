@@ -79,8 +79,7 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut VariableSets)) {
     });
 }
 
-// 计划 3 的环境切换器（UI）调用；本计划只有测试在用
-#[allow(dead_code)]
+/// 切换激活环境（None = 不用环境）。
 pub fn set_active_environment(cx: &mut App, id: Option<Ulid>) {
     update(cx, |s| s.active_environment = id);
 }

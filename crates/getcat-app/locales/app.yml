@@ -165,6 +165,118 @@ tools:
       en: The parsed request will be summarized here
       zh-CN: 解析结果会显示在这里
       ja: 解析結果の概要がここに表示されます
+  variables:
+    title:
+      en: Variables
+      zh-CN: 变量
+      ja: 変数
+
+# 「变量」抽屉：全局 / 环境 / 分类三层变量的编辑，环境管理，Postman 导入导出
+variables:
+  scope_global:
+    en: Global
+    zh-CN: 全局
+    ja: グローバル
+  scope_environment:
+    en: Environments
+    zh-CN: 环境
+    ja: 環境
+  scope_group:
+    en: Categories
+    zh-CN: 分类
+    ja: カテゴリ
+  scope_aria:
+    en: Variable scope
+    zh-CN: 变量作用域
+    ja: 変数のスコープ
+  env_select_aria:
+    en: Environment
+    zh-CN: 环境
+    ja: 環境
+  group_select_aria:
+    en: Category
+    zh-CN: 分类
+    ja: カテゴリ
+  no_environment:
+    en: No environments yet. Create one to get started.
+    zh-CN: 还没有环境，先新建一个。
+    ja: 環境がまだありません。まず作成してください。
+  no_group:
+    en: No categories yet. Save a request into a category first.
+    zh-CN: 还没有分类，先把请求保存到某个分类。
+    ja: カテゴリがまだありません。まずリクエストをカテゴリに保存してください。
+  new_env:
+    en: New
+    zh-CN: 新建
+    ja: 新規
+  new_env_default_name:
+    en: New environment
+    zh-CN: 新环境
+    ja: 新しい環境
+  delete_env:
+    en: Delete
+    zh-CN: 删除
+    ja: 削除
+  delete_env_title:
+    en: "Delete environment “%{name}”?"
+    zh-CN: "删除环境「%{name}」？"
+    ja: "環境「%{name}」を削除しますか？"
+  delete_env_body:
+    en: Its variables are deleted. Requests that reference them will send the placeholders as-is.
+    zh-CN: 其中的变量会被删除；引用它们的请求会把占位符原样发出。
+    ja: 含まれる変数は削除されます。参照しているリクエストはプレースホルダーをそのまま送信します。
+  delete_env_ok:
+    en: Delete
+    zh-CN: 删除
+    ja: 削除
+  rename_placeholder:
+    en: Environment name
+    zh-CN: 环境名
+    ja: 環境名
+  activate:
+    en: Use this environment
+    zh-CN: 使用此环境
+    ja: この環境を使う
+  active_tag:
+    en: Active
+    zh-CN: 当前
+    ja: 使用中
+  import:
+    en: Import…
+    zh-CN: 导入…
+    ja: インポート…
+  export:
+    en: Export…
+    zh-CN: 导出…
+    ja: エクスポート…
+  import_tooltip:
+    en: Import a Postman environment or globals JSON file
+    zh-CN: 导入 Postman 的 environment / globals JSON 文件
+    ja: Postman の environment / globals JSON ファイルをインポート
+  export_tooltip:
+    en: Export as Postman environment JSON (secret values are written in plain text)
+    zh-CN: 导出为 Postman environment JSON（敏感值以明文写入）
+    ja: Postman environment JSON としてエクスポート（秘密の値は平文で書き込まれます）
+  imported:
+    en: "Imported %{count} variables"
+    zh-CN: "已导入 %{count} 个变量"
+    ja: "%{count} 個の変数をインポートしました"
+  import_failed:
+    en: "Import failed: %{error}"
+    zh-CN: "导入失败：%{error}"
+    ja: "インポートに失敗しました：%{error}"
+  exported:
+    en: "Exported to %{path}"
+    zh-CN: "已导出到 %{path}"
+    ja: "%{path} にエクスポートしました"
+  export_failed:
+    en: "Export failed: %{error}"
+    zh-CN: "导出失败：%{error}"
+    ja: "エクスポートに失敗しました：%{error}"
+  table_aria:
+    en: Variables table
+    zh-CN: 变量表
+    ja: 変数テーブル
 
 sidebar:
   rail_aria:

@@ -41,8 +41,7 @@ pub enum KvPlaceholder {
     Header,
     /// 表单字段（urlencoded / form-data）
     Field,
-    /// 变量（全局 / 分类 / 环境）；计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用
-    #[allow(dead_code)]
+    /// 变量（全局 / 分类 / 环境）
     Variable,
 }
 
@@ -209,8 +208,6 @@ impl KvTable {
     }
 
     /// 变量表：每行可标记为敏感值，值输入框掩码显示。
-    /// 计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用。
-    #[allow(dead_code)]
     pub fn secret_capable(mut self, yes: bool) -> Self {
         self.secret_capable = yes;
         self
@@ -535,8 +532,6 @@ impl KvTable {
     }
 
     /// 读出当前行内容为变量列表（过滤空行）。
-    /// 计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用。
-    #[allow(dead_code)]
     pub fn variables(&self, cx: &App) -> Vec<Variable> {
         self.rows
             .iter()
@@ -552,8 +547,6 @@ impl KvTable {
     }
 
     /// 程序化载入（不发 `Changed`）；末尾补空行。
-    /// 计划 3 的变量抽屉（任务 6）调用，本任务只有测试在用。
-    #[allow(dead_code)]
     pub fn set_variables(
         &mut self,
         vars: &[Variable],

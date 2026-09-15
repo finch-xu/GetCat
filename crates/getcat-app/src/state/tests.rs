@@ -29,7 +29,7 @@ use getcat_core::store::{Store, codec::decode};
 use getcat_core::tls::{CertWarning, CertificateInfo};
 use gpui_kit::base::TextSelection;
 use gpui_kit::component::{
-    ActiveTheme, IndexPath, Root,
+    ActiveTheme, IndexPath, Root, WindowExt,
     input::{InputEvent, InputState},
     select::{SelectEvent, SelectState},
 };
@@ -59,6 +59,7 @@ use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
 use crate::ui::ops_table::{OpsMode, OpsTable, OpsTableEvent, PostRowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 use crate::ui::tab_strip::{page_count, tabs_per_page};
+use crate::ui::variables_sheet::{SheetScope, VariablesSheet};
 use getcat_core::model::{LanguagePref, MAX_TAB_ROWS};
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
@@ -2293,6 +2294,354 @@ fn code_sheet_uses_resolved_variables_without_running_pre_ops(cx: &mut TestAppCo
                 .all(|v| v.key != "side_effect")
         )
     });
+}
+
+/// 抽屉：编辑表格写回对应作用域；导入 environment 建新环境、导入 globals 合并；导出能被 parse 读回。
+#[gpui_kit::test]
+fn variables_sheet_edits_import_and_export(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    // 全局页：表格改动 → 写回
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Global, None, vec![], window, cx);
+            s.table().update(cx, |t, cx| {
+                t.set_variables(&[Variable::new("host", "h")], window, cx)
+            });
+            s.commit_table_for_test(cx);
+        })
+    });
+    cx.read(|app| assert_eq!(variables::variables(app).globals[0].value, "h"));
+    // 抽屉开着时后台写入变量（模拟响应到达后的提取）：表格跟上，之后的编辑不会把它抹掉
+    cx.update(|_, app| variables::update(app, |s| s.globals.push(Variable::new("token", "T"))));
+    cx.run_until_parked();
+    cx.read(|app| {
+        let keys: Vec<String> = sheet
+            .read(app)
+            .table()
+            .read(app)
+            .variables(app)
+            .into_iter()
+            .map(|v| v.key)
+            .collect();
+        assert_eq!(keys, vec!["host".to_string(), "token".to_string()]);
+    });
+    cx.update(|_, cx| sheet.update(cx, |s, cx| s.commit_table_for_test(cx)));
+    cx.read(|app| {
+        assert!(
+            variables::variables(app)
+                .globals
+                .iter()
+                .any(|v| v.key == "token" && v.value == "T")
+        )
+    });
+    // 导入 environment → 新环境并激活
+    let n = cx
+        .update(|window, cx| {
+            sheet.update(cx, |s, cx| {
+                s.import_from_text(
+                    r#"{"name":"Dev","values":[{"key":"code","value":"200","type":"secret"}],"_postman_variable_scope":"environment"}"#,
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    assert_eq!(n, 1);
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments[0].name, "Dev");
+        assert!(sets.environments[0].variables[0].secret);
+        assert_eq!(sets.active_environment, Some(sets.environments[0].id));
+    });
+    // 再导一次同名：名字加后缀
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.import_from_text(r#"{"name":"Dev","values":[]}"#, window, cx)
+        })
+    })
+    .unwrap();
+    cx.read(|app| assert_eq!(variables::variables(app).environments[1].name, "Dev 2"));
+    // 导入 globals：合并、同 key 覆盖
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.import_from_text(
+                r#"{"values":[{"key":"host","value":"new"},{"key":"x","value":"1"}],"_postman_variable_scope":"globals"}"#,
+                window,
+                cx,
+            )
+        })
+    })
+    .unwrap();
+    cx.read(|app| {
+        let g = &variables::variables(app).globals;
+        assert_eq!(g.len(), 3);
+        assert_eq!(g.iter().find(|v| v.key == "host").unwrap().value, "new");
+    });
+    // 导出环境页：打开时定位到激活环境（刚导入的 Dev 2），经下拉切回 Dev 再导出
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Environment, None, vec![], window, cx)
+        })
+    });
+    let (name, _) = cx.read(|app| sheet.read(app).export_text(app)).unwrap();
+    assert_eq!(name, "Dev_2.postman_environment.json");
+    let env_select = cx.read(|app| sheet.read(app).env_select().clone());
+    pick_select(cx, &env_select, 0);
+    cx.run_until_parked();
+    let (name, text) = cx.read(|app| sheet.read(app).export_text(app)).unwrap();
+    assert!(name.ends_with(".postman_environment.json"), "{name}");
+    let parsed = getcat_core::postman_env::parse(&text).unwrap();
+    assert_eq!(parsed.name, "Dev");
+    assert_eq!(parsed.variables[0].key, "code");
+    assert!(parsed.variables[0].secret);
+    // 分类页没有 Postman 对应格式，不导出
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Group, None, vec!["api".into()], window, cx)
+        })
+    });
+    assert!(cx.read(|app| sheet.read(app).export_text(app)).is_none());
+    // 坏文件报错，不改变量
+    let before = cx.read(|app| variables::variables(app).clone());
+    let err = cx.update(|window, cx| sheet.update(cx, |s, cx| s.import_from_text("{", window, cx)));
+    assert!(err.is_err());
+    cx.read(|app| assert_eq!(*variables::variables(app), before));
+    assert!(store.flush());
+}
+
+/// 抽屉：下拉切环境换表；改名边打字边写回，观察者不会把输入框重置（尾随空格不被吃掉）；
+/// 分类页写回该分类，清空后不留空条目。
+#[gpui_kit::test]
+fn variables_sheet_switches_renames_and_edits_groups(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            let mut a = Environment::new("A");
+            a.variables.push(Variable::new("k", "a"));
+            let mut b = Environment::new("B");
+            b.variables.push(Variable::new("k", "b"));
+            s.active_environment = Some(b.id);
+            s.environments = vec![a, b];
+            s.groups
+                .insert("orphan".into(), vec![Variable::new("g", "1")]);
+        })
+    });
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    let table_values = |cx: &mut VisualTestContext| {
+        cx.read(|app| {
+            sheet
+                .read(app)
+                .table()
+                .read(app)
+                .variables(app)
+                .into_iter()
+                .map(|v| (v.key, v.value))
+                .collect::<Vec<_>>()
+        })
+    };
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Environment, None, vec![], window, cx)
+        })
+    });
+    // 默认定位到激活环境
+    assert_eq!(table_values(cx), vec![("k".to_string(), "b".to_string())]);
+    let env_select = cx.read(|app| sheet.read(app).env_select().clone());
+    pick_select(cx, &env_select, 0);
+    cx.run_until_parked();
+    assert_eq!(table_values(cx), vec![("k".to_string(), "a".to_string())]);
+
+    // 改名：中间态 "Alpha " 存为 "Alpha"，但输入框里的尾随空格保留，接着打字不受影响
+    let name_input = cx.read(|app| sheet.read(app).env_name().clone());
+    type_input(cx, &name_input, "Alpha ");
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(variables::variables(app).environments[0].name, "Alpha");
+        assert_eq!(name_input.read(app).value().as_ref(), "Alpha ");
+    });
+    type_input(cx, &name_input, "Alpha 2");
+    cx.run_until_parked();
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments[0].name, "Alpha 2");
+        // 改名不动激活状态
+        assert_eq!(sets.active_environment, Some(sets.environments[1].id));
+    });
+    // 激活当前选中的环境
+    cx.update(|_, cx| sheet.update(cx, |s, cx| s.activate_env_for_test(cx)));
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.active_environment, Some(sets.environments[0].id));
+    });
+
+    // 分类页：定位到给定分类，改动写回该分类
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(
+                SheetScope::Group,
+                Some("orphan".into()),
+                vec!["api".into(), "orphan".into()],
+                window,
+                cx,
+            )
+        })
+    });
+    assert_eq!(table_values(cx), vec![("g".to_string(), "1".to_string())]);
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.table().update(cx, |t, cx| {
+                t.set_variables(&[Variable::new("g", "2")], window, cx)
+            });
+            s.commit_table_for_test(cx);
+        })
+    });
+    cx.read(|app| assert_eq!(variables::variables(app).groups["orphan"][0].value, "2"));
+    // 切到另一个分类再清空：不留空条目
+    let group_select = cx.read(|app| sheet.read(app).group_select().clone());
+    pick_select(cx, &group_select, 0);
+    cx.run_until_parked();
+    assert!(table_values(cx).is_empty());
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.table().update(cx, |t, cx| {
+                t.set_variables(&[Variable::new("x", "1")], window, cx)
+            });
+            s.commit_table_for_test(cx);
+            s.table()
+                .update(cx, |t, cx| t.set_variables(&[], window, cx));
+            s.commit_table_for_test(cx);
+        })
+    });
+    cx.read(|app| assert!(!variables::variables(app).groups.contains_key("api")));
+    assert!(store.flush());
+}
+
+/// 分类页的候选 = 已保存请求推导出的分类 ∪ 变量表里挂着变量的分类（成员移走后变量仍可见可删）。
+#[gpui_kit::test]
+fn variables_sheet_group_candidates_include_orphaned_group_vars(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.groups.insert("api".into(), vec![Variable::new("a", "1")]);
+            s.groups
+                .insert("orphan".into(), vec![Variable::new("o", "1")]);
+        })
+    });
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab.clone(), "r".into(), Some("api".into()), cx)
+        })
+    });
+    let groups = cx.read(|app| ws.read(app).variable_group_names(app));
+    assert_eq!(groups, vec!["api".to_string(), "orphan".to_string()]);
+}
+
+/// 真实 `Root` 窗口里走一遍：图标栏打开抽屉 → 抽屉上弹删除确认 → 整窗画帧 → 确认删除 → 再点图标收起。
+/// Sheet / Dialog 的 builder 都在 `Workspace::render` 内部每帧执行，谁在里面碰宿主，画帧时就会
+/// 二次借用 panic（「点一下就闪退」）。
+#[gpui_kit::test]
+fn variables_sheet_and_delete_dialog_draw_over_the_workspace(cx: &mut TestAppContext) {
+    init_globals(cx);
+    cx.update(|app| {
+        variables::update(app, |s| {
+            let dev = Environment::new("Dev");
+            s.active_environment = Some(dev.id);
+            s.environments = vec![dev, Environment::new("Prod")];
+        })
+    });
+    let slot: Rc<RefCell<Option<Entity<Workspace>>>> = Rc::new(RefCell::new(None));
+    let slot_for_root = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let ws = cx.new(|cx| Workspace::new(window, cx));
+        *slot_for_root.borrow_mut() = Some(ws.clone());
+        Root::new(ws, window, cx)
+    });
+    let ws = slot
+        .borrow_mut()
+        .take()
+        .expect("workspace created inside the root view");
+    let draw = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        })
+    };
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_tool_section(ToolSection::Variables, window, cx)
+        })
+    });
+    draw(cx);
+    assert!(cx.update(|window, cx| window.has_active_sheet(cx)));
+
+    let sheet = cx.read(|app| ws.read(app).variables_sheet.clone());
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Environment, None, vec![], window, cx);
+            s.confirm_delete_env_for_test(window, cx);
+        })
+    });
+    draw(cx);
+    cx.update(|window, cx| {
+        assert!(window.has_active_dialog(cx));
+        assert!(
+            window.has_active_sheet(cx),
+            "确认框叠在抽屉上，不该把抽屉关掉"
+        );
+    });
+    // 与按下确认键同一条路：对话框聚焦时派发 Confirm
+    cx.update(|window, cx| {
+        window.dispatch_action(
+            Box::new(gpui_kit::component::dialog::Confirm { secondary: false }),
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    draw(cx);
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments.len(), 1);
+        assert_eq!(sets.environments[0].name, "Prod");
+        assert_eq!(sets.active_environment, None, "删掉的是激活环境");
+    });
+    // 抽屉退到剩下的环境
+    let (name, _) = cx.read(|app| sheet.read(app).export_text(app)).unwrap();
+    assert_eq!(name, "Prod.postman_environment.json");
+
+    // 再点一次同一个图标：收起
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_tool_section(ToolSection::Variables, window, cx)
+        })
+    });
+    draw(cx);
+    assert!(!cx.update(|window, cx| window.has_active_sheet(cx)));
+}
+
+/// 抽屉正文与 CodeSheet 同一条约束：自己就是 `Render`，三个作用域页都能单独画出来。
+#[gpui_kit::test]
+fn variables_sheet_renders_every_scope_on_its_own(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.environments.push(Environment::new("Dev"));
+        })
+    });
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    for (scope, groups) in [
+        (SheetScope::Global, vec![]),
+        (SheetScope::Environment, vec![]),
+        (SheetScope::Group, vec![]),
+        (SheetScope::Group, vec!["api".to_string()]),
+    ] {
+        cx.update(|window, cx| sheet.update(cx, |s, cx| s.load(scope, None, groups, window, cx)));
+        cx.draw(point(px(0.), px(0.)), size(px(640.), px(700.)), |_, _| {
+            sheet.clone().into_any_element()
+        });
+    }
 }
 
 /// 断言操作的期望值（原文或已替换）。
