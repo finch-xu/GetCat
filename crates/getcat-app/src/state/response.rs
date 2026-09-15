@@ -236,13 +236,36 @@ pub(crate) fn prepare_guarded(
     post_ops: Vec<PostOp>,
     should_cancel: impl FnMut() -> bool,
 ) -> Option<Result<Prepared, RequestError>> {
+    prepare_guarded_with(meta, body, post_ops, ops::run_post_ops, should_cancel)
+}
+
+/// [`prepare_guarded`] 的实现；`run_post` 是后置操作执行器（生产固定为 `ops::run_post_ops`，
+/// 抽成参数是为了让测试能注入一个会 panic 的执行器）。
+fn prepare_guarded_with(
+    meta: ResponseMeta,
+    body: BodyStore,
+    post_ops: Vec<PostOp>,
+    run_post: impl FnOnce(&[PostOp], &ResponseMeta, Option<&[u8]>) -> PostReport,
+    should_cancel: impl FnMut() -> bool,
+) -> Option<Result<Prepared, RequestError>> {
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         // 后置操作先跑：它要读 meta，而 prepare_cancellable 会把 meta 移进视图。
-        // 只看启用的：全部停用时与没有操作一样给 None，「操作」页签不出现（同 run_pre_ops）
-        let report = post_ops
-            .iter()
-            .any(|o| o.enabled)
-            .then(|| ops::run_post_ops(&post_ops, &meta, body.memory()));
+        // 只看启用的：全部停用时与没有操作一样给 None，「操作」页签不出现（同前置操作）
+        let report = if post_ops.iter().any(|o| o.enabled) {
+            // 单独再包一层：后置操作 panic 只丢掉操作报告，响应视图照常准备
+            match catch_unwind(AssertUnwindSafe(|| {
+                run_post(&post_ops, &meta, body.memory())
+            })) {
+                Ok(report) => Some(report),
+                Err(payload) => {
+                    let message = panic_message(payload.as_ref());
+                    tracing::error!("post-ops panicked: {message}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         ResponseView::prepare_cancellable(meta, &body, should_cancel).map(|view| (view, report))
     }));
     match outcome {
@@ -709,5 +732,36 @@ mod tests {
         let r = report(vec![status_is(false, "500"), status_is(true, "200")]).unwrap();
         assert_eq!(r.results.len(), 1);
         assert_eq!(r.passed(), 1);
+    }
+
+    /// 后置操作 panic 只丢掉操作报告：响应视图照常准备，不整体变成「后台处理异常」。
+    #[test]
+    fn a_post_ops_panic_drops_only_the_report() {
+        let op = PostOp {
+            enabled: true,
+            kind: PostOpKind::Assert {
+                subject: ResponseSource::Status,
+                op: AssertOp::Equals,
+                expected: "200".into(),
+            },
+        };
+        let result = prepare_guarded_with(
+            meta(Some("application/json"), 7),
+            mem(br#"{"a":1}"#),
+            vec![op],
+            |_, _, _| panic!("boom in post ops"),
+            || false,
+        );
+        match result {
+            Some(Ok((_, view, report))) => {
+                assert!(report.is_none());
+                assert_eq!(view.raw.as_ref().unwrap().doc.text(), r#"{"a":1}"#);
+                assert!(view.has_pretty());
+            }
+            other => panic!(
+                "expected Some(Ok), got {:?}",
+                other.map(|r| r.map(|(_, _, report)| report))
+            ),
+        }
     }
 }
