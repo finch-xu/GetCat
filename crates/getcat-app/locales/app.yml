@@ -405,6 +405,10 @@ url_bar:
     en: HTTP/3 (not supported yet)
     zh-CN: HTTP/3（暂不支持）
     ja: HTTP/3（未対応）
+  unresolved_vars:
+    en: "Undefined variables: %{names}"
+    zh-CN: "未定义变量：%{names}"
+    ja: "未定義の変数：%{names}"
 
 request:
   path_params:

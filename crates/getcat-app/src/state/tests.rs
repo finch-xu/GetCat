@@ -2771,6 +2771,25 @@ fn url_bar_with_split_save_and_version_picker_draws(cx: &mut TestAppContext) {
     });
 }
 
+/// URL 栏未解析变量提示能正常渲染。
+#[gpui_kit::test]
+fn url_bar_unresolved_vars_warning_draws(cx: &mut TestAppContext) {
+    let (tab, cx) = tab_in_root_window(cx);
+    // 设置两个未解析变量
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.unresolved_vars.insert("var_a".to_string());
+            t.unresolved_vars.insert("var_b".to_string());
+            cx.notify();
+        })
+    });
+
+    // 绘制一帧，确保不 panic
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        tab.clone().into_any_element()
+    });
+}
+
 /// 证书页签只在拿到证书时出现，且体检有结论时上方挂横幅。
 #[gpui_kit::test]
 fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {

@@ -3,6 +3,8 @@
 //! 规则（与用户确认过）：错误的**种类**翻译，**技术细节**（reqwest 原话、路径、字段名）
 //! 两种语言都保留英文原文。
 
+use std::collections::BTreeSet;
+
 use getcat_core::body::spill::HEAD_BYTES;
 use getcat_core::body::tier::{EDITOR_MAX_BYTES, EDITOR_MAX_LINES, ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
@@ -76,6 +78,12 @@ pub fn prepare_error_line(error: &RequestError) -> SharedString {
     } else {
         format!("{}: {}", error_kind(error), detail).into()
     }
+}
+
+/// 未解析变量提示：「Undefined variables: a, b」。
+pub fn unresolved_vars_line(names: &BTreeSet<String>) -> SharedString {
+    let names_str = names.iter().cloned().collect::<Vec<_>>().join(", ");
+    tr!("url_bar.unresolved_vars", names = names_str)
 }
 
 /// 内容类型标签：JSON / XML / HTML 是专名不翻译，文本 / 二进制按语言显示。
@@ -272,5 +280,17 @@ mod tests {
                 "{locale}"
             );
         }
+    }
+
+    #[test]
+    fn unresolved_vars_line_formats_names() {
+        let _locale = crate::i18n::locale_test_lock();
+        let mut names = BTreeSet::new();
+        names.insert("a".to_string());
+        names.insert("b".to_string());
+        assert_eq!(
+            unresolved_vars_line(&names).as_ref(),
+            "Undefined variables: a, b"
+        );
     }
 }
