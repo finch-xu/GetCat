@@ -13,7 +13,7 @@ use getcat_core::model::{
     BodyKind, HttpVersionPref, Method, PostOp, PreOp, RawFormat, RequestDraft, SplitDirection,
     TabDraft, TabId, Ulid,
 };
-use getcat_core::ops::OpOutcome;
+use getcat_core::ops::{self, OpOutcome};
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui_kit::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui_kit::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
@@ -270,8 +270,12 @@ pub struct RequestTab {
     /// 前置 / 后置操作。计划 3 会换成表格实体；此时先做纯数据字段。
     pub pre_ops: Vec<PreOp>,
     pub post_ops: Vec<PostOp>,
-    /// 本次发送的前置结果，等响应到达后并进 `Done.ops`。
+    /// 本次发送的前置结果，等响应到达后并进 `Done.ops` / `Failed.ops`。
     pre_results: Vec<(PreOp, OpOutcome)>,
+    /// 本次发送的后置操作快照（期望值已替换）：请求失败时 `apply_outcome` 据它把每条
+    /// 标成「请求失败，未执行」。生命周期与 `pre_results` 相同（send 写入，apply_outcome /
+    /// cancel / clear_response 清掉）。
+    sent_post_ops: Vec<PostOp>,
     pub path_params: Entity<KvTable>,
     pub params: Entity<KvTable>,
     pub headers: Entity<KvTable>,
@@ -412,6 +416,7 @@ impl RequestTab {
             pre_ops: Vec::new(),
             post_ops: Vec::new(),
             pre_results: Vec::new(),
+            sent_post_ops: Vec::new(),
             path_params,
             params,
             headers,
@@ -842,6 +847,7 @@ impl RequestTab {
             Err(e) => {
                 // 请求发不出去：丢掉副本，前置操作的写入不进全局、不落盘（反复点发送也不会反复写）
                 self.pre_results.clear();
+                self.sent_post_ops.clear();
                 self.prepare_error = Some(e);
                 cx.notify();
                 return;
@@ -852,8 +858,9 @@ impl RequestTab {
             variables::update(cx, |sets| *sets = next);
         }
         self.pre_results = prepared.pre_results;
-        // 断言的期望值在上面已经替换完；这份快照随完成任务进后台
+        // 断言的期望值在上面已经替换完：一份随完成任务进后台执行，一份留给请求失败时标记「未执行」
         let post_ops: Vec<PostOp> = std::mem::take(&mut draft.post_ops);
+        self.sent_post_ops = post_ops.clone();
         self.prepare_error = None;
         self.notice = None;
         self.generation += 1;
@@ -984,6 +991,9 @@ impl RequestTab {
         if self.generation != generation {
             return;
         }
+        // 本次发送的前置结果与后置快照：无论成败都在这里取走
+        let pre = std::mem::take(&mut self.pre_results);
+        let sent_post_ops = std::mem::take(&mut self.sent_post_ops);
         match outcome {
             Ok((body, mut view, report)) => {
                 // TTFT（首个内容 delta 的时刻）只有在途解析才知道：从被替换掉的
@@ -1007,7 +1017,6 @@ impl RequestTab {
                 self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
                 // reset 让列表按新响应的行数重建，滚动位置一并回到顶部
                 self.headers_list.reset(view.header_rows.len());
-                let pre = std::mem::take(&mut self.pre_results);
                 let mut report = report;
                 if let Some(report) = report.as_mut() {
                     // generation 已在函数开头校验：过期回调不会走到这里，提取值也就不会写盘。
@@ -1023,8 +1032,15 @@ impl RequestTab {
                 self.sync_lines_selection(window, cx);
             }
             Err(error) => {
-                self.pre_results.clear();
-                self.response = ResponseState::Failed { error };
+                // 取消是用户主动放弃，结果丢弃；其余失败（网络错误、后台处理异常）保留前置结果
+                // （写入已在发送时提交），后置操作一律记为「请求失败，未执行」（spec 前后置操作 · 限制）
+                let ops = if matches!(error, RequestError::Cancelled) {
+                    None
+                } else {
+                    let post = ops::skip_all(&sent_post_ops);
+                    (!pre.is_empty() || !post.results.is_empty()).then_some(OpsReport { pre, post })
+                };
+                self.response = ResponseState::Failed { error, ops };
             }
         }
         cx.notify();
@@ -1037,8 +1053,11 @@ impl RequestTab {
         }
         self.generation += 1;
         self.pre_results.clear();
+        self.sent_post_ops.clear();
+        // 取消是用户主动放弃：前后置结果一并丢弃（spec 前后置操作 · 限制）
         self.response = ResponseState::Failed {
             error: RequestError::Cancelled,
+            ops: None,
         };
         cx.notify();
     }
@@ -1057,8 +1076,9 @@ impl RequestTab {
         // 先把号改掉，换 response 时被 drop 的任务就再也写不回来了
         self.generation += 1;
         self.response = ResponseState::Idle;
-        // 在途请求的前置结果随它一起作废（完成回调已因 generation 失效，不会再来取）
+        // 在途请求的前置结果与后置快照随它一起作废（完成回调已因 generation 失效，不会再来取）
         self.pre_results.clear();
+        self.sent_post_ops.clear();
         // 编辑器是常驻实体，不随 response 一起 drop。留着上一条响应的文本，
         // 下一条非 A 档响应到来时 apply_outcome 不会覆写它，残留内容会在 ⌘F 里冒出来
         for (_, editor) in &self.response_editors {

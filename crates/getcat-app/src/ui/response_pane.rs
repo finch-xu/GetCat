@@ -400,8 +400,9 @@ impl RequestTab {
             }
             ResponseState::Failed {
                 error: RequestError::Cancelled,
+                ..
             } => empty_state(tr!("response.cancelled"), cx),
-            ResponseState::Failed { error } => v_flex()
+            ResponseState::Failed { error, .. } => v_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
@@ -701,7 +702,7 @@ impl RequestTab {
                 ))
                 .child(format_bytes(*received))
                 .into_any_element(),
-            ResponseState::Failed { error } => {
+            ResponseState::Failed { error, .. } => {
                 let cancelled = matches!(error, RequestError::Cancelled);
                 h_flex()
                     .text_sm()

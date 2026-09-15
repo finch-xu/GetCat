@@ -4520,3 +4520,86 @@ fn unresolved_vars_include_names_from_pre_op_values(cx: &mut TestAppContext) {
         );
     });
 }
+
+fn extract_status(key: &str) -> PostOp {
+    PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Global,
+            key: key.into(),
+            source: ResponseSource::Status,
+        },
+    }
+}
+
+/// 网络错误：前置结果保留（写入照常生效）；后置操作全部记为「请求失败，未执行」，不提取。
+#[gpui_kit::test]
+fn request_failure_keeps_pre_results_and_marks_post_ops_not_run(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.pre_ops = vec![pre_set(VarScope::Global, "who", "cat")];
+            t.post_ops = vec![extract_status("leak")];
+        })
+    });
+    set_url_and_send(&tab, &refused_url(), cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        let ResponseState::Failed {
+            error,
+            ops: Some(report),
+        } = &t.response
+        else {
+            panic!("expected Failed with ops, got {:?}", t.response.error());
+        };
+        assert!(
+            matches!(error, RequestError::ConnectionRefused(_)),
+            "{error:?}"
+        );
+        assert_eq!(report.pre.len(), 1);
+        assert_eq!(report.pre[0].1, OpOutcome::Passed);
+        assert_eq!(report.post.results.len(), 1);
+        assert_eq!(
+            report.post.results[0].1,
+            OpOutcome::Skipped(OpSkip::RequestFailed)
+        );
+        assert!(report.post.extracted.is_empty());
+        let sets = variables::variables(app);
+        assert!(
+            sets.globals
+                .iter()
+                .any(|v| v.key == "who" && v.value == "cat")
+        );
+        assert!(sets.globals.iter().all(|v| v.key != "leak"));
+    });
+}
+
+/// 取消是用户主动放弃：前后置结果一并丢弃。
+#[gpui_kit::test]
+fn cancel_discards_the_ops_report(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.pre_ops = vec![pre_set(VarScope::Global, "who", "cat")];
+            t.post_ops = vec![extract_status("leak")];
+        })
+    });
+    set_url_and_send(&tab, &hanging_server(), cx);
+    cx.update(|_, cx| tab.update(cx, |t, cx| t.cancel(cx)));
+    std::thread::sleep(Duration::from_millis(50));
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert!(matches!(
+            tab.read(app).response,
+            ResponseState::Failed {
+                error: RequestError::Cancelled,
+                ops: None
+            }
+        ));
+    });
+}
