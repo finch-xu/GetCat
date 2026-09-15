@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 use serde::{Deserialize, Serialize};
 
 use crate::tls::CertificateInfo;
+use crate::vars::VarContext;
 
 /// 已保存请求与 Tab 的标识；26 字符 Crockford Base32 字符串落盘。ulid 3.0 的构造函数是 `Ulid::generate()`。
 pub use ulid::Ulid;
@@ -326,6 +327,15 @@ impl VariableSets {
             .unwrap_or(&[])
     }
 
+    /// 替换用的三层上下文：全局 + 该分类 + 激活环境（没激活时环境层为空）。
+    pub fn context(&self, group: Option<&str>) -> VarContext<'_> {
+        let env = self
+            .active_env()
+            .map(|e| e.variables.as_slice())
+            .unwrap_or(&[]);
+        VarContext::new(&self.globals, self.group_vars(group), env)
+    }
+
     /// 某个作用域的可写变量表；作用域不可用（没激活环境 / 请求未分类）时为 None。
     pub fn scope_vars_mut(
         &mut self,
@@ -391,16 +401,26 @@ impl VariableSets {
     }
 }
 
-/// 前置操作：发送前把一个值写进变量（值本身先做 `{{}}` 替换，所以能写 `{{$timestamp}}`）。
-/// 目前只有「设置变量」一种，所以直接是结构体；以后加种类时补一个带默认值的 `kind` 字段即可。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PreOpKind {
+    /// 把一个值写进变量；值本身先做 `{{}}` 替换，所以能写 `{{$timestamp}}`。
+    SetVariable {
+        scope: VarScope,
+        key: String,
+        #[serde(default)]
+        value: String,
+    },
+}
+
+/// 前置操作：发送前依次执行。与 [`PostOp`] 同形（`enabled` + 平铺的 `kind` tag），
+/// 落盘形如 `{"enabled":true,"kind":"set_variable","scope":"global","key":"a","value":"1"}`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreOp {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    pub scope: VarScope,
-    pub key: String,
-    #[serde(default)]
-    pub value: String,
+    #[serde(flatten)]
+    pub kind: PreOpKind,
 }
 
 /// 后置操作读取响应的哪一部分。
@@ -925,9 +945,11 @@ mod tests {
         let d = RequestDraft {
             pre_ops: vec![PreOp {
                 enabled: true,
-                scope: VarScope::Environment,
-                key: "ts".into(),
-                value: "{{$timestamp}}".into(),
+                kind: PreOpKind::SetVariable {
+                    scope: VarScope::Environment,
+                    key: "ts".into(),
+                    value: "{{$timestamp}}".into(),
+                },
             }],
             post_ops: vec![
                 PostOp {
@@ -963,6 +985,71 @@ mod tests {
         )
         .unwrap();
         assert!(op.enabled);
+    }
+
+    /// 前置操作与后置操作同形：`enabled` + 平铺的 `kind` tag，以后加种类不用自定义反序列化。
+    #[test]
+    fn pre_op_is_kind_tagged_like_post_op() {
+        let op = PreOp {
+            enabled: true,
+            kind: PreOpKind::SetVariable {
+                scope: VarScope::Global,
+                key: "a".into(),
+                value: "1".into(),
+            },
+        };
+        let json = serde_json::to_string(&op).unwrap();
+        assert_eq!(
+            json,
+            r#"{"enabled":true,"kind":"set_variable","scope":"global","key":"a","value":"1"}"#
+        );
+        assert_eq!(serde_json::from_str::<PreOp>(&json).unwrap(), op);
+        // 缺 enabled 默认启用，缺 value 默认空串
+        let minimal: PreOp =
+            serde_json::from_str(r#"{"kind":"set_variable","scope":"group","key":"k"}"#).unwrap();
+        assert_eq!(
+            minimal,
+            PreOp {
+                enabled: true,
+                kind: PreOpKind::SetVariable {
+                    scope: VarScope::Group,
+                    key: "k".into(),
+                    value: String::new(),
+                },
+            }
+        );
+        // 没有 kind 的旧形态不再接受（尚未发布，不做兼容）
+        assert!(serde_json::from_str::<PreOp>(r#"{"scope":"global","key":"a"}"#).is_err());
+    }
+
+    #[test]
+    fn context_stacks_globals_group_and_active_environment() {
+        let env = Environment {
+            variables: vec![Variable::new("a", "env")],
+            ..Environment::new("dev")
+        };
+        let inactive = Environment {
+            variables: vec![Variable::new("a", "inactive")],
+            ..Environment::new("prod")
+        };
+        let mut sets = VariableSets {
+            globals: vec![Variable::new("a", "g"), Variable::new("b", "g")],
+            environments: vec![inactive, env.clone()],
+            active_environment: None,
+            groups: BTreeMap::from([("grp".to_string(), vec![Variable::new("b", "grp")])]),
+        };
+        let resolve = |sets: &VariableSets, group: Option<&str>| {
+            let ctx = sets.context(group);
+            crate::vars::Resolver::new(&ctx)
+                .resolve("{{a}}/{{b}}")
+                .into_owned()
+        };
+        // 没激活环境：环境层为空，未激活的环境不参与
+        assert_eq!(resolve(&sets, None), "g/g");
+        assert_eq!(resolve(&sets, Some("grp")), "g/grp");
+        sets.active_environment = Some(env.id);
+        assert_eq!(resolve(&sets, Some("grp")), "env/grp");
+        assert_eq!(resolve(&sets, Some("other")), "env/g");
     }
 
     #[test]

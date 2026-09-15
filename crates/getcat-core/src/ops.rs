@@ -8,9 +8,10 @@
 use serde_json::Value;
 
 use crate::model::{
-    AssertOp, PostOp, PostOpKind, PreOp, ResponseMeta, ResponseSource, VarScope, VariableSets,
+    AssertOp, PostOp, PostOpKind, PreOp, PreOpKind, ResponseMeta, ResponseSource, VarScope,
+    VariableSets,
 };
-use crate::vars::{Resolver, VarContext};
+use crate::vars::Resolver;
 
 /// JsonPath 操作愿意解析的响应体上限：再大就解析出一棵占内存的 `Value` 树，不值得。
 pub const OPS_JSON_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -85,26 +86,26 @@ pub fn run_pre_ops(
 ) -> Vec<(PreOp, OpOutcome)> {
     let mut results = Vec::new();
     for op in ops.iter().filter(|o| o.enabled) {
-        let key = op.key.trim();
-        if key.is_empty() {
-            results.push((op.clone(), OpOutcome::Failed(OpFailure::EmptyKey)));
-            continue;
-        }
-        let value = {
-            let env = sets
-                .active_env()
-                .map(|e| e.variables.as_slice())
-                .unwrap_or(&[]);
-            let ctx = VarContext::new(&sets.globals, sets.group_vars(group), env);
-            Resolver::new(&ctx).resolve(&op.value).into_owned()
-        };
-        let outcome = if sets.set_var(op.scope, group, key, &value) {
-            OpOutcome::Passed
-        } else {
-            OpOutcome::Skipped(match op.scope {
-                VarScope::Environment => OpSkip::NoActiveEnvironment,
-                _ => OpSkip::NoGroup,
-            })
+        let outcome = match &op.kind {
+            PreOpKind::SetVariable { scope, key, value } => {
+                let key = key.trim();
+                if key.is_empty() {
+                    OpOutcome::Failed(OpFailure::EmptyKey)
+                } else {
+                    let value = {
+                        let ctx = sets.context(group);
+                        Resolver::new(&ctx).resolve(value).into_owned()
+                    };
+                    if sets.set_var(*scope, group, key, &value) {
+                        OpOutcome::Passed
+                    } else {
+                        OpOutcome::Skipped(match scope {
+                            VarScope::Environment => OpSkip::NoActiveEnvironment,
+                            _ => OpSkip::NoGroup,
+                        })
+                    }
+                }
+            }
         };
         results.push((op.clone(), outcome));
     }
@@ -332,6 +333,17 @@ mod tests {
         }
     }
 
+    fn set_variable(scope: VarScope, key: &str, value: &str) -> PreOp {
+        PreOp {
+            enabled: true,
+            kind: PreOpKind::SetVariable {
+                scope,
+                key: key.into(),
+                value: value.into(),
+            },
+        }
+    }
+
     fn json(path: &str) -> ResponseSource {
         ResponseSource::JsonPath { path: path.into() }
     }
@@ -375,42 +387,15 @@ mod tests {
         let mut sets = VariableSets::default();
         sets.globals.push(Variable::new("base", "B"));
         let ops = vec![
-            PreOp {
-                enabled: true,
-                scope: VarScope::Global,
-                key: "a".into(),
-                value: "{{base}}-1".into(),
-            },
-            PreOp {
-                enabled: true,
-                scope: VarScope::Global,
-                key: "b".into(),
-                value: "{{a}}-2".into(),
-            },
+            set_variable(VarScope::Global, "a", "{{base}}-1"),
+            set_variable(VarScope::Global, "b", "{{a}}-2"),
             PreOp {
                 enabled: false,
-                scope: VarScope::Global,
-                key: "never".into(),
-                value: "x".into(),
+                ..set_variable(VarScope::Global, "never", "x")
             },
-            PreOp {
-                enabled: true,
-                scope: VarScope::Environment,
-                key: "e".into(),
-                value: "x".into(),
-            },
-            PreOp {
-                enabled: true,
-                scope: VarScope::Group,
-                key: "g".into(),
-                value: "x".into(),
-            },
-            PreOp {
-                enabled: true,
-                scope: VarScope::Global,
-                key: "  ".into(),
-                value: "x".into(),
-            },
+            set_variable(VarScope::Environment, "e", "x"),
+            set_variable(VarScope::Group, "g", "x"),
+            set_variable(VarScope::Global, "  ", "x"),
         ];
         let results = run_pre_ops(&ops, &mut sets, None);
         assert_eq!(results.len(), 5, "禁用的不出现在结果里");

@@ -249,8 +249,8 @@ pub fn resolve_draft(draft: &RequestDraft, ctx: &VarContext) -> Resolved {
 mod tests {
     use super::*;
     use crate::model::{
-        AssertOp, BodyKind, FormField, FormValue, KeyValue, PostOp, PostOpKind, RawFormat,
-        RequestDraft, ResponseSource, VarScope,
+        AssertOp, BodyKind, FormField, FormValue, KeyValue, PostOp, PostOpKind, PreOpKind,
+        RawFormat, RequestDraft, ResponseSource, VarScope,
     };
     use std::path::PathBuf;
 
@@ -484,13 +484,15 @@ mod tests {
         let pre = RequestDraft {
             pre_ops: vec![crate::model::PreOp {
                 enabled: true,
-                scope: VarScope::Global,
-                key: "a".into(),
-                value: "{{v}}".into(),
+                kind: PreOpKind::SetVariable {
+                    scope: VarScope::Global,
+                    key: "a".into(),
+                    value: "{{v}}".into(),
+                },
             }],
             ..Default::default()
         };
-        assert_eq!(resolve_draft(&pre, &ctx).draft.pre_ops[0].value, "{{v}}");
+        assert_eq!(resolve_draft(&pre, &ctx).draft.pre_ops, pre.pre_ops);
     }
 
     #[test]
