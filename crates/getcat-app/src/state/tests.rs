@@ -4455,3 +4455,68 @@ fn stale_outcome_does_not_apply_extracted_variables(cx: &mut TestAppContext) {
     });
     cx.read(|app| assert!(variables::variables(app).globals.is_empty()));
 }
+
+fn pre_set(scope: VarScope, key: &str, value: &str) -> PreOp {
+    PreOp {
+        enabled: true,
+        kind: PreOpKind::SetVariable {
+            scope,
+            key: key.into(),
+            value: value.into(),
+        },
+    }
+}
+
+/// URL 非法、请求根本发不出去：前置操作在副本上执行后整份丢弃，变量表不变、不写盘。
+#[gpui_kit::test]
+fn pre_ops_are_discarded_when_the_request_cannot_be_prepared(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.pre_ops = vec![pre_set(VarScope::Global, "who", "cat")]
+        })
+    });
+    assert!(store.flush());
+    let writes = store.write_count();
+    // 反复点发送也一样
+    for _ in 0..2 {
+        set_url_and_send(&tab, "ftp://x", cx);
+    }
+    cx.run_until_parked();
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes, "发不出去的请求不该写盘");
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(
+            matches!(t.prepare_error, Some(RequestError::InvalidUrl(_))),
+            "{:?}",
+            t.prepare_error
+        );
+        assert!(matches!(t.response, ResponseState::Idle));
+        assert!(variables::variables(app).globals.is_empty());
+    });
+}
+
+/// 前置操作值里引用的未定义变量，与草稿里的一起进 URL 栏的「未定义变量」提示。
+#[gpui_kit::test]
+fn unresolved_vars_include_names_from_pre_op_values(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|_, cx| {
+        tab.update(cx, |t, _| {
+            t.pre_ops = vec![pre_set(VarScope::Global, "who", "{{ghost}}")]
+        })
+    });
+    set_url_and_send(&tab, &format!("{}{{{{missing}}}}", refused_url()), cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(
+            t.unresolved_vars.iter().cloned().collect::<Vec<_>>(),
+            vec!["ghost".to_string(), "missing".to_string()]
+        );
+    });
+}

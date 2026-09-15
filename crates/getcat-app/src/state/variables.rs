@@ -64,20 +64,39 @@ pub fn resolve(cx: &App, group: Option<&str>, draft: RequestDraft) -> Resolved {
     vars::resolve_draft(draft, &variables(cx).context(group))
 }
 
-/// 执行前置操作并落盘。没有启用的操作时不碰变量表（也就不写盘）。
-pub fn run_pre_ops(
-    cx: &mut App,
-    group: Option<&str>,
-    pre_ops: &[PreOp],
-) -> Vec<(PreOp, OpOutcome)> {
-    if !pre_ops.iter().any(|o| o.enabled) {
-        return Vec::new();
+/// 一次发送的准备结果，见 [`prepare_send`]。
+pub struct PreparedSend {
+    /// 执行过前置操作的变量表副本；没有启用的前置操作时为 None（不复制、也无需提交）。
+    /// 调用方要等请求真正能发出（`http::prepare` 成功）后再用 [`update`] 装回全局——
+    /// 发不出去就直接丢掉，全局不变、不写盘。
+    pub next: Option<VariableSets>,
+    /// 每条启用的前置操作一行。
+    pub pre_results: Vec<(PreOp, OpOutcome)>,
+    /// 按副本替换后的草稿；`unresolved` 已并入前置操作值里的未解析名。
+    pub resolved: Resolved,
+}
+
+/// 发送前的变量处理：在全局变量表的**副本**上依次执行前置操作，再按副本替换草稿——
+/// 顺序决定了 `{{ts}}` 能引用前置操作刚设的值。本函数不改全局、不写盘。
+/// 按值接收草稿，理由同 [`resolve`]。
+pub fn prepare_send(cx: &App, group: Option<&str>, draft: RequestDraft) -> PreparedSend {
+    let current = variables(cx);
+    if !draft.pre_ops.iter().any(|o| o.enabled) {
+        return PreparedSend {
+            next: None,
+            pre_results: Vec::new(),
+            resolved: vars::resolve_draft(draft, &current.context(group)),
+        };
     }
-    let mut results = Vec::new();
-    update(cx, |sets| {
-        results = ops::run_pre_ops(pre_ops, sets, group).results
-    });
-    results
+    let mut next = current.clone();
+    let pre = ops::run_pre_ops(&draft.pre_ops, &mut next, group);
+    let mut resolved = vars::resolve_draft(draft, &next.context(group));
+    resolved.unresolved.extend(pre.unresolved);
+    PreparedSend {
+        next: Some(next),
+        pre_results: pre.results,
+        resolved,
+    }
 }
 
 /// 把后置提取的值写进变量表，并把写不进去的提取行改写为「跳过」。

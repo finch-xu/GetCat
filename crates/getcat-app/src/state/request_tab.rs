@@ -832,24 +832,28 @@ impl RequestTab {
         if self.response.is_in_flight() {
             return;
         }
-        let group = self.saved_group.clone();
-        let draft = self.draft(cx);
-        // 前置操作先写进变量表（会落盘），再做替换——顺序决定了 {{ts}} 能引用刚设的值
-        self.pre_results = variables::run_pre_ops(cx, group.as_deref(), &draft.pre_ops);
-        // 按值交出草稿：draft() 刚拷出来的快照，替换后直接复用，不再多克隆一次 body
-        let resolved = variables::resolve(cx, group.as_deref(), draft);
-        self.unresolved_vars = resolved.unresolved;
-        let draft = resolved.draft;
+        // 前置操作在变量表副本上执行，再按副本替换（按值交出 draft() 刚拷出来的快照，
+        // 替换后直接复用，不再多克隆一次 body）
+        let prepared = variables::prepare_send(cx, self.saved_group.as_deref(), self.draft(cx));
+        self.unresolved_vars = prepared.resolved.unresolved;
+        let mut draft = prepared.resolved.draft;
         let req = match http::prepare(&draft) {
             Ok(r) => r,
             Err(e) => {
+                // 请求发不出去：丢掉副本，前置操作的写入不进全局、不落盘（反复点发送也不会反复写）
+                self.pre_results.clear();
                 self.prepare_error = Some(e);
                 cx.notify();
                 return;
             }
         };
+        // 请求确定会发出：提交前置操作的写入（值没变时 update 不写盘）
+        if let Some(next) = prepared.next {
+            variables::update(cx, |sets| *sets = next);
+        }
+        self.pre_results = prepared.pre_results;
         // 断言的期望值在上面已经替换完；这份快照随完成任务进后台
-        let post_ops: Vec<PostOp> = draft.post_ops.clone();
+        let post_ops: Vec<PostOp> = std::mem::take(&mut draft.post_ops);
         self.prepare_error = None;
         self.notice = None;
         self.generation += 1;
