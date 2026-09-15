@@ -1,6 +1,6 @@
 //! `{{name}}` 变量替换。
 //!
-//! 替换在 [`crate::http::prepare`] **之前**对 `RequestDraft` 的克隆做：先展开 `{{var}}`，
+//! 替换在 [`crate::http::prepare`] **之前**对 `RequestDraft` 的副本做：先展开 `{{var}}`，
 //! 再由 `build_url` 单遍替换 Path 参数 `{id}`——两种语法互不干扰
 //! （`extract_path_params` 会跳过名字里含 `{` 的片段）。已保存请求里始终存原文。
 //!
@@ -13,11 +13,11 @@ use std::path::PathBuf;
 
 use memchr::memmem;
 
-use crate::model::{BodyKind, FormValue, KeyValue, PostOpKind, RequestDraft, Variable};
+use crate::model::{AssertOp, BodyKind, FormValue, KeyValue, PostOpKind, RequestDraft, Variable};
 
 /// 值里再引用变量时的最大展开层数。
 pub const MAX_DEPTH: usize = 8;
-/// 变量名长度上限。
+/// 变量名长度上限（按 UTF-8 字节计）。
 pub const MAX_NAME_LEN: usize = 128;
 
 /// 三层变量，低 → 高：`[全局, 分类, 环境]`。
@@ -47,7 +47,7 @@ impl<'a> VarContext<'a> {
     }
 }
 
-/// 变量名是否合法：非空、不超长、不含花括号与换行。
+/// 变量名是否合法：非空、不超过 [`MAX_NAME_LEN`]（按 UTF-8 字节计）、不含花括号与换行。
 pub fn valid_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= MAX_NAME_LEN && !name.contains(['{', '}', '\n', '\r'])
 }
@@ -82,22 +82,13 @@ pub fn iso_utc(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
 }
 
-fn dynamic_value(name: &str) -> Option<String> {
-    Some(match name {
-        "$timestamp" => unix_secs().to_string(),
-        "$isoTimestamp" => iso_utc(unix_secs()),
-        "$randomUUID" | "$guid" => uuid::Uuid::new_v4().to_string(),
-        // Postman 语义：0..=1000
-        "$randomInt" => (uuid::Uuid::new_v4().as_u128() % 1001).to_string(),
-        _ => return None,
-    })
-}
-
 /// 一次替换会话：动态变量在会话内只取值一次，未解析的名字累计到 `unresolved`。
 pub struct Resolver<'a> {
     ctx: &'a VarContext<'a>,
     dynamic: HashMap<String, String>,
     unresolved: BTreeSet<String>,
+    /// 会话内第一次需要时读一次时钟（Unix 秒），`$timestamp` 与 `$isoTimestamp` 共用。
+    now: Option<u64>,
 }
 
 impl<'a> Resolver<'a> {
@@ -106,6 +97,7 @@ impl<'a> Resolver<'a> {
             ctx,
             dynamic: HashMap::new(),
             unresolved: BTreeSet::new(),
+            now: None,
         }
     }
 
@@ -147,9 +139,17 @@ impl<'a> Resolver<'a> {
             };
             let name = after[..len].trim();
             if !valid_name(name) {
-                // 不是变量（比如 `{{a{{b}}` 的外层）：吐出这两个字符，从后面继续找
+                // 不是变量（比如 `{{a{{b}}` 的外层）：吐出这两个字符，从后面继续找。
+                // 段内还有 `{{` 时直接跳到其中最后一个（逐 2 字节前进会对每个 `{{` 重找一遍
+                // `}}`，`"{{ x " * n + "}}"` 这类输入就成了 O(n²)）。
                 out.push_str("{{");
-                rest = after;
+                match last_open_in(&after.as_bytes()[..len]) {
+                    Some(ix) => {
+                        out.push_str(&after[..ix]);
+                        rest = &after[ix..];
+                    }
+                    None => rest = after,
+                }
                 continue;
             }
             let token = &rest[start..start + 2 + len + 2];
@@ -176,12 +176,44 @@ impl<'a> Resolver<'a> {
             if let Some(v) = self.dynamic.get(name) {
                 return Some(v.clone());
             }
-            let v = dynamic_value(name)?;
+            let v = self.dynamic_value(name)?;
             self.dynamic.insert(name.to_string(), v.clone());
             return Some(v);
         }
         self.ctx.lookup(name).map(str::to_string)
     }
+
+    fn dynamic_value(&mut self, name: &str) -> Option<String> {
+        Some(match name {
+            "$timestamp" => self.now().to_string(),
+            "$isoTimestamp" => iso_utc(self.now()),
+            "$randomUUID" | "$guid" => uuid::Uuid::new_v4().to_string(),
+            // Postman 语义：0..=1000
+            "$randomInt" => (uuid::Uuid::new_v4().as_u128() % 1001).to_string(),
+            _ => return None,
+        })
+    }
+
+    fn now(&mut self) -> u64 {
+        *self.now.get_or_insert_with(unix_secs)
+    }
+}
+
+/// `seg`（`{{` 与其后第一个 `}}` 之间的内容）里还有 `{{` 时，返回逐个前进会停在的**最后一个**
+/// `{{` 的起点；没有则 None。
+///
+/// 逐个前进是从左到右、不重叠地匹配：一串连续的 `{` 两两配对，奇数个时最后一个落单。
+/// 所以不能直接用 `rfind` 的位置（它可能落在重叠处，比如 `{{{` 里的第 1 个字节），
+/// 要按这串 `{` 的起点对齐到偶数偏移。`seg` 紧跟在一个已配对的 `{{` 之后，从它开头对齐即可。
+fn last_open_in(seg: &[u8]) -> Option<usize> {
+    let last = memmem::rfind(seg, b"{{")?;
+    // `last + 1` 是最后一串 `{` 的最后一个字节（否则 rfind 会找到更靠后的位置）
+    let run_start = seg[..last]
+        .iter()
+        .rposition(|&b| b != b'{')
+        .map_or(0, |i| i + 1);
+    let run_len = last + 2 - run_start;
+    Some(run_start + (run_len / 2 - 1) * 2)
 }
 
 /// `resolve_draft` 的结果：替换后的草稿 + 未解析的名字（按名字排序去重）。
@@ -209,12 +241,14 @@ fn resolve_path(r: &mut Resolver, path: &mut PathBuf) {
     }
 }
 
-/// 克隆草稿并替换所有可替换字段（只处理启用的行）。
+/// 原地替换草稿的所有可替换字段（只处理启用的行），放进 [`Resolved`]。
+///
+/// 按值接收：调用方手里都是刚取出、用完即丢的草稿，不必再为多 MB 的 body 克隆一次。
 /// Path 参数只替换值——key 由 URL 里的 `{id}` 驱动。前置操作的值**不在这里**替换，
 /// 它们在执行时（[`crate::ops::run_pre_ops`]）按当时的变量表替换。
-pub fn resolve_draft(draft: &RequestDraft, ctx: &VarContext) -> Resolved {
+pub fn resolve_draft(draft: RequestDraft, ctx: &VarContext) -> Resolved {
     let mut r = Resolver::new(ctx);
-    let mut out = draft.clone();
+    let mut out = draft;
     r.resolve_in(&mut out.url);
     resolve_kvs(&mut r, &mut out.path_params, false);
     resolve_kvs(&mut r, &mut out.params, true);
@@ -234,8 +268,11 @@ pub fn resolve_draft(draft: &RequestDraft, ctx: &VarContext) -> Resolved {
         BodyKind::FormUrlEncoded { fields } => resolve_kvs(&mut r, fields, true),
         BodyKind::Binary { path, .. } => resolve_path(&mut r, path),
     }
-    for op in out.post_ops.iter_mut().filter(|o| o.enabled) {
-        if let PostOpKind::Assert { expected, .. } = &mut op.kind {
+    for post in out.post_ops.iter_mut().filter(|o| o.enabled) {
+        // Exists 不看期望值：不替换，也就不会因残留的 `{{x}}` 报未解析
+        if let PostOpKind::Assert { op, expected, .. } = &mut post.kind
+            && *op != AssertOp::Exists
+        {
             r.resolve_in(expected);
         }
     }
@@ -299,14 +336,43 @@ mod tests {
 
     #[test]
     fn invalid_names_and_unclosed_braces_are_left_alone() {
-        let globals = vars(&[("b", "B")]);
+        let globals = vars(&[("b", "B"), ("c", "C"), ("x", "X")]);
         let ctx = VarContext::new(&globals, &[], &[]);
         let mut r = Resolver::new(&ctx);
-        // 外层名字含 `{`：不是变量；内层 {{b}} 照常替换
-        assert_eq!(r.resolve("{{a{{b}}"), "{{aB");
-        assert_eq!(r.resolve("{{unclosed"), "{{unclosed");
-        assert_eq!(r.resolve("{{}}"), "{{}}");
+        for (input, want) in [
+            // 外层名字含 `{`：不是变量；内层 {{b}} 照常替换
+            ("{{a{{b}}", "{{aB"),
+            ("{{{c}}", "{{{c}}"),
+            ("{{{{c}}", "{{C"),
+            ("{{a{{{}}", "{{a{{{}}"),
+            ("{{unclosed", "{{unclosed"),
+            ("{{}}", "{{}}"),
+            // 连续的 `{` 从左到右不重叠地两两配对：奇数个时落单的 `{` 让里面的名字不成立
+            ("{{{{{x}}", "{{{{{x}}"),
+            ("{{{{{{x}}", "{{{{X"),
+            ("{{{ {{x}}", "{{{ X"),
+            ("{{ {{{x}} }}", "{{ {{{x}} }}"),
+            ("{{a}b}}{{x}}", "{{a}b}}X"),
+        ] {
+            assert_eq!(r.resolve(input), want, "{input:?}");
+        }
         assert!(r.finish().is_empty());
+    }
+
+    /// 名字非法时若只前进 2 字节再重找 `}}`，`"{{ x " * n + "}}"` 是 O(n²)；
+    /// 替换会在 UI 主线程上对多 MB 的 body 执行，必须线性。
+    #[test]
+    fn malformed_braces_resolve_in_linear_time() {
+        let input = "{{ x ".repeat(200_000) + "}}";
+        assert!(input.len() >= 1_000_000);
+        let ctx = VarContext::EMPTY;
+        let mut r = Resolver::new(&ctx);
+        let started = std::time::Instant::now();
+        let out = r.resolve(&input);
+        let elapsed = started.elapsed();
+        assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(out, input.as_str());
+        assert_eq!(r.finish(), BTreeSet::from(["x".to_string()]));
     }
 
     #[test]
@@ -334,9 +400,24 @@ mod tests {
             .collect();
         let ctx = VarContext::new(&chain, &[], &[]);
         let mut r = Resolver::new(&ctx);
-        let out = r.resolve("{{d0}}").into_owned();
-        assert!(out.starts_with("{{d"), "{out}");
-        assert!(!r.finish().is_empty());
+        // d0…d7 共 MAX_DEPTH 层展开，第 9 层的 {{d8}} 原样保留
+        assert_eq!(r.resolve("{{d0}}"), "{{d8}}");
+        assert_eq!(r.finish(), BTreeSet::from(["d8".to_string()]));
+    }
+
+    #[test]
+    fn timestamp_and_iso_timestamp_share_one_clock_reading() {
+        let ctx = VarContext::EMPTY;
+        let mut r = Resolver::new(&ctx);
+        let ts: u64 = r.resolve("{{$timestamp}}").parse().unwrap();
+        assert_eq!(r.resolve("{{$isoTimestamp}}"), iso_utc(ts));
+        // 同一个 Resolver 只读一次时钟：先取 iso 再取秒数，也基于同一个读数
+        let mut r = Resolver::new(&ctx);
+        r.now = Some(951_782_400);
+        assert_eq!(
+            r.resolve("{{$isoTimestamp}} {{$timestamp}}"),
+            "2000-02-29T00:00:00Z 951782400"
+        );
     }
 
     #[test]
@@ -410,7 +491,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let out = resolve_draft(&draft, &ctx);
+        let input = draft.clone();
+        let out = resolve_draft(draft, &ctx);
         assert_eq!(
             out.draft.url,
             "https://example.com/users/{id}?x={{missing}}"
@@ -424,7 +506,7 @@ mod tests {
             ("K", "V")
         );
         // 禁用行不替换
-        assert_eq!(out.draft.params[1].key, "{{k}}");
+        assert_eq!(out.draft.params[1], input.params[1]);
         assert_eq!(out.draft.headers[0].key, "X-K");
         match &out.draft.body {
             BodyKind::FormData { fields } => {
@@ -448,8 +530,8 @@ mod tests {
             out.unresolved.into_iter().collect::<Vec<_>>(),
             vec!["missing".to_string()]
         );
-        // 原草稿不动
-        assert!(draft.url.contains("{{h}}"));
+        // 按值接收、原地替换：与克隆的输入对比，确实改过
+        assert_ne!(out.draft, input);
 
         let raw = RequestDraft {
             body: BodyKind::Raw {
@@ -458,7 +540,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let out = resolve_draft(&raw, &ctx);
+        let out = resolve_draft(raw, &ctx);
         assert_eq!(
             out.draft.body,
             BodyKind::Raw {
@@ -474,7 +556,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            resolve_draft(&bin, &ctx).draft.body,
+            resolve_draft(bin, &ctx).draft.body,
             BodyKind::Binary {
                 path: PathBuf::from("/tmp/f"),
                 content_type: None
@@ -492,7 +574,87 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(resolve_draft(&pre, &ctx).draft.pre_ops, pre.pre_ops);
+        assert_eq!(resolve_draft(pre.clone(), &ctx).draft.pre_ops, pre.pre_ops);
+        // urlencoded：启用行的 key / value 都替换，禁用行不动
+        let form = RequestDraft {
+            body: BodyKind::FormUrlEncoded {
+                fields: vec![
+                    KeyValue::new("{{k}}", "{{v}}"),
+                    KeyValue {
+                        enabled: false,
+                        ..KeyValue::new("{{k}}", "{{v}}")
+                    },
+                ],
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_draft(form, &ctx).draft.body,
+            BodyKind::FormUrlEncoded {
+                fields: vec![
+                    KeyValue::new("K", "V"),
+                    KeyValue {
+                        enabled: false,
+                        ..KeyValue::new("{{k}}", "{{v}}")
+                    },
+                ],
+            }
+        );
+    }
+
+    fn assertion(op: AssertOp, expected: &str) -> PostOp {
+        PostOp {
+            enabled: true,
+            kind: PostOpKind::Assert {
+                subject: ResponseSource::Status,
+                op,
+                expected: expected.into(),
+            },
+        }
+    }
+
+    /// Exists 不看期望值，所以不替换，也就不会因残留的 `{{x}}` 报未解析。
+    #[test]
+    fn exists_assertion_expected_is_not_resolved() {
+        let globals = vars(&[("v", "V")]);
+        let ctx = VarContext::new(&globals, &[], &[]);
+        let draft = RequestDraft {
+            post_ops: vec![
+                assertion(AssertOp::Exists, "{{nope}}"),
+                assertion(AssertOp::Equals, "{{v}}"),
+                assertion(AssertOp::Exists, "{{v}}"),
+            ],
+            ..Default::default()
+        };
+        let out = resolve_draft(draft, &ctx);
+        let expected: Vec<&str> = out
+            .draft
+            .post_ops
+            .iter()
+            .map(|op| match &op.kind {
+                PostOpKind::Assert { expected, .. } => expected.as_str(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(expected, ["{{nope}}", "V", "{{v}}"]);
+        assert!(out.unresolved.is_empty(), "{:?}", out.unresolved);
+    }
+
+    /// 先展开 `{{}}` 再由 `build_url` 替换 `{id}`：两步合起来的最终 URL。
+    #[test]
+    fn variables_expand_before_path_params_are_substituted() {
+        let globals = vars(&[("base", "https://api.example.com"), ("v", "42")]);
+        let ctx = VarContext::new(&globals, &[], &[]);
+        let draft = RequestDraft {
+            url: "{{base}}/users/{id}".into(),
+            path_params: vec![KeyValue::new("id", "{{v}}")],
+            ..Default::default()
+        };
+        let resolved = resolve_draft(draft, &ctx);
+        assert!(resolved.unresolved.is_empty());
+        let req = crate::http::prepare(&resolved.draft).unwrap();
+        assert_eq!(req.url.path(), "/users/42");
+        assert_eq!(req.url.as_str(), "https://api.example.com/users/42");
     }
 
     #[test]
