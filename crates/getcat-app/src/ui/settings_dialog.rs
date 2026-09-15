@@ -230,10 +230,9 @@ fn linux_system_group() -> SettingGroup {
     SettingGroup::new().title(tr!("settings.system")).item(
         SettingItem::new(
             tr!("settings.app_menu_entry"),
-            SettingField::switch(
-                desktop_entry::installed,
-                |value, cx| desktop_entry::set_installed(cx, value),
-            )
+            SettingField::switch(desktop_entry::installed, |value, cx| {
+                desktop_entry::set_installed(cx, value)
+            })
             .default_value(false),
         )
         .description(tr!("settings.app_menu_entry_desc")),
