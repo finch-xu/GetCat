@@ -2264,16 +2264,22 @@ fn code_sheet_uses_resolved_variables_without_running_pre_ops(cx: &mut TestAppCo
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://{{host}}/v1", cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.pre_ops = vec![PreOp {
-                enabled: true,
-                kind: PreOpKind::SetVariable {
-                    scope: VarScope::Global,
-                    key: "side_effect".into(),
-                    value: "1".into(),
-                },
-            }];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(
+                    &[PreOp {
+                        enabled: true,
+                        kind: PreOpKind::SetVariable {
+                            scope: VarScope::Global,
+                            key: "side_effect".into(),
+                            value: "1".into(),
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
         })
     });
     cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
@@ -2304,16 +2310,22 @@ fn saved_requests_keep_ops_and_raw_placeholders(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, "https://{{host}}/x", cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.post_ops = vec![PostOp {
-                enabled: true,
-                kind: PostOpKind::Assert {
-                    subject: ResponseSource::Status,
-                    op: AssertOp::Equals,
-                    expected: "{{code}}".into(),
-                },
-            }];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[PostOp {
+                        enabled: true,
+                        kind: PostOpKind::Assert {
+                            subject: ResponseSource::Status,
+                            op: AssertOp::Equals,
+                            expected: "{{code}}".into(),
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
         })
     });
     let id = cx
@@ -2338,8 +2350,9 @@ fn saved_requests_keep_ops_and_raw_placeholders(cx: &mut TestAppContext) {
     let reopened = cx.read(|app| ws.read(app).active_tab());
     cx.read(|app| {
         let t = reopened.read(app);
-        assert_eq!(t.post_ops.len(), 1);
-        assert_eq!(assert_expected(&t.post_ops[0]), "{{code}}");
+        let post_ops = t.post_ops.read(app).post_ops(app);
+        assert_eq!(post_ops.len(), 1);
+        assert_eq!(assert_expected(&post_ops[0]), "{{code}}");
     });
 
     // 重开的 Tab 发送一次：host 指向拒绝连接的端口，code 有值
@@ -4700,16 +4713,22 @@ fn pre_ops_write_variables_before_the_request_goes_out(cx: &mut TestAppContext) 
         variables::update(app, |s| s.globals.push(Variable::new("base", base.clone())))
     });
     let tab = new_tab(cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.pre_ops = vec![PreOp {
-                enabled: true,
-                kind: PreOpKind::SetVariable {
-                    scope: VarScope::Global,
-                    key: "who".into(),
-                    value: "cat-{{$randomInt}}".into(),
-                },
-            }];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(
+                    &[PreOp {
+                        enabled: true,
+                        kind: PreOpKind::SetVariable {
+                            scope: VarScope::Global,
+                            key: "who".into(),
+                            value: "cat-{{$randomInt}}".into(),
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
         })
     });
     set_url_and_send(&tab, "{{base}}/hi/{{who}}", cx);
@@ -4758,38 +4777,44 @@ fn post_ops_extract_and_assert_then_persist(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let (base, _rx) = echo_server(r#"{"data":{"token":"T"}}"#);
     let tab = new_tab(cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.post_ops = vec![
-                PostOp {
-                    enabled: true,
-                    kind: PostOpKind::Extract {
-                        scope: VarScope::Global,
-                        key: "token".into(),
-                        source: ResponseSource::JsonPath {
-                            path: "$.data.token".into(),
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Extract {
+                                scope: VarScope::Global,
+                                key: "token".into(),
+                                source: ResponseSource::JsonPath {
+                                    path: "$.data.token".into(),
+                                },
+                            },
                         },
-                    },
-                },
-                PostOp {
-                    enabled: true,
-                    kind: PostOpKind::Extract {
-                        scope: VarScope::Environment,
-                        key: "req".into(),
-                        source: ResponseSource::Header {
-                            name: "x-req".into(),
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Extract {
+                                scope: VarScope::Environment,
+                                key: "req".into(),
+                                source: ResponseSource::Header {
+                                    name: "x-req".into(),
+                                },
+                            },
                         },
-                    },
-                },
-                PostOp {
-                    enabled: true,
-                    kind: PostOpKind::Assert {
-                        subject: ResponseSource::Status,
-                        op: AssertOp::Equals,
-                        expected: "201".into(),
-                    },
-                },
-            ];
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Assert {
+                                subject: ResponseSource::Status,
+                                op: AssertOp::Equals,
+                                expected: "201".into(),
+                            },
+                        },
+                    ],
+                    window,
+                    cx,
+                )
+            });
         })
     });
     set_url_and_send(&tab, &base, cx);
@@ -4888,9 +4913,11 @@ fn pre_set(scope: VarScope, key: &str, value: &str) -> PreOp {
 fn pre_ops_are_discarded_when_the_request_cannot_be_prepared(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
     let tab = new_tab(cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.pre_ops = vec![pre_set(VarScope::Global, "who", "cat")]
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
         })
     });
     assert!(store.flush());
@@ -4919,9 +4946,11 @@ fn pre_ops_are_discarded_when_the_request_cannot_be_prepared(cx: &mut TestAppCon
 fn unresolved_vars_include_names_from_pre_op_values(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let tab = new_tab(cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.pre_ops = vec![pre_set(VarScope::Global, "who", "{{ghost}}")]
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "{{ghost}}")], window, cx)
+            });
         })
     });
     set_url_and_send(&tab, &format!("{}{{{{missing}}}}", refused_url()), cx);
@@ -4953,10 +4982,14 @@ fn extract_status(key: &str) -> PostOp {
 fn request_failure_keeps_pre_results_and_marks_post_ops_not_run(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let tab = new_tab(cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.pre_ops = vec![pre_set(VarScope::Global, "who", "cat")];
-            t.post_ops = vec![extract_status("leak")];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(&[extract_status("leak")], window, cx)
+            });
         })
     });
     set_url_and_send(&tab, &refused_url(), cx);
@@ -4999,10 +5032,14 @@ fn request_failure_keeps_pre_results_and_marks_post_ops_not_run(cx: &mut TestApp
 fn cancel_discards_the_ops_report(cx: &mut TestAppContext) {
     let (cx, _store, _dir) = init_with_store(cx);
     let tab = new_tab(cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.pre_ops = vec![pre_set(VarScope::Global, "who", "cat")];
-            t.post_ops = vec![extract_status("leak")];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(&[extract_status("leak")], window, cx)
+            });
         })
     });
     set_url_and_send(&tab, &hanging_server(), cx);
@@ -5078,18 +5115,24 @@ fn post_ops_extract_into_the_saved_group(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     let tab = cx.read(|app| ws.read(app).active_tab());
     change_url(&tab, &base, cx);
-    cx.update(|_, cx| {
-        tab.update(cx, |t, _| {
-            t.post_ops = vec![PostOp {
-                enabled: true,
-                kind: PostOpKind::Extract {
-                    scope: VarScope::Group,
-                    key: "token".into(),
-                    source: ResponseSource::JsonPath {
-                        path: "$.data.token".into(),
-                    },
-                },
-            }];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[PostOp {
+                        enabled: true,
+                        kind: PostOpKind::Extract {
+                            scope: VarScope::Group,
+                            key: "token".into(),
+                            source: ResponseSource::JsonPath {
+                                path: "$.data.token".into(),
+                            },
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
         })
     });
     cx.update(|_, cx| {
@@ -5120,6 +5163,41 @@ fn post_ops_extract_into_the_saved_group(cx: &mut TestAppContext) {
     assert!(store.flush());
     let on_disk = store.load_all().variables.unwrap();
     assert_eq!(on_disk.group_vars(Some("g")), [Variable::new("token", "T")]);
+}
+
+/// 前后置操作表是子实体：程序化载入草稿不置脏，但用户在表格里改动（发出 `Changed`）要置脏，
+/// 且改动经 `draft()` 能读回来。
+#[gpui_kit::test]
+fn editing_ops_marks_the_tab_dirty_and_round_trips_through_draft(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let ops = vec![PreOp {
+        enabled: true,
+        kind: PreOpKind::SetVariable {
+            scope: VarScope::Global,
+            key: "a".into(),
+            value: "1".into(),
+        },
+    }];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.load_draft(
+                &RequestDraft {
+                    pre_ops: ops.clone(),
+                    ..Default::default()
+                },
+                window,
+                cx,
+            );
+            assert!(!t.dirty, "程序化载入不置脏");
+            assert_eq!(t.draft(cx).pre_ops, ops);
+            // 模拟用户改动：表格发 Changed → Tab 置脏
+            t.pre_ops.update(cx, |_, cx| {
+                cx.emit(crate::ui::ops_table::OpsTableEvent::Changed)
+            });
+        })
+    });
+    cx.read(|app| assert!(tab.read(app).dirty));
 }
 
 /// 改 URL / 重新载入草稿时，上一次发送留下的未定义变量提示与校验错误一起清掉。

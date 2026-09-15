@@ -40,6 +40,7 @@ use crate::state::settings;
 use crate::state::store::store;
 use crate::state::variables;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
+use crate::ui::ops_table::{OpsMode, OpsTable, OpsTableEvent};
 use crate::ui::selectable_lines::LinesSelection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,13 +48,15 @@ pub enum RequestSection {
     Params,
     Headers,
     Body,
+    Ops,
 }
 
 impl RequestSection {
-    pub const ALL: [RequestSection; 3] = [
+    pub const ALL: [RequestSection; 4] = [
         RequestSection::Params,
         RequestSection::Headers,
         RequestSection::Body,
+        RequestSection::Ops,
     ];
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|s| *s == self).unwrap_or(0)
@@ -268,9 +271,9 @@ pub struct RequestTab {
     /// 上一次发送时没能解析的变量名（URL 栏下方 warning）；每次发送重算，与 `prepare_error`
     /// 同步清空（改 URL、载入草稿）。
     pub unresolved_vars: BTreeSet<String>,
-    /// 前置 / 后置操作。计划 3 会换成表格实体；此时先做纯数据字段。
-    pub pre_ops: Vec<PreOp>,
-    pub post_ops: Vec<PostOp>,
+    /// 前置 / 后置操作表：与 [`crate::ui::ops_table::OpsTable`] 一一对应的子实体。
+    pub pre_ops: Entity<OpsTable>,
+    pub post_ops: Entity<OpsTable>,
     /// 本次发送的前置结果，等响应到达后并进 `Done.ops` / `Failed.ops`。
     pre_results: Vec<(PreOp, OpOutcome)>,
     /// 本次发送的后置操作快照（期望值已替换）：请求失败时 `apply_outcome` 据它把每条
@@ -333,6 +336,8 @@ impl RequestTab {
         let form = cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx));
         let form_data =
             cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true));
+        let pre_ops = cx.new(|cx| OpsTable::new(OpsMode::Pre, window, cx));
+        let post_ops = cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx));
 
         // 换行是全局偏好：新建的 Tab 直接按当前设置建，不必等第一次 render 去纠正
         let wrap = wrap_prefs(cx);
@@ -392,6 +397,12 @@ impl RequestTab {
             cx.subscribe_in(&form_data, window, |this, _, _: &KvTableEvent, _, cx| {
                 this.mark_dirty(cx)
             }),
+            cx.subscribe_in(&pre_ops, window, |this, _, _: &OpsTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
+            cx.subscribe_in(&post_ops, window, |this, _, _: &OpsTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
         ];
         for (_, editor) in &body_editors {
             subs.push(cx.subscribe_in(editor, window, Self::on_body_editor_event));
@@ -414,8 +425,8 @@ impl RequestTab {
             url,
             prepare_error: None,
             unresolved_vars: BTreeSet::new(),
-            pre_ops: Vec::new(),
-            post_ops: Vec::new(),
+            pre_ops,
+            post_ops,
             pre_results: Vec::new(),
             sent_post_ops: Vec::new(),
             path_params,
@@ -619,8 +630,8 @@ impl RequestTab {
             params: self.params.read(cx).values(cx),
             headers: self.headers.read(cx).values(cx),
             body,
-            pre_ops: self.pre_ops.clone(),
-            post_ops: self.post_ops.clone(),
+            pre_ops: self.pre_ops.read(cx).pre_ops(cx),
+            post_ops: self.post_ops.read(cx).post_ops(cx),
         }
     }
 
@@ -809,8 +820,10 @@ impl RequestTab {
                 }
             }
         }
-        self.pre_ops = draft.pre_ops.clone();
-        self.post_ops = draft.post_ops.clone();
+        self.pre_ops
+            .update(cx, |t, cx| t.set_pre_ops(&draft.pre_ops, window, cx));
+        self.post_ops
+            .update(cx, |t, cx| t.set_post_ops(&draft.post_ops, window, cx));
         self.prepare_error = None;
         self.unresolved_vars.clear();
         self.refresh_body_hint(cx);

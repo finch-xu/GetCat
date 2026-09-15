@@ -31,8 +31,6 @@ pub enum OpsTableEvent {
     Changed,
 }
 
-// 任务 3 把两张表接进 RequestTab 后才会在非测试代码里构造，本任务只有测试在用
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpsMode {
     Pre,
@@ -238,8 +236,6 @@ fn selected_row(sel: &Entity<LabelSelect>, cx: &App) -> usize {
 }
 
 impl OpsTable {
-    // 任务 3 的 RequestTab 调用，本任务只有测试在用
-    #[allow(dead_code)]
     pub fn new(mode: OpsMode, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let locale_sub = cx.observe_global_in::<Locale>(window, Self::refresh_locale);
         let mut this = Self {
@@ -578,8 +574,6 @@ impl OpsTable {
     }
 
     /// 启用且非空的行数（页签角标）。
-    // 任务 3 的请求页签角标调用，本任务还没有调用方
-    #[allow(dead_code)]
     pub fn count(&self, cx: &App) -> usize {
         self.rows
             .iter()
