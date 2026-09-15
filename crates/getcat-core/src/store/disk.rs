@@ -586,4 +586,24 @@ mod tests {
             layout.root().join("variables.json")
         );
     }
+
+    #[test]
+    fn variables_file_with_incomplete_environment_is_loaded_not_quarantined() {
+        let (_dir, layout) = layout();
+        std::fs::write(
+            layout.variables_path(),
+            br#"{"version":1,"globals":[{"key":"host","value":"h"}],"environments":[{"variables":[{"value":"x"}]}]}"#,
+        )
+        .unwrap();
+        let loaded = load_all(&layout);
+        assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
+        let sets = loaded.variables.expect("variables.json 应被读出");
+        assert_eq!(sets.globals[0].value, "h");
+        assert_eq!(sets.environments.len(), 1);
+        assert_eq!(sets.environments[0].variables[0].value, "x");
+        assert_eq!(
+            entries(layout.root()),
+            vec!["drafts", "requests", "variables.json"]
+        );
+    }
 }

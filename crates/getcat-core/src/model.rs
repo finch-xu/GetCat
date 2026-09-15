@@ -227,6 +227,8 @@ pub enum BodyKind {
 /// 一个变量：全局 / 分类 / 环境三层共用这一个形状（spec「变量与替换」）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Variable {
+    /// 缺字段按空串读（空 key 不参与替换），免得一行坏数据让整个 variables.json 被隔离。
+    #[serde(default)]
     pub key: String,
     #[serde(default)]
     pub value: String,
@@ -255,7 +257,10 @@ impl Variable {
 /// 一个环境（开发 / 测试 / 生产 …）；同一时间只有一个激活。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Environment {
+    /// 缺字段时生成新 id（与 `name` 的默认值一样，是为了不让一个坏条目隔离整个 variables.json）。
+    #[serde(default = "Ulid::generate")]
     pub id: Ulid,
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub variables: Vec<Variable>,
@@ -349,8 +354,12 @@ impl VariableSets {
         }
     }
 
-    /// 写一个变量：已有同名则只改值（保留 secret / description / enabled），否则追加。
-    /// 返回 false 表示作用域不可用，什么都没写。
+    /// 写一个变量，写到替换真正会读的那一行（`VarContext` 读同层第一条**启用**的同名行）：
+    /// - 有启用的同名行：改第一条启用行的值；
+    /// - 只有禁用的同名行：改第一条的值并把它重新启用；
+    /// - 都没有：追加。
+    ///
+    /// 改值时保留 secret / description。返回 false 表示作用域不可用，什么都没写。
     pub fn set_var(
         &mut self,
         scope: VarScope,
@@ -361,8 +370,16 @@ impl VariableSets {
         let Some(vars) = self.scope_vars_mut(scope, group) else {
             return false;
         };
-        match vars.iter_mut().find(|v| v.key == key) {
-            Some(v) => v.value = value.to_string(),
+        let target = vars
+            .iter()
+            .position(|v| v.enabled && v.key == key)
+            .or_else(|| vars.iter().position(|v| v.key == key));
+        match target {
+            Some(ix) => {
+                let v = &mut vars[ix];
+                v.value = value.to_string();
+                v.enabled = true;
+            }
             None => vars.push(Variable::new(key, value)),
         }
         true
@@ -1386,6 +1403,73 @@ mod tests {
         sets.environments.push(env);
         assert!(sets.set_var(VarScope::Environment, None, "token", "t"));
         assert_eq!(sets.active_env().unwrap().variables[0].key, "token");
+    }
+
+    /// `set_var` 要写到替换真正会读的那一行：`VarContext` 读第一条**启用**的同名行。
+    #[test]
+    fn set_var_targets_the_row_substitution_reads() {
+        let off = |k: &str, v: &str| Variable {
+            enabled: false,
+            ..Variable::new(k, v)
+        };
+        // 禁用行在前、启用行在后：改启用行，禁用行不动
+        let mut sets = VariableSets {
+            globals: vec![off("k", "old-off"), Variable::new("k", "old-on")],
+            ..Default::default()
+        };
+        assert!(sets.set_var(VarScope::Global, None, "k", "new"));
+        assert_eq!(
+            sets.globals,
+            vec![off("k", "old-off"), Variable::new("k", "new")]
+        );
+        let ctx = sets.context(None);
+        assert_eq!(crate::vars::Resolver::new(&ctx).resolve("{{k}}"), "new");
+
+        // 只有禁用行：改第一条并重新启用，secret / description 保留
+        let mut sets = VariableSets {
+            globals: vec![
+                Variable {
+                    secret: true,
+                    description: "d".into(),
+                    ..off("k", "a")
+                },
+                off("k", "b"),
+            ],
+            ..Default::default()
+        };
+        assert!(sets.set_var(VarScope::Global, None, "k", "new"));
+        assert_eq!(
+            sets.globals,
+            vec![
+                Variable {
+                    secret: true,
+                    description: "d".into(),
+                    ..Variable::new("k", "new")
+                },
+                off("k", "b"),
+            ]
+        );
+        let ctx = sets.context(None);
+        assert_eq!(crate::vars::Resolver::new(&ctx).resolve("{{k}}"), "new");
+    }
+
+    /// 手改坏的 variables.json 里某个环境缺 id / name、某个变量缺 key，不该让整个文件被隔离。
+    #[test]
+    fn environment_and_variable_tolerate_missing_identity_fields() {
+        let sets: VariableSets =
+            serde_json::from_str(r#"{"environments":[{"variables":[]}]}"#).unwrap();
+        assert_eq!(sets.environments.len(), 1);
+        assert_eq!(sets.environments[0].name, "");
+        assert!(sets.environments[0].variables.is_empty());
+        let other: VariableSets =
+            serde_json::from_str(r#"{"environments":[{"variables":[]}]}"#).unwrap();
+        assert_ne!(
+            sets.environments[0].id, other.environments[0].id,
+            "缺 id 时每次生成新的"
+        );
+        let v: Variable = serde_json::from_str(r#"{"value":"x"}"#).unwrap();
+        assert_eq!(v.key, "");
+        assert_eq!(v.value, "x");
     }
 
     #[test]
