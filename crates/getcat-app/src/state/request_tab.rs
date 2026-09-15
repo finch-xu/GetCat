@@ -1109,6 +1109,8 @@ impl RequestTab {
             editor.update(cx, |e, cx| e.set_value("", window, cx));
         }
         self.notice = None;
+        // 未解析变量提示挂在这次响应上（发送时算的），响应被清空后一起清掉
+        self.unresolved_vars.clear();
         // 「证书」页签在 Idle 下不再出现，停在那一页会落到空态分支
         self.response_section = ResponseSection::Body;
         self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);

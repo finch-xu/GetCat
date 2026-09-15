@@ -41,8 +41,8 @@ use tempfile::TempDir;
 
 use crate::i18n::Locale;
 use crate::state::request_tab::{
-    BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestTab, ResponseSection,
-    SseBodyMode,
+    BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestSection, RequestTab,
+    ResponseSection, SseBodyMode,
 };
 use crate::state::response::{OpsReport, ResponseState, ResponseView};
 use crate::state::saved_filter::SavedFilter;
@@ -2916,6 +2916,7 @@ fn clear_response_resets_everything_including_the_editor(cx: &mut TestAppContext
         tab.update(cx, |t, cx| {
             t.response_section = ResponseSection::Headers;
             t.notice = Some(Notice::NoResponse);
+            t.unresolved_vars.insert("ghost".to_string());
             let before = t.generation;
             assert!(
                 !t.response_editor_for("json")
@@ -2935,6 +2936,8 @@ fn clear_response_resets_everything_including_the_editor(cx: &mut TestAppContext
             );
             assert_eq!(t.response_section, ResponseSection::Body);
             assert!(t.notice.is_none());
+            // 未定义变量提示描述的是刚清掉的那份响应，一起清空
+            assert!(t.unresolved_vars.is_empty());
             // generation 必须往前走，否则在途请求的回调还能把旧响应写回来
             assert_eq!(t.generation, before + 1);
         })
@@ -3278,6 +3281,220 @@ fn certificate_section_falls_back_to_body_without_a_certificate(cx: &mut TestApp
     let element = tab.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         element.into_any_element()
+    });
+}
+
+/// 请求面板「操作」页签：两张操作表各带几行也要能画出来（此前从未被任何测试渲染过）。
+#[gpui_kit::test]
+fn request_pane_ops_tab_draws_with_rows(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.request_section = RequestSection::Ops;
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(
+                    &[
+                        pre_set(VarScope::Global, "who", "cat"),
+                        pre_set(VarScope::Environment, "req", "{{$timestamp}}"),
+                    ],
+                    window,
+                    cx,
+                )
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[
+                        extract_status("code"),
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Assert {
+                                subject: ResponseSource::Status,
+                                op: AssertOp::Equals,
+                                expected: "200".into(),
+                            },
+                        },
+                    ],
+                    window,
+                    cx,
+                )
+            });
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.request_section, RequestSection::Ops);
+        assert_eq!(t.pre_ops.read(app).count(app), 2);
+        assert_eq!(t.post_ops.read(app).count(app), 2);
+    });
+}
+
+/// 响应面板「操作」页签、Done 分支：一条通过的提取（目标已标敏感，触发掩码分支）、
+/// 一条失败的断言（`op_detail` + `mask_secrets` 分支）、一条因没有激活环境被跳过的
+/// 前置行，三种行样式一起画出来。
+#[gpui_kit::test]
+fn response_pane_ops_tab_draws_done_report_with_masked_and_failed_rows(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    // 提前把 "token" 标成敏感值：后置提取写回时按 key 命中旧行，secret 标记保留
+    // （`VariableSets::set_var` 的约定，见 core::model 测试）。
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals.push(Variable {
+                secret: true,
+                ..Variable::new("token", "")
+            })
+        })
+    });
+    let (base, _rx) = echo_server(r#"{"data":{"token":"T"}}"#);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                // 没有激活环境：这条前置行执行后落成跳过
+                o.set_pre_ops(&[pre_set(VarScope::Environment, "req", "x")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Extract {
+                                scope: VarScope::Global,
+                                key: "token".into(),
+                                source: ResponseSource::JsonPath {
+                                    path: "$.data.token".into(),
+                                },
+                            },
+                        },
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Assert {
+                                subject: ResponseSource::Status,
+                                op: AssertOp::Equals,
+                                expected: "201".into(),
+                            },
+                        },
+                    ],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    set_url_and_send(&tab, &base, cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Ops;
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        let ResponseState::Done {
+            ops: Some(report), ..
+        } = &t.response
+        else {
+            panic!(
+                "expected Done with ops report, got {:?}",
+                t.response.error()
+            );
+        };
+        assert_eq!(
+            report.pre[0].1,
+            OpOutcome::Skipped(OpSkip::NoActiveEnvironment)
+        );
+        assert_eq!(report.post.results[0].1, OpOutcome::Passed);
+        assert!(matches!(
+            report.post.results[1].1,
+            OpOutcome::Failed(OpFailure::Mismatch { .. })
+        ));
+    });
+}
+
+/// 响应面板「操作」页签、Failed 分支（非取消）：前置结果保留、后置操作全落成
+/// 「请求失败，未执行」，这条渲染路径此前没有测试画过。
+#[gpui_kit::test]
+fn response_pane_ops_tab_draws_failed_report(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(&[extract_status("leak")], window, cx)
+            });
+        })
+    });
+    set_url_and_send(&tab, &refused_url(), cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Ops;
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(
+            matches!(t.response, ResponseState::Failed { ops: Some(_), .. }),
+            "{:?}",
+            t.response.error()
+        );
+    });
+}
+
+/// 变量表：`secret_capable` 打开时锁按钮与掩码值输入框两条分支（敏感行 + 普通行）
+/// 一起画出来，此前只有不画帧的读断言测试覆盖过这张表。
+#[gpui_kit::test]
+fn kv_table_secret_capable_draws_masked_and_plain_rows(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Variable, window, cx).secret_capable(true))
+    });
+    let vars = vec![
+        Variable::new("host", "h"),
+        Variable {
+            secret: true,
+            ..Variable::new("token", "t")
+        },
+    ];
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_variables(&vars, window, cx)));
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = table.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = table.read(app);
+        assert!(!t.row_secret(0));
+        assert!(t.row_secret(1));
     });
 }
 

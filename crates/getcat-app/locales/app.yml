@@ -274,9 +274,9 @@ variables:
     zh-CN: "文件不是合法的 JSON：%{detail}"
     ja: "ファイルが正しい JSON ではありません：%{detail}"
   exported:
-    en: "Exported to %{path}"
-    zh-CN: "已导出到 %{path}"
-    ja: "%{path} にエクスポートしました"
+    en: "Exported to %{path} (secret values were written in plain text)"
+    zh-CN: "已导出到 %{path}（敏感值以明文写入）"
+    ja: "%{path} にエクスポートしました（秘密の値は平文で書き込まれています）"
   export_failed:
     en: "Export failed: %{error}"
     zh-CN: "导出失败：%{error}"
@@ -668,9 +668,9 @@ kv:
     zh-CN: "URL 中没有 {name} 形式的 Path 参数"
     ja: "URL に {name} 形式のパスパラメータはありません"
   secret_on:
-    en: "Secret: value is masked (click to reveal)"
-    zh-CN: "敏感值：已掩码（点击显示）"
-    ja: "秘密の値：マスク表示中（クリックで表示）"
+    en: "Unmark as secret (store and show in plain text)"
+    zh-CN: "取消敏感标记（明文显示）"
+    ja: "秘密の値の設定を解除（平文で表示されます）"
   secret_off:
     en: "Mark as secret (mask the value)"
     zh-CN: "标记为敏感值（掩码显示）"

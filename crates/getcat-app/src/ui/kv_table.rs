@@ -203,12 +203,20 @@ impl KvTable {
 
     /// form-data 模式：每行可在 Text / File 间切换，File 行按行选文件。
     pub fn file_capable(mut self, yes: bool) -> Self {
+        debug_assert!(
+            !(yes && self.secret_capable),
+            "file_capable 与 secret_capable 互斥，不能同时开启"
+        );
         self.file_capable = yes;
         self
     }
 
     /// 变量表：每行可标记为敏感值，值输入框掩码显示。
     pub fn secret_capable(mut self, yes: bool) -> Self {
+        debug_assert!(
+            !(yes && self.file_capable),
+            "secret_capable 与 file_capable 互斥，不能同时开启"
+        );
         self.secret_capable = yes;
         self
     }

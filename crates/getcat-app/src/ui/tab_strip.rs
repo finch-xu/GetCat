@@ -288,7 +288,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// 标签栏右侧的一组控件：翻页 / 滚动箭头，以及行数切换。
+    /// 标签栏右侧的一组控件：环境切换器、翻页 / 滚动箭头，以及行数切换。
     fn render_strip_controls(
         &self,
         total: usize,
@@ -437,7 +437,7 @@ impl Workspace {
 /// 切换器按钮上的可见文字：过长的环境名截到这么多字符（`Button` 的 `text_ellipsis`
 /// 只在容器有宽度上限时才生效，而这个按钮的宽度就是内容撑出来的，所以自己先截）。
 /// 可访问名称与 tooltip 不受影响，仍是全名（[`Workspace::render_env_switcher`]）。
-const ENV_LABEL_MAX_CHARS: usize = 24;
+const ENV_LABEL_MAX_CHARS: usize = 16;
 
 fn truncate_env_label(name: &str) -> SharedString {
     if name.chars().count() <= ENV_LABEL_MAX_CHARS {
