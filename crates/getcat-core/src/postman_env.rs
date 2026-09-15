@@ -35,7 +35,7 @@ pub enum PostmanEnvError {
 struct PostmanValue {
     key: String,
     #[serde(default)]
-    value: String,
+    value: serde_json::Value,
     #[serde(default = "default_true")]
     enabled: bool,
     /// `"default"` / `"secret"`；其它值当 default。
@@ -47,6 +47,25 @@ fn default_true() -> bool {
     true
 }
 
+/// JSON 值转字符串：string → as-is; null/missing → ""; 其它 → JSON 文本。
+fn value_to_string(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        _ => val.to_string(),
+    }
+}
+
+/// scope 值转枚举：只有 "globals" 字符串才是 Globals，其它都是 Environment。
+fn scope_from_value(val: &Option<serde_json::Value>) -> PostmanScope {
+    match val {
+        Some(serde_json::Value::String(s)) if s == "globals" => PostmanScope::Globals,
+        _ => PostmanScope::Environment,
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct PostmanFile {
     #[serde(default)]
@@ -55,7 +74,7 @@ struct PostmanFile {
     name: String,
     values: Vec<PostmanValue>,
     #[serde(default, rename = "_postman_variable_scope")]
-    scope: Option<PostmanScope>,
+    scope: Option<serde_json::Value>,
     #[serde(
         default,
         rename = "_postman_exported_at",
@@ -73,21 +92,38 @@ struct PostmanFile {
 pub fn parse(text: &str) -> Result<PostmanEnv, PostmanEnvError> {
     let value: serde_json::Value =
         serde_json::from_str(text).map_err(|e| PostmanEnvError::Json(e.to_string()))?;
-    // 先验形状再反序列化：serde 的错误分不清「不是 JSON」和「不是这个格式」
+    // 先验形状：必须是对象且 values 是数组
+    if !value.is_object() {
+        return Err(PostmanEnvError::NotEnvironment);
+    }
     if !value.get("values").is_some_and(serde_json::Value::is_array) {
         return Err(PostmanEnvError::NotEnvironment);
     }
+
+    // 验证 values 数组的每个条目都是对象且有字符串 key
+    if let Some(vals) = value.get("values").and_then(serde_json::Value::as_array) {
+        for val in vals {
+            if !val.is_object() {
+                return Err(PostmanEnvError::NotEnvironment);
+            }
+            // key 必须存在且为字符串
+            if !val.get("key").is_some_and(serde_json::Value::is_string) {
+                return Err(PostmanEnvError::NotEnvironment);
+            }
+        }
+    }
+
     let file: PostmanFile =
         serde_json::from_value(value).map_err(|_| PostmanEnvError::NotEnvironment)?;
     Ok(PostmanEnv {
         name: file.name,
-        scope: file.scope.unwrap_or(PostmanScope::Environment),
+        scope: scope_from_value(&file.scope),
         variables: file
             .values
             .into_iter()
             .map(|v| Variable {
                 key: v.key,
-                value: v.value,
+                value: value_to_string(&v.value),
                 enabled: v.enabled,
                 secret: v.kind == "secret",
                 description: String::new(),
@@ -109,12 +145,15 @@ pub fn render(name: &str, scope: PostmanScope, variables: &[Variable]) -> String
             .iter()
             .map(|v| PostmanValue {
                 key: v.key.clone(),
-                value: v.value.clone(),
+                value: serde_json::Value::String(v.value.clone()),
                 enabled: v.enabled,
                 kind: if v.secret { "secret" } else { "default" }.to_string(),
             })
             .collect(),
-        scope: Some(scope),
+        scope: Some(serde_json::json!(match scope {
+            PostmanScope::Environment => "environment",
+            PostmanScope::Globals => "globals",
+        })),
         exported_at: Some(iso_utc(secs)),
         exported_using: Some(format!("GetCat/{}", env!("CARGO_PKG_VERSION"))),
     };
@@ -189,5 +228,39 @@ mod tests {
         assert_eq!(back.name, "Dev");
         assert_eq!(back.scope, PostmanScope::Globals);
         assert_eq!(back.variables, vars);
+    }
+
+    #[test]
+    fn tolerates_non_string_values_and_unknown_scope() {
+        // 非字符串值：数字 → JSON 文本，布尔 → JSON 文本，null → 空字符串，对象 → JSON 文本
+        let text = r#"{
+          "name": "Mixed",
+          "values": [
+            {"key": "port", "value": 8080, "enabled": true},
+            {"key": "debug", "value": true, "enabled": true},
+            {"key": "empty", "value": null, "enabled": true},
+            {"key": "config", "value": {"a": 1}, "enabled": true}
+          ]
+        }"#;
+        let env = parse(text).unwrap();
+        assert_eq!(env.variables[0].value, "8080");
+        assert_eq!(env.variables[1].value, "true");
+        assert_eq!(env.variables[2].value, "");
+        assert_eq!(env.variables[3].value, r#"{"a":1}"#);
+
+        // 未知 scope 值或非字符串 scope → Environment
+        let unknown_scope =
+            parse(r#"{"name":"x","values":[],"_postman_variable_scope":"workspace"}"#).unwrap();
+        assert_eq!(unknown_scope.scope, PostmanScope::Environment);
+
+        let numeric_scope =
+            parse(r#"{"name":"x","values":[],"_postman_variable_scope":123}"#).unwrap();
+        assert_eq!(numeric_scope.scope, PostmanScope::Environment);
+
+        // 缺少 key 或 key 不是字符串 → NotEnvironment
+        assert_eq!(
+            parse(r#"{"values":[{"value":"x"}]}"#),
+            Err(PostmanEnvError::NotEnvironment)
+        );
     }
 }
