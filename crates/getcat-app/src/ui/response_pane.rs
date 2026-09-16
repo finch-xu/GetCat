@@ -18,19 +18,29 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+// 显式导入而非 `use gpui_kit::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
+// `#[test]` 属性宏并与标准库同名冲突。编译器报"找不到 X"时把 X 加进这里，不要改回通配符。
+use gpui_kit::{
+    AnyElement, App, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    Role, SharedString, StatefulInteractiveElement, Styled, Window, div, rems,
+};
 
 use crate::assets::ICON_WRAP_TEXT;
 use crate::i18n::tr;
 use crate::state::request_tab::{RequestTab, ResponseSection, SseBodyMode};
-use crate::state::response::{ResponseState, ResponseView, SseLive, SseView};
+use crate::state::response::{OpsReport, ResponseState, ResponseView, SseLive, SseView};
 use crate::state::settings;
+use crate::state::variables;
 use crate::ui::body_view::{render_header_rows, render_sse_events, render_text_lines};
+use crate::ui::ops_table::{PostRowKind, row_texts, scope_label};
 use crate::ui::text::{
-    cert_warning_label, content_kind_label, error_detail, error_kind, tier_notice,
+    cert_warning_label, content_kind_label, error_detail, error_kind, op_detail, op_outcome_label,
+    tier_notice,
 };
 use crate::ui::{format_bytes, format_duration, status_color};
 use crate::{FindInResponse, SendRequest};
+use getcat_core::model::{PreOpKind, VarScope, VariableSets};
+use getcat_core::ops::OpOutcome;
 
 fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
     empty_state_frame(cx).child(text.into()).into_any_element()
@@ -98,6 +108,140 @@ fn notice_bar(text: impl Into<SharedString>) -> AnyElement {
         .into_any_element()
 }
 
+/// 全局 / 每个环境 / 每个分类里所有非空的 secret 变量值，去重后按字节长度**降序**排列。
+///
+/// 长度必须降序：如果 secret A = "abc"、secret B = "abcXYZ" 同时存在，先换 A 会把 B 切掉
+/// 一角——"abcXYZ" 变成 "••••••XYZ"，"XYZ" 这部分本属于 B、却没被掩码，明文露了出来。
+/// 从最长的开始替换就不会有这个问题：位置上如果两个 secret 都能匹配，长的一定先被处理。
+fn secret_values(sets: &VariableSets) -> Vec<String> {
+    // 用 BTreeSet 去重（`dedup()` 只去掉相邻重复，排序后长度相同的重复值不一定相邻）
+    let unique: std::collections::BTreeSet<String> = sets
+        .globals
+        .iter()
+        .chain(sets.environments.iter().flat_map(|e| e.variables.iter()))
+        .chain(sets.groups.values().flat_map(|vars| vars.iter()))
+        .filter(|v| v.secret && !v.value.is_empty())
+        .map(|v| v.value.clone())
+        .collect();
+    let mut values: Vec<String> = unique.into_iter().collect();
+    values.sort_by_key(|v| std::cmp::Reverse(v.len()));
+    values
+}
+
+/// 把 `secrets`（须已按 [`secret_values`] 的长度降序排列）里在 `text` 中出现的子串
+/// 依次换成掩码。断言失败详情里的载荷（如 `Mismatch` 的 actual/expected）可能夹带
+/// 发送时用 `{{secret_var}}` 替换出来的明文，渲染前统一在这里掩掉。
+fn mask_with(text: &str, secrets: &[String]) -> String {
+    let mut masked = text.to_string();
+    for value in secrets {
+        if masked.contains(value.as_str()) {
+            masked = masked.replace(value.as_str(), "••••••");
+        }
+    }
+    masked
+}
+
+/// 提取到的变量当前是否标了 secret（决定「操作」页签里这条提取值要不要掩码显示）。
+fn is_extracted_var_secret(
+    sets: &VariableSets,
+    scope: VarScope,
+    group: Option<&str>,
+    key: &str,
+) -> bool {
+    let vars = match scope {
+        VarScope::Global => sets.globals.as_slice(),
+        VarScope::Environment => sets
+            .active_env()
+            .map(|e| e.variables.as_slice())
+            .unwrap_or(&[]),
+        VarScope::Group => sets.group_vars(group),
+    };
+    vars.iter().any(|v| v.key == key && v.secret)
+}
+
+/// 「操作」页签：前置在前、后置在后，每条一行：状态色圆点 + 操作描述 + 原因 / 提取值。
+fn render_ops_report(report: &OpsReport, group: Option<&str>, cx: &App) -> AnyElement {
+    let sets = variables::variables(cx);
+    // 每次渲染只算一遍、排一次序，逐行复用——secret 列表与行数无关
+    let secrets = secret_values(sets);
+    let line =
+        |ix: usize, title: SharedString, outcome: &OpOutcome, extra: Option<SharedString>| {
+            let color = match outcome {
+                OpOutcome::Passed => cx.theme().success,
+                OpOutcome::Failed(_) => cx.theme().danger,
+                OpOutcome::Skipped(_) => cx.theme().warning,
+            };
+            let detail =
+                op_detail(outcome).map(|text| SharedString::from(mask_with(&text, &secrets)));
+            v_flex()
+                .id(("op-result", ix))
+                .py_1()
+                .gap_0p5()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(div().w_2().h_2().rounded_full().bg(color).flex_none())
+                        .child(div().text_sm().child(title))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(color)
+                                .child(op_outcome_label(outcome)),
+                        ),
+                )
+                .when_some(detail.or(extra), |v, text| {
+                    v.child(
+                        div()
+                            .pl_4()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(text),
+                    )
+                })
+        };
+    let mut rows: Vec<AnyElement> = Vec::new();
+    for (ix, (op, outcome)) in report.pre.iter().enumerate() {
+        let PreOpKind::SetVariable { scope, key, .. } = &op.kind;
+        let title = tr!(
+            "ops.set_line",
+            scope = scope_label(*scope),
+            key = key.clone()
+        );
+        rows.push(line(ix, title, outcome, None).into_any_element());
+    }
+    let offset = report.pre.len();
+    for (ix, (op, outcome)) in report.post.results.iter().enumerate() {
+        let title: SharedString =
+            format!("{} · {}", PostRowKind::from_op(op).label(), row_texts(op).0).into();
+        // 提取值按结果行号对应（core 的 `Extracted.index`），不按 key 反查——同一个 key
+        // 提取两次也对得上；`apply_extracted` 已把写不进去的行从 extracted 移除，
+        // 找得到的都是真正写入的。
+        let extra = report
+            .post
+            .extracted
+            .iter()
+            .find(|e| e.index == ix)
+            .map(|e| {
+                let value = if is_extracted_var_secret(sets, e.scope, group, &e.key) {
+                    "••••••".to_string()
+                } else {
+                    e.value.clone()
+                };
+                tr!("ops.extracted_line", key = e.key.clone(), value = value)
+            });
+        rows.push(line(offset + ix, title, outcome, extra).into_any_element());
+    }
+    v_flex()
+        .id("ops-section")
+        .size_full()
+        .min_h_0()
+        .overflow_y_scroll()
+        .p_3()
+        .children(rows)
+        .into_any_element()
+}
+
 impl RequestTab {
     pub fn render_response_pane(
         &self,
@@ -124,8 +268,9 @@ impl RequestTab {
                 _ => (false, false, false, 0, false, None),
             };
         let section = self.response_section;
-        // 页签随响应变：http 请求没有证书，那一页就不该出现
-        let sections = ResponseSection::visible(has_certificate);
+        let ops_report = self.ops_report();
+        // 页签随响应变：http 请求没有证书、没有启用操作时那两页就不该出现
+        let sections = ResponseSection::visible(has_certificate, ops_report.is_some());
         let selected_section = sections.iter().position(|s| *s == section).unwrap_or(0);
         let clicked_sections = sections.clone();
         // Idle 下没东西可清；InFlight 归 URL 栏的取消按钮管，这里不掺和
@@ -272,6 +417,14 @@ impl RequestTab {
                                 ResponseSection::Certificate => {
                                     Tab::new().label(tr!("response.section_certificate"))
                                 }
+                                ResponseSection::Ops => Tab::new().label(match ops_report {
+                                    Some(r) => tr!(
+                                        "ops.section_title",
+                                        passed = r.passed(),
+                                        total = r.total()
+                                    ),
+                                    None => tr!("ops.section_title", passed = 0, total = 0),
+                                }),
                             })),
                     )
                     // 只有存在美化文本时才提供 Pretty/Raw 切换（SSE 响应没有 Pretty，
@@ -400,40 +553,49 @@ impl RequestTab {
             }
             ResponseState::Failed {
                 error: RequestError::Cancelled,
+                ..
             } => empty_state(tr!("response.cancelled"), cx),
-            ResponseState::Failed { error } => v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().danger)
-                        .child(error_kind(error)),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(error_detail(error)),
-                )
-                // 显式挑了版本又失败，多半是服务端不支持这一版——reqwest 的原话
-                // （"frame with invalid size" 之类）指不到这一点，补一句去处
-                .when(self.http_version != HttpVersionPref::Auto, |v| {
-                    v.child(
+            ResponseState::Failed { error, ops } => {
+                // 「操作」页签且这次失败挂了报告：前置结果 + 后置「请求失败，未执行」照常可看
+                if section == ResponseSection::Ops
+                    && let Some(report) = ops
+                {
+                    return render_ops_report(report, self.saved_group.as_deref(), cx);
+                }
+                v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().danger)
+                            .child(error_kind(error)),
+                    )
+                    .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(tr!(
-                                "response.forced_version_hint",
-                                version = self.http_version.label()
-                            )),
+                            .child(error_detail(error)),
                     )
-                })
-                .into_any_element(),
-            ResponseState::Done { body, view } => match section {
+                    // 显式挑了版本又失败，多半是服务端不支持这一版——reqwest 的原话
+                    // （"frame with invalid size" 之类）指不到这一点，补一句去处
+                    .when(self.http_version != HttpVersionPref::Auto, |v| {
+                        v.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr!(
+                                    "response.forced_version_hint",
+                                    version = self.http_version.label()
+                                )),
+                        )
+                    })
+                    .into_any_element()
+            }
+            ResponseState::Done { body, view, ops } => match section {
                 ResponseSection::Body => self.render_body_view(body, view, cx),
                 ResponseSection::Headers => {
                     render_header_rows(view.header_rows.clone(), &self.headers_list, cx)
@@ -442,6 +604,11 @@ impl RequestTab {
                 ResponseSection::Certificate => match &view.meta.certificate {
                     Some(info) => render_certificate(info),
                     // 上一条响应有证书、这一条没有：页签已经消失，内容跟着回落到 Body
+                    None => self.render_body_view(body, view, cx),
+                },
+                ResponseSection::Ops => match ops {
+                    Some(report) => render_ops_report(report, self.saved_group.as_deref(), cx),
+                    // 没有报告时页签本就不出现，防御性地回落到 Body
                     None => self.render_body_view(body, view, cx),
                 },
             },
@@ -701,7 +868,7 @@ impl RequestTab {
                 ))
                 .child(format_bytes(*received))
                 .into_any_element(),
-            ResponseState::Failed { error } => {
+            ResponseState::Failed { error, .. } => {
                 let cancelled = matches!(error, RequestError::Cancelled);
                 h_flex()
                     .text_sm()
@@ -745,5 +912,72 @@ impl RequestTab {
                     .into_any_element()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use getcat_core::model::{Environment, Variable};
+
+    fn secret(key: &str, value: &str) -> Variable {
+        let mut v = Variable::new(key, value);
+        v.secret = true;
+        v
+    }
+
+    /// 短 secret 是长 secret 的前缀时，必须先换长的，否则长值被切掉一角、
+    /// 残留的后半截（这里是 "XYZ"）会露在外面。
+    #[test]
+    fn secret_values_sort_longer_first_so_substrings_dont_leak() {
+        let mut sets = VariableSets::default();
+        sets.globals.push(secret("short", "abc"));
+        let mut env = Environment::new("dev");
+        env.variables.push(secret("long", "abcXYZ"));
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+
+        let values = secret_values(&sets);
+        assert_eq!(values, vec!["abcXYZ".to_string(), "abc".to_string()]);
+        assert_eq!(
+            mask_with("got abcXYZ and abc", &values),
+            "got •••••• and ••••••"
+        );
+    }
+
+    /// 环境作用域与分类作用域的 secret 都要认得到、都能掩码。
+    #[test]
+    fn secret_values_cover_environment_and_group_scopes() {
+        let mut sets = VariableSets::default();
+        let mut env = Environment::new("dev");
+        env.variables.push(secret("env_token", "ENVSECRET"));
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+        sets.groups
+            .insert("g".into(), vec![secret("grp_token", "GRPSECRET")]);
+
+        let values = secret_values(&sets);
+        assert!(values.contains(&"ENVSECRET".to_string()));
+        assert!(values.contains(&"GRPSECRET".to_string()));
+        assert_eq!(
+            mask_with("env=ENVSECRET grp=GRPSECRET", &values),
+            "env=•••••• grp=••••••"
+        );
+    }
+
+    /// 既有场景：全局 secret 被掩码，非 secret 值原样保留。
+    #[test]
+    fn mask_with_redacts_secret_variable_values() {
+        let mut sets = VariableSets::default();
+        sets.globals.push(secret("token", "T0K"));
+        sets.globals.push(Variable::new("plain", "P"));
+        let values = secret_values(&sets);
+
+        assert_eq!(
+            mask_with("Expected 200, got T0K", &values),
+            "Expected 200, got ••••••"
+        );
+        // 非 secret 的值原样保留
+        assert_eq!(mask_with("value is P", &values), "value is P");
     }
 }

@@ -3,11 +3,15 @@
 //! 规则（与用户确认过）：错误的**种类**翻译，**技术细节**（reqwest 原话、路径、字段名）
 //! 两种语言都保留英文原文。
 
+use std::collections::BTreeSet;
+
 use getcat_core::body::spill::HEAD_BYTES;
 use getcat_core::body::tier::{EDITOR_MAX_BYTES, EDITOR_MAX_LINES, ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{MAX_BODY_BYTES, RequestError};
 use getcat_core::model::{LanguagePref, ThemePref, UpdateSourcePref};
+use getcat_core::ops::{OPS_JSON_MAX_BYTES, OpFailure, OpOutcome, OpSkip};
+use getcat_core::postman_env::PostmanEnvError;
 use getcat_core::tls::CertWarning;
 use gpui_kit::SharedString;
 
@@ -77,6 +81,12 @@ pub fn prepare_error_line(error: &RequestError) -> SharedString {
     }
 }
 
+/// 未解析变量提示：「Undefined variables: a, b」。
+pub fn unresolved_vars_line(names: &BTreeSet<String>) -> SharedString {
+    let names_str = names.iter().cloned().collect::<Vec<_>>().join(", ");
+    tr!("url_bar.unresolved_vars", names = names_str)
+}
+
 /// 内容类型标签：JSON / XML / HTML 是专名不翻译，文本 / 二进制按语言显示。
 pub fn content_kind_label(kind: ContentKind) -> SharedString {
     match kind {
@@ -125,6 +135,52 @@ pub fn update_source_label(pref: UpdateSourcePref) -> SharedString {
         UpdateSourcePref::Auto => tr!("update_source.auto"),
         UpdateSourcePref::Global => tr!("update_source.global"),
         UpdateSourcePref::ChinaMirror => tr!("update_source.china_mirror"),
+    }
+}
+
+/// 「操作」页签一行的结果标签：通过 / 失败 / 跳过。
+pub fn op_outcome_label(outcome: &OpOutcome) -> SharedString {
+    match outcome {
+        OpOutcome::Passed => tr!("ops.result_passed"),
+        OpOutcome::Failed(_) => tr!("ops.result_failed"),
+        OpOutcome::Skipped(_) => tr!("ops.result_skipped"),
+    }
+}
+
+/// 失败 / 跳过的原因；通过没有说明。载荷（路径、头名、实际值）原文保留。
+pub fn op_detail(outcome: &OpOutcome) -> Option<SharedString> {
+    Some(match outcome {
+        OpOutcome::Passed => return None,
+        OpOutcome::Skipped(OpSkip::NoActiveEnvironment) => tr!("ops.skip_no_environment"),
+        OpOutcome::Skipped(OpSkip::NoGroup) => tr!("ops.skip_no_group"),
+        OpOutcome::Skipped(OpSkip::RequestFailed) => tr!("ops.skip_request_failed"),
+        OpOutcome::Failed(f) => match f {
+            OpFailure::EmptyKey => tr!("ops.fail_empty_key"),
+            OpFailure::InvalidKey(k) => tr!("ops.fail_invalid_key", key = k),
+            OpFailure::EmptyPath => tr!("ops.fail_empty_path"),
+            OpFailure::EmptyHeader => tr!("ops.fail_empty_header"),
+            OpFailure::BodyUnavailable => tr!("ops.fail_body_unavailable"),
+            OpFailure::BodyTooLarge => tr!(
+                "ops.fail_body_too_large",
+                size = mib_label(OPS_JSON_MAX_BYTES as u64)
+            ),
+            OpFailure::NotJson => tr!("ops.fail_not_json"),
+            OpFailure::PathNotFound(p) => tr!("ops.fail_path_not_found", path = p),
+            OpFailure::HeaderNotFound(n) => tr!("ops.fail_header_not_found", name = n),
+            OpFailure::Mismatch { actual, expected } => {
+                tr!("ops.fail_mismatch", actual = actual, expected = expected)
+            }
+            OpFailure::Unexpected { actual } => tr!("ops.fail_unexpected", actual = actual),
+            OpFailure::Missing => tr!("ops.fail_missing"),
+        },
+    })
+}
+
+/// Postman environment / globals 导入失败的原因：种类翻译，serde 给出的 JSON 细节原文保留。
+pub fn postman_env_error_line(error: &PostmanEnvError) -> SharedString {
+    match error {
+        PostmanEnvError::NotEnvironment => tr!("variables.import_not_environment"),
+        PostmanEnvError::Json(detail) => tr!("variables.import_invalid_json", detail = detail),
     }
 }
 
@@ -188,6 +244,38 @@ mod tests {
     }
 
     #[test]
+    fn op_failure_details_embed_payloads() {
+        let _locale = crate::i18n::locale_test_lock();
+        assert_eq!(op_outcome_label(&OpOutcome::Passed).as_ref(), "Passed");
+        assert_eq!(
+            op_detail(&OpOutcome::Failed(OpFailure::Mismatch {
+                actual: "200".into(),
+                expected: "201".into()
+            }))
+            .as_deref(),
+            Some("Expected 201, got 200")
+        );
+        assert_eq!(
+            op_detail(&OpOutcome::Failed(OpFailure::PathNotFound("$.a".into()))).as_deref(),
+            Some("Path not found: $.a")
+        );
+        assert_eq!(
+            op_detail(&OpOutcome::Skipped(OpSkip::NoGroup)).as_deref(),
+            Some("This request is not in a category")
+        );
+        assert_eq!(
+            op_detail(&OpOutcome::Skipped(OpSkip::RequestFailed)).as_deref(),
+            Some("Request failed, not run")
+        );
+        assert!(
+            op_detail(&OpOutcome::Failed(OpFailure::BodyTooLarge))
+                .unwrap()
+                .contains("8 MB")
+        );
+        assert_eq!(op_detail(&OpOutcome::Passed), None);
+    }
+
+    #[test]
     fn japanese_locale_is_wired_up() {
         assert_eq!(
             rust_i18n::t!("theme.system", locale = "ja").as_ref(),
@@ -201,5 +289,46 @@ mod tests {
                 "{locale}"
             );
         }
+    }
+
+    /// Postman 导入失败：原因的种类翻译，serde 的技术细节原文保留；不能漏出 core 的英文 Display。
+    #[test]
+    fn postman_env_errors_translate_the_kind_and_keep_the_detail() {
+        let _locale = crate::i18n::locale_test_lock();
+        assert_eq!(
+            postman_env_error_line(&PostmanEnvError::NotEnvironment).as_ref(),
+            "This file isn't a Postman environment or globals export"
+        );
+        let detail = "EOF while parsing an object at line 1 column 1";
+        assert_eq!(
+            postman_env_error_line(&PostmanEnvError::Json(detail.into())).as_ref(),
+            format!("The file isn't valid JSON: {detail}")
+        );
+        // 另两种界面语言也有译文
+        assert_eq!(
+            rust_i18n::t!("variables.import_not_environment", locale = "zh-CN").as_ref(),
+            "这不是 Postman 的 environment / globals 导出文件"
+        );
+        assert_eq!(
+            rust_i18n::t!(
+                "variables.import_invalid_json",
+                locale = "ja",
+                detail = detail
+            )
+            .as_ref(),
+            format!("ファイルが正しい JSON ではありません：{detail}")
+        );
+    }
+
+    #[test]
+    fn unresolved_vars_line_formats_names() {
+        let _locale = crate::i18n::locale_test_lock();
+        let mut names = BTreeSet::new();
+        names.insert("a".to_string());
+        names.insert("b".to_string());
+        assert_eq!(
+            unresolved_vars_line(&names).as_ref(),
+            "Undefined variables: a, b"
+        );
     }
 }

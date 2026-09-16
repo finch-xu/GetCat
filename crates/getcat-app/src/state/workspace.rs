@@ -40,11 +40,13 @@ use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::settings;
 use crate::state::store::{banner, store};
 use crate::state::update;
+use crate::state::variables;
 use crate::templates;
 use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
 use crate::ui::curl_sheet::{CURL_SHEET_WIDTH, CurlSheet, import_button};
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
 use crate::ui::tab_strip::{next_tab_rows, page_count, tabs_per_page};
+use crate::ui::variables_sheet::{SheetScope, VARIABLES_SHEET_WIDTH, VariablesSheet};
 use crate::{
     CloseTab, DuplicateTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest,
     ToggleSidebar,
@@ -82,10 +84,15 @@ pub enum ToolSection {
     #[default]
     CodeGen,
     ImportCurl,
+    Variables,
 }
 
 impl ToolSection {
-    pub const ALL: [ToolSection; 2] = [ToolSection::CodeGen, ToolSection::ImportCurl];
+    pub const ALL: [ToolSection; 3] = [
+        ToolSection::CodeGen,
+        ToolSection::ImportCurl,
+        ToolSection::Variables,
+    ];
 }
 
 pub struct Workspace {
@@ -134,6 +141,8 @@ pub struct Workspace {
     pub(crate) code_sheet: Entity<CodeSheet>,
     /// 「导入 cURL」抽屉的正文。与 `code_sheet` 同样的约束：必须是独立实体。
     pub(crate) curl_sheet: Entity<CurlSheet>,
+    /// 「变量」抽屉的正文。同上：必须是独立实体。
+    pub(crate) variables_sheet: Entity<VariablesSheet>,
     /// 当前打开着的是哪个抽屉。`Sheet` 是窗口级单例，只靠 `has_active_sheet`
     /// 分不清「点的是同一个（该收起）」还是「点的是另一个（该换内容）」。
     open_tool: Option<ToolSection>,
@@ -156,6 +165,8 @@ impl Workspace {
             workspace: state,
             // 设置在开窗前已由 main 取走安装；这里不再用
             settings: _,
+            // 变量由全局句柄管理，这里不用
+            variables: _,
             drafts,
             requests,
             errors: _,
@@ -184,6 +195,7 @@ impl Workspace {
             update_status: update::status(cx),
             code_sheet: cx.new(|cx| CodeSheet::new(window, cx)),
             curl_sheet: cx.new(|cx| CurlSheet::new(window, cx)),
+            variables_sheet: cx.new(|cx| VariablesSheet::new(window, cx)),
             open_tool: None,
             _subs: Vec::new(),
         };
@@ -195,14 +207,23 @@ impl Workspace {
                 cx.notify();
             }));
         }
+        // 变量表可能在别处被改（前置 / 后置操作写回、抽屉里切换 / 删除环境）：
+        // 标签栏的环境切换器直接读全局，不订阅就画面滞后到下一次任意重绘。
+        ws._subs.push(
+            cx.observe_global_in::<variables::VariablesHandle>(window, |_this, _window, cx| {
+                cx.notify()
+            }),
+        );
 
         let (drafts, active) = order_drafts(&state, drafts);
         let split = ws.split;
         for d in drafts {
-            let saved_name: Option<SharedString> = d
+            let saved = d
                 .saved_id
-                .and_then(|id| ws.saved.iter().find(|r| r.id == id))
-                .map(|r| SharedString::from(r.name.clone()));
+                .and_then(|id| ws.saved.iter().find(|r| r.id == id));
+            let saved_name: Option<SharedString> =
+                saved.map(|r| SharedString::from(r.name.clone()));
+            let saved_group = saved.and_then(|r| r.group.clone());
             let still_saved = saved_name.is_some();
             let tab = cx.new(|cx| {
                 let mut tab = RequestTab::new(d.id, window, cx);
@@ -211,6 +232,7 @@ impl Workspace {
                 // 对应的已保存请求文件已不存在（被手工删除）：退化为有改动的未保存 Tab
                 tab.saved_id = d.saved_id.filter(|_| still_saved);
                 tab.saved_name = saved_name;
+                tab.saved_group = saved_group;
                 tab.dirty = d.dirty || (d.saved_id.is_some() && !still_saved);
                 tab
             });
@@ -761,6 +783,17 @@ impl Workspace {
         if changed.is_empty() {
             return;
         }
+        for request in &changed {
+            for tab in &self.tabs {
+                if tab.read(cx).saved_id == Some(request.id) {
+                    let group = request.group.clone();
+                    tab.update(cx, |t, cx| {
+                        t.saved_group = group;
+                        cx.notify();
+                    });
+                }
+            }
+        }
         if let Some(store) = store(cx) {
             for request in changed {
                 store.write_request(request);
@@ -792,11 +825,13 @@ impl Workspace {
             |r| (r.group.as_deref() == Some(from)).then(|| Some(to.clone())),
             cx,
         );
+        variables::update(cx, |s| s.rename_group(from, &to));
     }
 
     /// 解散分类：成员回未分类，请求本身不删。
     pub fn dissolve_group(&mut self, name: &str, cx: &mut Context<Self>) {
         self.retag_saved(|r| (r.group.as_deref() == Some(name)).then_some(None), cx);
+        variables::update(cx, |s| s.remove_group(name));
     }
 
     /// 选中的分类没有成员了（删光/解散/合并走）→ 回退「全部」。
@@ -825,6 +860,7 @@ impl Workspace {
             t.load_draft(&request.draft, window, cx);
             t.saved_id = Some(id);
             t.saved_name = Some(request.name.clone().into());
+            t.saved_group = request.group.clone();
             t.dirty = false;
             t.save_draft_now(cx);
             cx.notify();
@@ -870,6 +906,7 @@ impl Workspace {
                 tab.update(cx, |t, cx| {
                     t.saved_id = None;
                     t.saved_name = None;
+                    t.saved_group = None;
                     t.dirty = true;
                     t.save_draft_now(cx);
                     cx.notify();
@@ -1094,9 +1131,11 @@ impl Workspace {
             ..existing
         };
         let name: SharedString = request.name.clone().into();
+        let group = request.group.clone();
         self.upsert_saved(request, cx);
         tab.update(cx, |t, cx| {
             t.saved_name = Some(name);
+            t.saved_group = group;
             t.mark_clean(cx);
             t.save_draft_now(cx);
         });
@@ -1125,10 +1164,12 @@ impl Workspace {
         let mut request = SavedRequest::new(name.clone(), tab.read(cx).draft(cx));
         request.group = group.and_then(|g| saved_filter::normalize_group(&g));
         let id = request.id;
+        let group = request.group.clone();
         self.upsert_saved(request, cx);
         tab.update(cx, |t, cx| {
             t.saved_id = Some(id);
             t.saved_name = Some(name.into());
+            t.saved_group = group;
             t.mark_clean(cx);
             t.save_draft_now(cx);
         });
@@ -1377,6 +1418,9 @@ impl Workspace {
         match section {
             ToolSection::CodeGen => self.open_code_sheet(window, cx),
             ToolSection::ImportCurl => self.open_curl_sheet(window, cx),
+            ToolSection::Variables => {
+                self.open_variables_sheet(SheetScope::Global, None, window, cx)
+            }
         }
     }
 
@@ -1444,6 +1488,45 @@ impl Workspace {
         cx.notify();
     }
 
+    /// 打开「变量」抽屉，定位到某一页（`group` 只对分类页有意义，None 取第一个分类）。
+    ///
+    /// builder 里只放 `Entity<VariablesSheet>`，**绝不碰 `self`**：它是 `Fn`、每帧在本实体的
+    /// `render` 内部执行，动一下就二次借用 panic。抽屉的写入全部直接走全局变量句柄，不回调宿主。
+    pub fn open_variables_sheet(
+        &mut self,
+        scope: SheetScope,
+        group: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let groups = self.variable_group_names(cx);
+        self.variables_sheet
+            .update(cx, |s, cx| s.load(scope, group, groups, window, cx));
+        self.open_tool = Some(ToolSection::Variables);
+        let sheet = self.variables_sheet.clone();
+        window.open_sheet(cx, move |sh, _, _| {
+            sh.size(px(VARIABLES_SHEET_WIDTH))
+                .title(div().child(tr!("tools.variables.title")))
+                .child(sheet.clone())
+        });
+        cx.notify();
+    }
+
+    /// 变量抽屉分类页的候选 = 已保存请求推导出的分类 ∪ 变量表里挂着变量的分类名。
+    /// spec 规定分类因成员移走而自然消失时变量保留——只列前者的话，这些变量既看不到也删不掉。
+    pub(crate) fn variable_group_names(&self, cx: &App) -> Vec<String> {
+        let mut groups: Vec<String> = saved_filter::derive_groups(&self.saved)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        for name in variables::variables(cx).groups.keys() {
+            if !groups.contains(name) {
+                groups.push(name.clone());
+            }
+        }
+        groups
+    }
+
     /// 把抽屉里解析好的草稿开成一个新 Tab。
     ///
     /// 开新 Tab 而不是改当前那个：当前 Tab 多半正编到一半，导入不该把它冲掉。
@@ -1472,11 +1555,40 @@ impl Workspace {
     /// 默认请求头的开关是全局设置，所以每次都现取——用户刚在设置里关掉 User-Agent，
     /// 下一次打开抽屉就该看到它消失。
     pub(crate) fn refresh_code_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let draft = self.active_tab().read(cx).draft(cx);
+        let tab = self.active_tab();
+        let (draft, group) = {
+            let tab = tab.read(cx);
+            (tab.draft(cx), tab.saved_group.clone())
+        };
+        // 生成的代码要等于真正发出去的请求：变量展开，但前置操作不在这里跑（它有副作用）
+        let draft = variables::resolve(cx, group.as_deref(), draft).draft;
         let disabled = settings::settings(cx).request.disabled_default_headers;
         self.code_sheet.update(cx, |sheet, cx| {
             sheet.load(draft, disabled, window, cx);
         });
+    }
+
+    /// 标签栏环境切换器的动作：`None` 表示「不用环境」。
+    pub fn select_environment(
+        &mut self,
+        id: Option<Ulid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        variables::set_active_environment(cx, id);
+        // 「生成代码」抽屉开着时，展开结果随环境变化，要立刻刷新，否则显示的是旧环境的请求
+        if self.open_tool == Some(ToolSection::CodeGen) {
+            self.refresh_code_sheet(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// 切换器按钮上的文字：当前环境名，没有则「无环境」。
+    pub fn environment_label(&self, cx: &App) -> SharedString {
+        variables::variables(cx)
+            .active_env()
+            .map(|e| SharedString::from(e.name.clone()))
+            .unwrap_or_else(|| tr!("env_switcher.none"))
     }
 }
 

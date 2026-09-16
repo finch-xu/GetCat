@@ -165,6 +165,126 @@ tools:
       en: The parsed request will be summarized here
       zh-CN: 解析结果会显示在这里
       ja: 解析結果の概要がここに表示されます
+  variables:
+    title:
+      en: Variables
+      zh-CN: 变量
+      ja: 変数
+
+# 「变量」抽屉：全局 / 环境 / 分类三层变量的编辑，环境管理，Postman 导入导出
+variables:
+  scope_global:
+    en: Global
+    zh-CN: 全局
+    ja: グローバル
+  scope_environment:
+    en: Environments
+    zh-CN: 环境
+    ja: 環境
+  scope_group:
+    en: Categories
+    zh-CN: 分类
+    ja: カテゴリ
+  scope_aria:
+    en: Variable scope
+    zh-CN: 变量作用域
+    ja: 変数のスコープ
+  env_select_aria:
+    en: Environment
+    zh-CN: 环境
+    ja: 環境
+  group_select_aria:
+    en: Category
+    zh-CN: 分类
+    ja: カテゴリ
+  no_environment:
+    en: No environments yet. Create one to get started.
+    zh-CN: 还没有环境，先新建一个。
+    ja: 環境がまだありません。まず作成してください。
+  no_group:
+    en: No categories yet. Save a request into a category first.
+    zh-CN: 还没有分类，先把请求保存到某个分类。
+    ja: カテゴリがまだありません。まずリクエストをカテゴリに保存してください。
+  new_env:
+    en: New
+    zh-CN: 新建
+    ja: 新規
+  new_env_default_name:
+    en: New environment
+    zh-CN: 新环境
+    ja: 新しい環境
+  delete_env:
+    en: Delete
+    zh-CN: 删除
+    ja: 削除
+  delete_env_title:
+    en: "Delete environment “%{name}”?"
+    zh-CN: "删除环境「%{name}」？"
+    ja: "環境「%{name}」を削除しますか？"
+  delete_env_body:
+    en: Its variables are deleted. Requests that reference them will send the placeholders as-is.
+    zh-CN: 其中的变量会被删除；引用它们的请求会把占位符原样发出。
+    ja: 含まれる変数は削除されます。参照しているリクエストはプレースホルダーをそのまま送信します。
+  delete_env_ok:
+    en: Delete
+    zh-CN: 删除
+    ja: 削除
+  rename_placeholder:
+    en: Environment name
+    zh-CN: 环境名
+    ja: 環境名
+  activate:
+    en: Use this environment
+    zh-CN: 使用此环境
+    ja: この環境を使う
+  active_tag:
+    en: Active
+    zh-CN: 当前
+    ja: 使用中
+  import:
+    en: Import…
+    zh-CN: 导入…
+    ja: インポート…
+  export:
+    en: Export…
+    zh-CN: 导出…
+    ja: エクスポート…
+  import_tooltip:
+    en: Import a Postman environment or globals JSON file
+    zh-CN: 导入 Postman 的 environment / globals JSON 文件
+    ja: Postman の environment / globals JSON ファイルをインポート
+  export_tooltip:
+    en: Export as Postman environment JSON (secret values are written in plain text)
+    zh-CN: 导出为 Postman environment JSON（敏感值以明文写入）
+    ja: Postman environment JSON としてエクスポート（秘密の値は平文で書き込まれます）
+  imported:
+    en: "Variables imported: %{count}"
+    zh-CN: "已导入变量：%{count} 个"
+    ja: "インポートした変数：%{count} 件"
+  import_failed:
+    en: "Import failed: %{error}"
+    zh-CN: "导入失败：%{error}"
+    ja: "インポートに失敗しました：%{error}"
+  import_not_environment:
+    en: This file isn't a Postman environment or globals export
+    zh-CN: 这不是 Postman 的 environment / globals 导出文件
+    ja: Postman の environment / globals のエクスポートファイルではありません
+  import_invalid_json:
+    en: "The file isn't valid JSON: %{detail}"
+    zh-CN: "文件不是合法的 JSON：%{detail}"
+    ja: "ファイルが正しい JSON ではありません：%{detail}"
+  exported:
+    en: "Exported to %{path} (secret values were written in plain text)"
+    zh-CN: "已导出到 %{path}（敏感值以明文写入）"
+    ja: "%{path} にエクスポートしました（秘密の値は平文で書き込まれています）"
+  export_failed:
+    en: "Export failed: %{error}"
+    zh-CN: "导出失败：%{error}"
+    ja: "エクスポートに失敗しました：%{error}"
+  table_aria:
+    en: Variables table
+    zh-CN: 变量表
+    ja: 変数テーブル
 
 sidebar:
   rail_aria:
@@ -256,6 +376,10 @@ sidebar:
       en: Dissolve Category
       zh-CN: 解散分类
       ja: カテゴリを解除
+    menu_group_vars:
+      en: Category Variables…
+      zh-CN: 分类变量…
+      ja: カテゴリの変数…
   templates:
     title:
       en: Templates
@@ -352,6 +476,20 @@ tab:
     zh-CN: 请求标签栏
     ja: リクエストタブバー
 
+env_switcher:
+  none:
+    en: No environment
+    zh-CN: 无环境
+    ja: 環境なし
+  aria:
+    en: "Environment: %{name}"
+    zh-CN: "环境：%{name}"
+    ja: "環境：%{name}"
+  manage:
+    en: Manage variables…
+    zh-CN: 管理变量…
+    ja: 変数を管理…
+
 url_bar:
   placeholder:
     en: "Enter a request URL, e.g. https://api.example.com/users/{id}"
@@ -405,6 +543,10 @@ url_bar:
     en: HTTP/3 (not supported yet)
     zh-CN: HTTP/3（暂不支持）
     ja: HTTP/3（未対応）
+  unresolved_vars:
+    en: "Undefined variables: %{names}"
+    zh-CN: "未定义变量：%{names}"
+    ja: "未定義の変数：%{names}"
 
 request:
   path_params:
@@ -467,6 +609,10 @@ request:
     en: Overridden by a header in this request
     zh-CN: 已被本请求的同名 Header 覆盖
     ja: このリクエストの同名ヘッダーで上書きされています
+  section_ops:
+    en: Pre/Post
+    zh-CN: 前后置
+    ja: 前後処理
 
 kv:
   param_key:
@@ -481,6 +627,10 @@ kv:
     en: Field
     zh-CN: 字段名
     ja: フィールド名
+  variable_key:
+    en: Variable
+    zh-CN: 变量名
+    ja: 変数名
   value:
     en: Value
     zh-CN: 值
@@ -517,6 +667,206 @@ kv:
     en: "The URL has no {name}-style path parameters"
     zh-CN: "URL 中没有 {name} 形式的 Path 参数"
     ja: "URL に {name} 形式のパスパラメータはありません"
+  secret_on:
+    en: "Unmark as secret (store and show in plain text)"
+    zh-CN: "取消敏感标记（明文显示）"
+    ja: "秘密の値の設定を解除（平文で表示されます）"
+  secret_off:
+    en: "Mark as secret (mask the value)"
+    zh-CN: "标记为敏感值（掩码显示）"
+    ja: "秘密の値として設定（マスク表示）"
+  builtin_name_hint:
+    en: "Names starting with $ are built-in dynamic variables and can’t be overridden"
+    zh-CN: "以 $ 开头的是内置动态变量，不能被覆盖"
+    ja: "$ で始まる名前は組み込みの動的変数で、上書きできません"
+
+# 前后置操作表与结果
+ops:
+  pre_title:
+    en: Before sending
+    zh-CN: 发送前
+    ja: 送信前
+  post_title:
+    en: After response
+    zh-CN: 响应后
+    ja: レスポンス後
+  pre_hint:
+    en: Set variables before the request goes out. Values may use {{var}} and {{$timestamp}}.
+    zh-CN: 发送前设置变量；值里可以写 {{var}} 与 {{$timestamp}}。
+    ja: 送信前に変数を設定します。値には {{var}} や {{$timestamp}} を使えます。
+  post_hint:
+    en: Extract values from the response into variables, or assert on it. Expected values are resolved when sending.
+    zh-CN: 从响应提取值到变量，或做断言；期望值在发送时替换。
+    ja: レスポンスから値を変数に取り出す、または検証します。期待値は送信時に展開されます。
+  kind_extract_json:
+    en: Extract JSON path
+    zh-CN: 提取 JSON 路径
+    ja: JSON パスを抽出
+  kind_extract_header:
+    en: Extract header
+    zh-CN: 提取响应头
+    ja: ヘッダーを抽出
+  kind_extract_status:
+    en: Extract status code
+    zh-CN: 提取状态码
+    ja: ステータスコードを抽出
+  kind_assert_status:
+    en: Assert status code
+    zh-CN: 断言状态码
+    ja: ステータスコードを検証
+  kind_assert_header:
+    en: Assert header
+    zh-CN: 断言响应头
+    ja: ヘッダーを検証
+  kind_assert_json:
+    en: Assert JSON path
+    zh-CN: 断言 JSON 路径
+    ja: JSON パスを検証
+  scope_global:
+    en: Global
+    zh-CN: 全局
+    ja: グローバル
+  scope_environment:
+    en: Environment
+    zh-CN: 当前环境
+    ja: 現在の環境
+  scope_group:
+    en: Category
+    zh-CN: 当前分类
+    ja: 現在のカテゴリ
+  op_equals:
+    en: equals
+    zh-CN: 等于
+    ja: 等しい
+  op_not_equals:
+    en: not equals
+    zh-CN: 不等于
+    ja: 等しくない
+  op_contains:
+    en: contains
+    zh-CN: 包含
+    ja: 含む
+  op_exists:
+    en: exists
+    zh-CN: 存在
+    ja: 存在する
+  path_placeholder:
+    en: "JSON path, e.g. $.data.token"
+    zh-CN: "JSON 路径，例如 $.data.token"
+    ja: "JSON パス（例：$.data.token）"
+  header_placeholder:
+    en: Header name
+    zh-CN: 响应头名
+    ja: ヘッダー名
+  variable_placeholder:
+    en: Variable name
+    zh-CN: 变量名
+    ja: 変数名
+  expected_placeholder:
+    en: Expected value
+    zh-CN: 期望值
+    ja: 期待値
+  value_placeholder:
+    en: Value
+    zh-CN: 值
+    ja: 値
+  kind_aria:
+    en: Operation type
+    zh-CN: 操作类型
+    ja: 操作の種類
+  scope_aria:
+    en: Variable scope
+    zh-CN: 变量作用域
+    ja: 変数のスコープ
+  assert_op_aria:
+    en: Comparison
+    zh-CN: 比较方式
+    ja: 比較方法
+  # 结果页
+  section_title:
+    en: "Operations %{passed}/%{total}"
+    zh-CN: "操作 %{passed}/%{total}"
+    ja: "操作 %{passed}/%{total}"
+  result_passed:
+    en: Passed
+    zh-CN: 通过
+    ja: 成功
+  result_failed:
+    en: Failed
+    zh-CN: 失败
+    ja: 失敗
+  result_skipped:
+    en: Skipped
+    zh-CN: 跳过
+    ja: スキップ
+  extracted_line:
+    en: "%{key} = %{value}"
+    zh-CN: "%{key} = %{value}"
+    ja: "%{key} = %{value}"
+  set_line:
+    en: "Set %{scope} variable %{key}"
+    zh-CN: "设置%{scope}变量 %{key}"
+    ja: "%{scope}変数 %{key} を設定"
+  skip_no_environment:
+    en: No active environment
+    zh-CN: 没有激活的环境
+    ja: 有効な環境がありません
+  skip_request_failed:
+    en: Request failed, not run
+    zh-CN: 请求失败，未执行
+    ja: リクエストが失敗したため実行されませんでした
+  skip_no_group:
+    en: This request is not in a category
+    zh-CN: 这条请求不属于任何分类
+    ja: このリクエストはカテゴリに属していません
+  fail_empty_key:
+    en: Variable name is empty
+    zh-CN: 变量名为空
+    ja: 変数名が空です
+  fail_invalid_key:
+    en: "“%{key}” can’t be used as a variable name (no braces or line breaks, not starting with $)"
+    zh-CN: "「%{key}」不能用作变量名（不能含花括号或换行，不能以 $ 开头）"
+    ja: "「%{key}」は変数名に使えません（波括弧や改行を含まず、$ で始まらないこと）"
+  fail_empty_header:
+    en: Header name is empty
+    zh-CN: 响应头名为空
+    ja: ヘッダー名が空です
+  fail_empty_path:
+    en: JSON path is empty
+    zh-CN: JSON 路径为空
+    ja: JSON パスが空です
+  fail_body_unavailable:
+    en: Response body was written to disk; JSON path is unavailable
+    zh-CN: 响应体已落盘，无法解析 JSON 路径
+    ja: レスポンスボディはディスクに保存されたため、JSON パスを解析できません
+  fail_body_too_large:
+    en: "Response body exceeds %{size}; JSON path skipped"
+    zh-CN: "响应体超过 %{size}，未解析 JSON 路径"
+    ja: "レスポンスボディが %{size} を超えたため、JSON パスを解析しませんでした"
+  fail_not_json:
+    en: Response body is not JSON
+    zh-CN: 响应体不是 JSON
+    ja: レスポンスボディが JSON ではありません
+  fail_path_not_found:
+    en: "Path not found: %{path}"
+    zh-CN: "路径不存在：%{path}"
+    ja: "パスが見つかりません：%{path}"
+  fail_header_not_found:
+    en: "Header not found: %{name}"
+    zh-CN: "响应头不存在：%{name}"
+    ja: "ヘッダーが見つかりません：%{name}"
+  fail_mismatch:
+    en: "Expected %{expected}, got %{actual}"
+    zh-CN: "期望 %{expected}，实际 %{actual}"
+    ja: "期待値 %{expected}、実際 %{actual}"
+  fail_unexpected:
+    en: "Value is %{actual}, which should not equal it"
+    zh-CN: "实际值 %{actual}，不应相等"
+    ja: "実際の値 %{actual} は等しくないはずでした"
+  fail_missing:
+    en: Not present
+    zh-CN: 不存在
+    ja: 存在しません
 
 response:
   idle_prefix:
@@ -915,9 +1265,9 @@ dialog:
       zh-CN: "解散分类「%{name}」？"
       ja: "カテゴリ「%{name}」を解除しますか？"
     body:
-      en: Its requests move back to Uncategorized. No request is deleted.
-      zh-CN: 该分类下的请求会回到未分类，不会删除任何请求。
-      ja: このカテゴリのリクエストは未分類に戻ります。リクエストは削除されません。
+      en: Its requests move back to Uncategorized and its category variables are deleted. No request is deleted.
+      zh-CN: 该分类下的请求会回到未分类，分类变量会被删除；不会删除任何请求。
+      ja: このカテゴリのリクエストは未分類に戻り、カテゴリの変数は削除されます。リクエストは削除されません。
     ok:
       en: Dissolve
       zh-CN: 解散

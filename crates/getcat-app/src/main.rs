@@ -137,6 +137,15 @@ fn main() {
                     install(cx, opened);
                     // 设置在开窗前生效：HTTP client、编辑器字号与界面语言都要在第一帧就是用户的值
                     settings::install(cx, loaded.settings.take());
+                    // 变量在开窗前装好：首帧的环境切换器与第一次发送都要读它
+                    // variables.json 在但读不出来（例如权限问题）时只改内存，免得覆盖用户的环境与 secret
+                    let persist = state::store::store(cx).is_none_or(|store| {
+                        state::variables::should_persist(
+                            &store.layout().variables_path(),
+                            &loaded.errors,
+                        )
+                    });
+                    state::variables::install(cx, loaded.variables.take(), persist);
                     // 更新器在开窗前安装：Workspace 构造时要订阅它
                     update::install(cx);
                     #[cfg(target_os = "linux")]

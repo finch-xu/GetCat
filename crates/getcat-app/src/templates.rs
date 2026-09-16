@@ -91,6 +91,8 @@ impl RequestTemplate {
                 format: RawFormat::Json,
                 text: self.body.to_string(),
             },
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
         }
     }
 

@@ -4,6 +4,7 @@ pub mod body_view;
 pub mod code_sheet;
 pub mod curl_sheet;
 pub mod kv_table;
+pub mod ops_table;
 pub mod request_pane;
 pub mod response_pane;
 pub mod selectable_lines;
@@ -13,6 +14,7 @@ pub mod tab_strip;
 pub mod text;
 pub mod tool_rail;
 pub mod url_bar;
+pub mod variables_sheet;
 
 use std::time::Duration;
 

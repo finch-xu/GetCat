@@ -74,7 +74,11 @@ impl RequestTab {
                     .child(
                         Tab::new()
                             .label(label("Body", usize::from(self.body_mode != BodyMode::None))),
-                    ),
+                    )
+                    .child(Tab::new().label(label(
+                        &tr!("request.section_ops"),
+                        self.pre_ops.read(cx).count(cx) + self.post_ops.read(cx).count(cx),
+                    ))),
             )
             .child(
                 div()
@@ -100,6 +104,13 @@ impl RequestTab {
                             .child(self.headers.clone())
                             .into_any_element(),
                         RequestSection::Body => self.render_body_section(cx),
+                        RequestSection::Ops => v_flex()
+                            .gap_3()
+                            .child(section_label(tr!("ops.pre_title"), cx))
+                            .child(self.pre_ops.clone())
+                            .child(section_label(tr!("ops.post_title"), cx))
+                            .child(self.post_ops.clone())
+                            .into_any_element(),
                     }),
             )
     }

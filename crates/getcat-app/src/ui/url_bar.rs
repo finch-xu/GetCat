@@ -17,7 +17,7 @@ use getcat_core::model::HttpVersionPref;
 use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
 use crate::ui::method_color;
-use crate::ui::text::prepare_error_line;
+use crate::ui::text::{prepare_error_line, unresolved_vars_line};
 use crate::{DuplicateTab, SaveRequest};
 
 /// 收起来显示在输入框里的短标签。协议名照写，只有 `Auto` 需要本地化。
@@ -183,6 +183,14 @@ impl RequestTab {
                         .text_xs()
                         .text_color(cx.theme().danger)
                         .child(prepare_error_line(err)),
+                )
+            })
+            .when(!self.unresolved_vars.is_empty(), |v| {
+                v.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().warning)
+                        .child(unresolved_vars_line(&self.unresolved_vars)),
                 )
             })
     }

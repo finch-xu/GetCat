@@ -1,5 +1,6 @@
 //! 一个请求 Tab 的全部状态：输入组件实体、响应状态、视图选择。
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -7,11 +8,12 @@ use std::time::{Duration, Instant};
 use getcat_core::body::pretty::{is_valid_json, pretty_json};
 use getcat_core::body::tier::{ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
-use getcat_core::http::{self, BodyStore, HttpResponse, RequestError, guess_content_type};
+use getcat_core::http::{self, HttpResponse, RequestError, guess_content_type};
 use getcat_core::model::{
-    BodyKind, HttpVersionPref, Method, RawFormat, RequestDraft, SplitDirection, TabDraft, TabId,
-    Ulid,
+    BodyKind, HttpVersionPref, Method, PostOp, PreOp, RawFormat, RequestDraft, SplitDirection,
+    TabDraft, TabId, Ulid,
 };
+use getcat_core::ops::{self, OpOutcome};
 use getcat_core::url::extract_path_params;
 // 显式导入而非 `use gpui_kit::*`：本文件内 `#[cfg(test)] mod tests { use super::*; #[test] .. }`
 // 若通过通配符引入 `gpui_kit::test`（gpui 重导出的 `#[proc_macro_attribute]`），会与标准库的
@@ -31,10 +33,14 @@ use tokio::sync::mpsc;
 
 use crate::bridge;
 use crate::i18n::{Locale, tr};
-use crate::state::response::{CancelFlag, ResponseState, ResponseView, SseLive, prepare_guarded};
+use crate::state::response::{
+    CancelFlag, OpsReport, Prepared, ResponseState, ResponseView, SseLive, prepare_guarded,
+};
 use crate::state::settings;
 use crate::state::store::store;
+use crate::state::variables;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
+use crate::ui::ops_table::{OpsMode, OpsTable, OpsTableEvent};
 use crate::ui::selectable_lines::LinesSelection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,13 +48,15 @@ pub enum RequestSection {
     Params,
     Headers,
     Body,
+    Ops,
 }
 
 impl RequestSection {
-    pub const ALL: [RequestSection; 3] = [
+    pub const ALL: [RequestSection; 4] = [
         RequestSection::Params,
         RequestSection::Headers,
         RequestSection::Body,
+        RequestSection::Ops,
     ];
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|s| *s == self).unwrap_or(0)
@@ -63,15 +71,20 @@ pub enum ResponseSection {
     Body,
     Headers,
     Certificate,
+    Ops,
 }
 
 impl ResponseSection {
     /// 当前能看到的页签。证书页签只在真拿到了对端证书时出现——http 请求、
-    /// 以及打开校验后握手失败的 https 请求都没有证书可看。
-    pub fn visible(has_certificate: bool) -> Vec<ResponseSection> {
+    /// 以及打开校验后握手失败的 https 请求都没有证书可看；「操作」页签只在这次响应挂了
+    /// 前后置操作报告时出现（两边都没有启用的操作时不出现）。
+    pub fn visible(has_certificate: bool, has_ops: bool) -> Vec<ResponseSection> {
         let mut sections = vec![ResponseSection::Body, ResponseSection::Headers];
         if has_certificate {
             sections.push(ResponseSection::Certificate);
+        }
+        if has_ops {
+            sections.push(ResponseSection::Ops);
         }
         sections
     }
@@ -249,6 +262,10 @@ pub struct RequestTab {
     pub saved_id: Option<Ulid>,
     /// 已保存请求的名字：有则作为 Tab 标题。
     pub saved_name: Option<SharedString>,
+    /// 对应已保存请求的分类（分类级变量按它取）；未保存 / 未分类为 None。
+    /// 缓存在 Tab 上是因为 ⌘⏎ 的 listener 在 `Workspace::update` 内部 `update` 本实体，
+    /// 这里没法回读 Workspace（重入会 panic）。同步点与 `saved_name` 相同。
+    pub saved_group: Option<String>,
     /// 自上次保存以来是否有改动；Tab 标题前显示圆点。
     pub dirty: bool,
     pub method: Entity<SelectState<Vec<&'static str>>>,
@@ -256,6 +273,18 @@ pub struct RequestTab {
     /// 发送前校验失败的错误（URL 非法 / Header 非法 / 未选文件），显示在 URL 栏下方（spec §11）；
     /// 存错误本身，渲染时按当前语言翻译。
     pub prepare_error: Option<RequestError>,
+    /// 上一次发送时没能解析的变量名（URL 栏下方 warning）；每次发送重算，与 `prepare_error`
+    /// 同步清空（改 URL、载入草稿）。
+    pub unresolved_vars: BTreeSet<String>,
+    /// 前置 / 后置操作表：与 [`crate::ui::ops_table::OpsTable`] 一一对应的子实体。
+    pub pre_ops: Entity<OpsTable>,
+    pub post_ops: Entity<OpsTable>,
+    /// 本次发送的前置结果，等响应到达后并进 `Done.ops` / `Failed.ops`。
+    pre_results: Vec<(PreOp, OpOutcome)>,
+    /// 本次发送的后置操作快照（期望值已替换）：请求失败时 `apply_outcome` 据它把每条
+    /// 标成「请求失败，未执行」。生命周期与 `pre_results` 相同（send 写入，apply_outcome /
+    /// cancel / clear_response 清掉）。
+    sent_post_ops: Vec<PostOp>,
     pub path_params: Entity<KvTable>,
     pub params: Entity<KvTable>,
     pub headers: Entity<KvTable>,
@@ -312,6 +341,8 @@ impl RequestTab {
         let form = cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx));
         let form_data =
             cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true));
+        let pre_ops = cx.new(|cx| OpsTable::new(OpsMode::Pre, window, cx));
+        let post_ops = cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx));
 
         // 换行是全局偏好：新建的 Tab 直接按当前设置建，不必等第一次 render 去纠正
         let wrap = wrap_prefs(cx);
@@ -371,6 +402,12 @@ impl RequestTab {
             cx.subscribe_in(&form_data, window, |this, _, _: &KvTableEvent, _, cx| {
                 this.mark_dirty(cx)
             }),
+            cx.subscribe_in(&pre_ops, window, |this, _, _: &OpsTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
+            cx.subscribe_in(&post_ops, window, |this, _, _: &OpsTableEvent, _, cx| {
+                this.mark_dirty(cx)
+            }),
         ];
         for (_, editor) in &body_editors {
             subs.push(cx.subscribe_in(editor, window, Self::on_body_editor_event));
@@ -387,10 +424,16 @@ impl RequestTab {
             id,
             saved_id: None,
             saved_name: None,
+            saved_group: None,
             dirty: false,
             method,
             url,
             prepare_error: None,
+            unresolved_vars: BTreeSet::new(),
+            pre_ops,
+            post_ops,
+            pre_results: Vec::new(),
+            sent_post_ops: Vec::new(),
             path_params,
             params,
             headers,
@@ -434,7 +477,9 @@ impl RequestTab {
                 let names = extract_path_params(&self.url.read(cx).value());
                 self.path_params
                     .update(cx, |t, cx| t.sync_keys(&names, window, cx));
+                // 上一次发送的校验错误与未定义变量提示都描述旧 URL，一起清掉
                 self.prepare_error = None;
+                self.unresolved_vars.clear();
                 self.mark_dirty(cx);
             }
             InputEvent::PressEnter { .. } => self.send(window, cx),
@@ -590,6 +635,8 @@ impl RequestTab {
             params: self.params.read(cx).values(cx),
             headers: self.headers.read(cx).values(cx),
             body,
+            pre_ops: self.pre_ops.read(cx).pre_ops(cx),
+            post_ops: self.post_ops.read(cx).post_ops(cx),
         }
     }
 
@@ -778,7 +825,12 @@ impl RequestTab {
                 }
             }
         }
+        self.pre_ops
+            .update(cx, |t, cx| t.set_pre_ops(&draft.pre_ops, window, cx));
+        self.post_ops
+            .update(cx, |t, cx| t.set_post_ops(&draft.post_ops, window, cx));
         self.prepare_error = None;
+        self.unresolved_vars.clear();
         self.refresh_body_hint(cx);
         cx.notify();
     }
@@ -807,15 +859,30 @@ impl RequestTab {
         if self.response.is_in_flight() {
             return;
         }
-        let draft = self.draft(cx);
+        // 前置操作在变量表副本上执行，再按副本替换（按值交出 draft() 刚拷出来的快照，
+        // 替换后直接复用，不再多克隆一次 body）
+        let prepared = variables::prepare_send(cx, self.saved_group.as_deref(), self.draft(cx));
+        self.unresolved_vars = prepared.resolved.unresolved;
+        let mut draft = prepared.resolved.draft;
         let req = match http::prepare(&draft) {
             Ok(r) => r,
             Err(e) => {
+                // 请求发不出去：丢掉副本，前置操作的写入不进全局、不落盘（反复点发送也不会反复写）
+                self.pre_results.clear();
+                self.sent_post_ops.clear();
                 self.prepare_error = Some(e);
                 cx.notify();
                 return;
             }
         };
+        // 请求确定会发出：提交前置操作的写入（值没变时 update 不写盘）
+        if let Some(next) = prepared.next {
+            variables::update(cx, |sets| *sets = next);
+        }
+        self.pre_results = prepared.pre_results;
+        // 断言的期望值在上面已经替换完：一份随完成任务进后台执行，一份留给请求失败时标记「未执行」
+        let post_ops: Vec<PostOp> = std::mem::take(&mut draft.post_ops);
+        self.sent_post_ops = post_ops.clone();
         self.prepare_error = None;
         self.notice = None;
         self.generation += 1;
@@ -905,7 +972,9 @@ impl RequestTab {
                     // prepare_guarded 把后台 panic 转成 Err（spec §11），取消仍是 None
                     let guarded = cx
                         .background_spawn(async move {
-                            prepare_guarded(meta, body, || cancelled.load(Ordering::Relaxed))
+                            prepare_guarded(meta, body, post_ops, || {
+                                cancelled.load(Ordering::Relaxed)
+                            })
                         })
                         .await;
                     match guarded {
@@ -937,15 +1006,18 @@ impl RequestTab {
     pub(crate) fn apply_outcome(
         &mut self,
         generation: u64,
-        outcome: Result<(BodyStore, ResponseView), RequestError>,
+        outcome: Result<Prepared, RequestError>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.generation != generation {
             return;
         }
+        // 本次发送的前置结果与后置快照：无论成败都在这里取走
+        let pre = std::mem::take(&mut self.pre_results);
+        let sent_post_ops = std::mem::take(&mut self.sent_post_ops);
         match outcome {
-            Ok((body, mut view)) => {
+            Ok((body, mut view, report)) => {
                 // TTFT（首个内容 delta 的时刻）只有在途解析才知道：从被替换掉的
                 // InFlight 状态里合并进 Done 视图。
                 if let Some(sse) = view.sse.as_mut()
@@ -967,11 +1039,33 @@ impl RequestTab {
                 self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
                 // reset 让列表按新响应的行数重建，滚动位置一并回到顶部
                 self.headers_list.reset(view.header_rows.len());
-                self.response = ResponseState::Done { body, view };
+                let mut report = report;
+                if let Some(report) = report.as_mut() {
+                    // generation 已在函数开头校验：过期回调不会走到这里，提取值也就不会写盘。
+                    // 必须在组装 OpsReport 之前调：写不进去的提取行在这里才被改写为「跳过」。
+                    // 分类取响应到达时的 saved_group 是有意的：分类改名 / 解散会同步 Tab 的
+                    // saved_group，发送时的旧名可能已经不存在了
+                    variables::apply_extracted(cx, self.saved_group.as_deref(), report);
+                }
+                let ops = (!pre.is_empty() || report.is_some()).then(|| OpsReport {
+                    pre,
+                    post: report.unwrap_or_default(),
+                });
+                self.response = ResponseState::Done { body, view, ops };
                 self.response_section = ResponseSection::Body;
                 self.sync_lines_selection(window, cx);
             }
-            Err(error) => self.response = ResponseState::Failed { error },
+            Err(error) => {
+                // 取消是用户主动放弃，结果丢弃；其余失败（网络错误、后台处理异常）保留前置结果
+                // （写入已在发送时提交），后置操作一律记为「请求失败，未执行」（spec 前后置操作 · 限制）
+                let ops = if matches!(error, RequestError::Cancelled) {
+                    None
+                } else {
+                    let post = ops::skip_all(&sent_post_ops);
+                    (!pre.is_empty() || !post.results.is_empty()).then_some(OpsReport { pre, post })
+                };
+                self.response = ResponseState::Failed { error, ops };
+            }
         }
         cx.notify();
     }
@@ -982,8 +1076,12 @@ impl RequestTab {
             return;
         }
         self.generation += 1;
+        self.pre_results.clear();
+        self.sent_post_ops.clear();
+        // 取消是用户主动放弃：前后置结果一并丢弃（spec 前后置操作 · 限制）
         self.response = ResponseState::Failed {
             error: RequestError::Cancelled,
+            ops: None,
         };
         cx.notify();
     }
@@ -1002,12 +1100,17 @@ impl RequestTab {
         // 先把号改掉，换 response 时被 drop 的任务就再也写不回来了
         self.generation += 1;
         self.response = ResponseState::Idle;
+        // 在途请求的前置结果与后置快照随它一起作废（完成回调已因 generation 失效，不会再来取）
+        self.pre_results.clear();
+        self.sent_post_ops.clear();
         // 编辑器是常驻实体，不随 response 一起 drop。留着上一条响应的文本，
         // 下一条非 A 档响应到来时 apply_outcome 不会覆写它，残留内容会在 ⌘F 里冒出来
         for (_, editor) in &self.response_editors {
             editor.update(cx, |e, cx| e.set_value("", window, cx));
         }
         self.notice = None;
+        // 未解析变量提示挂在这次响应上（发送时算的），响应被清空后一起清掉
+        self.unresolved_vars.clear();
         // 「证书」页签在 Idle 下不再出现，停在那一页会落到空态分支
         self.response_section = ResponseSection::Body;
         self.body_scroll.scroll_to_item(0, ScrollStrategy::Top);
@@ -1073,7 +1176,7 @@ impl RequestTab {
     /// "保存到文件"：弹系统保存对话框（从上次保存的目录打开），选中后在 tokio 上原子写入 / 拷贝，
     /// 完成后在工具栏显示结果并记住目录。
     pub fn save_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let ResponseState::Done { body, view } = &self.response else {
+        let ResponseState::Done { body, view, .. } = &self.response else {
             return;
         };
         let body = body.clone();
@@ -1168,7 +1271,7 @@ impl RequestTab {
                 }
             }),
             ResponseSection::Headers => Some(CopyTarget::Headers),
-            ResponseSection::Certificate => None,
+            ResponseSection::Certificate | ResponseSection::Ops => None,
         }
     }
 
@@ -1213,6 +1316,14 @@ impl RequestTab {
     pub fn toggle_response_wrap(&mut self, cx: &mut Context<Self>) {
         settings::update(cx, |s| s.wrap_response_body = !s.wrap_response_body);
         cx.notify();
+    }
+
+    /// 当前响应上的前后置操作报告（Done 与 Failed 都可能有；Idle / InFlight / 取消没有）。
+    pub fn ops_report(&self) -> Option<&OpsReport> {
+        match &self.response {
+            ResponseState::Done { ops, .. } | ResponseState::Failed { ops, .. } => ops.as_ref(),
+            _ => None,
+        }
     }
 
     /// 响应体当前这一档是否支持换行：只有 A 档的只读 Editor 支持。

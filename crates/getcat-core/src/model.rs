@@ -1,10 +1,11 @@
 //! 领域模型：描述"一个具体的请求实例"与"一次响应的元数据"。
 
-use std::{path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
 use crate::tls::CertificateInfo;
+use crate::vars::VarContext;
 
 /// 已保存请求与 Tab 的标识；26 字符 Crockford Base32 字符串落盘。ulid 3.0 的构造函数是 `Ulid::generate()`。
 pub use ulid::Ulid;
@@ -223,6 +224,290 @@ pub enum BodyKind {
     },
 }
 
+/// 一个变量：全局 / 分类 / 环境三层共用这一个形状（spec「变量与替换」）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Variable {
+    /// 缺字段按空串读（空 key 不参与替换），免得一行坏数据让整个 variables.json 被隔离。
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 敏感值：界面掩码显示；仍明文落盘（数据目录文件固定 0600）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+    /// 备注，不参与替换；空串不落盘。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+impl Variable {
+    pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+            secret: false,
+            description: String::new(),
+        }
+    }
+}
+
+/// 一个环境（开发 / 测试 / 生产 …）；同一时间只有一个激活。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Environment {
+    /// 缺字段时生成新 id（与 `name` 的默认值一样，是为了不让一个坏条目隔离整个 variables.json）。
+    #[serde(default = "Ulid::generate")]
+    pub id: Ulid,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub variables: Vec<Variable>,
+}
+
+impl Environment {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            id: Ulid::generate(),
+            name: name.into(),
+            variables: Vec::new(),
+        }
+    }
+}
+
+/// 变量的作用域；`ALL` 的顺序就是界面上下拉框的顺序。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VarScope {
+    Global,
+    Environment,
+    Group,
+}
+
+impl VarScope {
+    pub const ALL: [VarScope; 3] = [VarScope::Global, VarScope::Environment, VarScope::Group];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|s| *s == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(VarScope::Global)
+    }
+}
+
+/// 全部变量（`variables.json`）：全局一层、若干环境、按分类名挂的分类变量。
+///
+/// 分类目前没有实体（由已保存请求的 `group` 反推），所以这里按名字挂；
+/// 分类改名 / 解散时由 app 层调 [`Self::rename_group`] / [`Self::remove_group`] 联动。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct VariableSets {
+    #[serde(default)]
+    pub globals: Vec<Variable>,
+    #[serde(default)]
+    pub environments: Vec<Environment>,
+    #[serde(default)]
+    pub active_environment: Option<Ulid>,
+    #[serde(default)]
+    pub groups: BTreeMap<String, Vec<Variable>>,
+}
+
+impl VariableSets {
+    pub fn active_env(&self) -> Option<&Environment> {
+        let id = self.active_environment?;
+        self.environments.iter().find(|e| e.id == id)
+    }
+
+    pub fn active_env_mut(&mut self) -> Option<&mut Environment> {
+        let id = self.active_environment?;
+        self.environments.iter_mut().find(|e| e.id == id)
+    }
+
+    /// 某个分类的变量；未分类 / 分类没有变量时是空切片。
+    pub fn group_vars(&self, group: Option<&str>) -> &[Variable] {
+        group
+            .and_then(|g| self.groups.get(g))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// 替换用的三层上下文：全局 + 该分类 + 激活环境（没激活时环境层为空）。
+    pub fn context(&self, group: Option<&str>) -> VarContext<'_> {
+        let env = self
+            .active_env()
+            .map(|e| e.variables.as_slice())
+            .unwrap_or(&[]);
+        VarContext::new(&self.globals, self.group_vars(group), env)
+    }
+
+    /// 某个作用域的可写变量表；作用域不可用（没激活环境 / 请求未分类）时为 None。
+    pub fn scope_vars_mut(
+        &mut self,
+        scope: VarScope,
+        group: Option<&str>,
+    ) -> Option<&mut Vec<Variable>> {
+        match scope {
+            VarScope::Global => Some(&mut self.globals),
+            VarScope::Environment => self.active_env_mut().map(|e| &mut e.variables),
+            VarScope::Group => group.map(|g| self.groups.entry(g.to_string()).or_default()),
+        }
+    }
+
+    /// 写一个变量，写到替换真正会读的那一行（`VarContext` 读同层第一条**启用**的同名行）：
+    /// - 有启用的同名行：改第一条启用行的值；
+    /// - 只有禁用的同名行：改第一条的值并把它重新启用；
+    /// - 都没有：追加。
+    ///
+    /// 改值时保留 secret / description。返回 false 表示作用域不可用，什么都没写。
+    pub fn set_var(
+        &mut self,
+        scope: VarScope,
+        group: Option<&str>,
+        key: &str,
+        value: &str,
+    ) -> bool {
+        let Some(vars) = self.scope_vars_mut(scope, group) else {
+            return false;
+        };
+        let target = vars
+            .iter()
+            .position(|v| v.enabled && v.key == key)
+            .or_else(|| vars.iter().position(|v| v.key == key));
+        match target {
+            Some(ix) => {
+                let v = &mut vars[ix];
+                v.value = value.to_string();
+                v.enabled = true;
+            }
+            None => vars.push(Variable::new(key, value)),
+        }
+        true
+    }
+
+    /// 分类改名：变量跟着搬；目标已有变量时按 key 合并，目标优先。
+    pub fn rename_group(&mut self, from: &str, to: &str) {
+        if from == to {
+            return;
+        }
+        let Some(moved) = self.groups.remove(from) else {
+            return;
+        };
+        let target = self.groups.entry(to.to_string()).or_default();
+        for v in moved {
+            if !target.iter().any(|t| t.key == v.key) {
+                target.push(v);
+            }
+        }
+    }
+
+    pub fn remove_group(&mut self, name: &str) {
+        self.groups.remove(name);
+    }
+
+    /// 不与现有环境重名的名字：`base`、`base 2`、`base 3` …
+    pub fn unique_env_name(&self, base: &str) -> String {
+        let taken = |n: &str| self.environments.iter().any(|e| e.name == n);
+        if !taken(base) {
+            return base.to_string();
+        }
+        (2..)
+            .map(|i| format!("{base} {i}"))
+            .find(|n| !taken(n))
+            .expect("unbounded counter")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PreOpKind {
+    /// 把一个值写进变量；值本身先做 `{{}}` 替换，所以能写 `{{$timestamp}}`。
+    SetVariable {
+        scope: VarScope,
+        key: String,
+        #[serde(default)]
+        value: String,
+    },
+}
+
+/// 前置操作：发送前依次执行。与 [`PostOp`] 同形（`enabled` + 平铺的 `kind` tag），
+/// 落盘形如 `{"enabled":true,"kind":"set_variable","scope":"global","key":"a","value":"1"}`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreOp {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub kind: PreOpKind,
+}
+
+/// 后置操作读取响应的哪一部分。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResponseSource {
+    Status,
+    /// 响应头，名字不区分大小写；多值取第一个。
+    Header {
+        name: String,
+    },
+    /// JSON 路径子集 `a.b[0].c`，可带前导 `$.`。
+    JsonPath {
+        path: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssertOp {
+    Equals,
+    NotEquals,
+    Contains,
+    Exists,
+}
+
+impl AssertOp {
+    pub const ALL: [AssertOp; 4] = [
+        AssertOp::Equals,
+        AssertOp::NotEquals,
+        AssertOp::Contains,
+        AssertOp::Exists,
+    ];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|o| *o == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(AssertOp::Equals)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PostOpKind {
+    /// 把响应的一部分写进变量。
+    Extract {
+        scope: VarScope,
+        key: String,
+        source: ResponseSource,
+    },
+    /// 断言；`expected` 在发送时做 `{{}}` 替换。
+    Assert {
+        subject: ResponseSource,
+        op: AssertOp,
+        #[serde(default)]
+        expected: String,
+    },
+}
+
+/// 后置操作：响应完成后在后台线程执行。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostOp {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub kind: PostOpKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RequestDraft {
     pub method: Method,
@@ -236,6 +521,12 @@ pub struct RequestDraft {
     pub headers: Vec<KeyValue>,
     #[serde(default)]
     pub body: BodyKind,
+    /// 前置操作（发送前依次执行）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_ops: Vec<PreOp>,
+    /// 后置操作（响应完成后执行）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_ops: Vec<PostOp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -434,7 +725,7 @@ fn default_timeout_secs() -> u64 {
 fn default_max_redirects() -> u32 {
     10
 }
-fn default_true() -> bool {
+pub(crate) fn default_true() -> bool {
     true
 }
 
@@ -654,10 +945,128 @@ mod tests {
                 format: RawFormat::Json,
                 text: "{}".into(),
             },
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
         };
         let json = serde_json::to_string(&d).unwrap();
         let back: RequestDraft = serde_json::from_str(&json).unwrap();
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn ops_serde_round_trip_and_legacy_drafts_have_no_ops() {
+        let legacy: RequestDraft =
+            serde_json::from_str(r#"{"method":"GET","url":"https://x"}"#).unwrap();
+        assert!(legacy.pre_ops.is_empty() && legacy.post_ops.is_empty());
+
+        let d = RequestDraft {
+            pre_ops: vec![PreOp {
+                enabled: true,
+                kind: PreOpKind::SetVariable {
+                    scope: VarScope::Environment,
+                    key: "ts".into(),
+                    value: "{{$timestamp}}".into(),
+                },
+            }],
+            post_ops: vec![
+                PostOp {
+                    enabled: true,
+                    kind: PostOpKind::Extract {
+                        scope: VarScope::Global,
+                        key: "token".into(),
+                        source: ResponseSource::JsonPath {
+                            path: "$.data.token".into(),
+                        },
+                    },
+                },
+                PostOp {
+                    enabled: false,
+                    kind: PostOpKind::Assert {
+                        subject: ResponseSource::Status,
+                        op: AssertOp::Equals,
+                        expected: "200".into(),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""kind":"extract""#), "{json}");
+        assert!(json.contains(r#""kind":"json_path""#), "{json}");
+        assert!(json.contains(r#""op":"equals""#), "{json}");
+        let back: RequestDraft = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, d);
+        // 缺 enabled 时默认启用
+        let op: PostOp = serde_json::from_str(
+            r#"{"kind":"assert","subject":{"kind":"status"},"op":"exists","expected":""}"#,
+        )
+        .unwrap();
+        assert!(op.enabled);
+    }
+
+    /// 前置操作与后置操作同形：`enabled` + 平铺的 `kind` tag，以后加种类不用自定义反序列化。
+    #[test]
+    fn pre_op_is_kind_tagged_like_post_op() {
+        let op = PreOp {
+            enabled: true,
+            kind: PreOpKind::SetVariable {
+                scope: VarScope::Global,
+                key: "a".into(),
+                value: "1".into(),
+            },
+        };
+        let json = serde_json::to_string(&op).unwrap();
+        assert_eq!(
+            json,
+            r#"{"enabled":true,"kind":"set_variable","scope":"global","key":"a","value":"1"}"#
+        );
+        assert_eq!(serde_json::from_str::<PreOp>(&json).unwrap(), op);
+        // 缺 enabled 默认启用，缺 value 默认空串
+        let minimal: PreOp =
+            serde_json::from_str(r#"{"kind":"set_variable","scope":"group","key":"k"}"#).unwrap();
+        assert_eq!(
+            minimal,
+            PreOp {
+                enabled: true,
+                kind: PreOpKind::SetVariable {
+                    scope: VarScope::Group,
+                    key: "k".into(),
+                    value: String::new(),
+                },
+            }
+        );
+        // 没有 kind 的旧形态不再接受（尚未发布，不做兼容）
+        assert!(serde_json::from_str::<PreOp>(r#"{"scope":"global","key":"a"}"#).is_err());
+    }
+
+    #[test]
+    fn context_stacks_globals_group_and_active_environment() {
+        let env = Environment {
+            variables: vec![Variable::new("a", "env")],
+            ..Environment::new("dev")
+        };
+        let inactive = Environment {
+            variables: vec![Variable::new("a", "inactive")],
+            ..Environment::new("prod")
+        };
+        let mut sets = VariableSets {
+            globals: vec![Variable::new("a", "g"), Variable::new("b", "g")],
+            environments: vec![inactive, env.clone()],
+            active_environment: None,
+            groups: BTreeMap::from([("grp".to_string(), vec![Variable::new("b", "grp")])]),
+        };
+        let resolve = |sets: &VariableSets, group: Option<&str>| {
+            let ctx = sets.context(group);
+            crate::vars::Resolver::new(&ctx)
+                .resolve("{{a}}/{{b}}")
+                .into_owned()
+        };
+        // 没激活环境：环境层为空，未激活的环境不参与
+        assert_eq!(resolve(&sets, None), "g/g");
+        assert_eq!(resolve(&sets, Some("grp")), "g/grp");
+        sets.active_environment = Some(env.id);
+        assert_eq!(resolve(&sets, Some("grp")), "env/grp");
+        assert_eq!(resolve(&sets, Some("other")), "env/g");
     }
 
     #[test]
@@ -930,5 +1339,168 @@ mod tests {
                 content_type: None
             }
         );
+    }
+
+    #[test]
+    fn variable_defaults_and_serde_skip_empty_flags() {
+        let v: Variable = serde_json::from_str(r#"{"key":"a"}"#).unwrap();
+        assert_eq!(v.value, "");
+        assert!(v.enabled);
+        assert!(!v.secret);
+        let json = serde_json::to_string(&Variable::new("a", "b")).unwrap();
+        assert!(!json.contains("secret"), "{json}");
+        assert!(!json.contains("description"), "{json}");
+        let s = Variable {
+            secret: true,
+            ..Variable::new("t", "x")
+        };
+        let back: Variable = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn variable_sets_tolerate_missing_fields_and_round_trip() {
+        let empty: VariableSets = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, VariableSets::default());
+        let mut sets = VariableSets::default();
+        let env = Environment::new("dev");
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+        sets.globals.push(Variable::new("host", "h"));
+        sets.groups
+            .insert("订单".into(), vec![Variable::new("code", "418")]);
+        let back: VariableSets =
+            serde_json::from_str(&serde_json::to_string(&sets).unwrap()).unwrap();
+        assert_eq!(back, sets);
+        assert_eq!(back.active_env().map(|e| e.name.as_str()), Some("dev"));
+        assert_eq!(back.group_vars(Some("订单")).len(), 1);
+        assert!(back.group_vars(Some("nope")).is_empty());
+        assert!(back.group_vars(None).is_empty());
+    }
+
+    #[test]
+    fn set_var_updates_value_keeps_flags_and_reports_unavailable_scopes() {
+        let mut sets = VariableSets::default();
+        // 没有激活环境 / 没有分类：写不进去
+        assert!(!sets.set_var(VarScope::Environment, None, "k", "v"));
+        assert!(!sets.set_var(VarScope::Group, None, "k", "v"));
+        assert!(sets.set_var(VarScope::Global, None, "k", "v"));
+        assert_eq!(sets.globals, vec![Variable::new("k", "v")]);
+        // 已有的 key：只改值，secret / description 保留
+        sets.globals[0].secret = true;
+        sets.globals[0].description = "d".into();
+        assert!(sets.set_var(VarScope::Global, None, "k", "v2"));
+        assert_eq!(sets.globals.len(), 1);
+        assert_eq!(sets.globals[0].value, "v2");
+        assert!(sets.globals[0].secret);
+        assert_eq!(sets.globals[0].description, "d");
+        // 分类：按名字建条目
+        assert!(sets.set_var(VarScope::Group, Some("g"), "code", "1"));
+        assert_eq!(sets.group_vars(Some("g"))[0].value, "1");
+        // 环境：写进激活的那个
+        let env = Environment::new("dev");
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+        assert!(sets.set_var(VarScope::Environment, None, "token", "t"));
+        assert_eq!(sets.active_env().unwrap().variables[0].key, "token");
+    }
+
+    /// `set_var` 要写到替换真正会读的那一行：`VarContext` 读第一条**启用**的同名行。
+    #[test]
+    fn set_var_targets_the_row_substitution_reads() {
+        let off = |k: &str, v: &str| Variable {
+            enabled: false,
+            ..Variable::new(k, v)
+        };
+        // 禁用行在前、启用行在后：改启用行，禁用行不动
+        let mut sets = VariableSets {
+            globals: vec![off("k", "old-off"), Variable::new("k", "old-on")],
+            ..Default::default()
+        };
+        assert!(sets.set_var(VarScope::Global, None, "k", "new"));
+        assert_eq!(
+            sets.globals,
+            vec![off("k", "old-off"), Variable::new("k", "new")]
+        );
+        let ctx = sets.context(None);
+        assert_eq!(crate::vars::Resolver::new(&ctx).resolve("{{k}}"), "new");
+
+        // 只有禁用行：改第一条并重新启用，secret / description 保留
+        let mut sets = VariableSets {
+            globals: vec![
+                Variable {
+                    secret: true,
+                    description: "d".into(),
+                    ..off("k", "a")
+                },
+                off("k", "b"),
+            ],
+            ..Default::default()
+        };
+        assert!(sets.set_var(VarScope::Global, None, "k", "new"));
+        assert_eq!(
+            sets.globals,
+            vec![
+                Variable {
+                    secret: true,
+                    description: "d".into(),
+                    ..Variable::new("k", "new")
+                },
+                off("k", "b"),
+            ]
+        );
+        let ctx = sets.context(None);
+        assert_eq!(crate::vars::Resolver::new(&ctx).resolve("{{k}}"), "new");
+    }
+
+    /// 手改坏的 variables.json 里某个环境缺 id / name、某个变量缺 key，不该让整个文件被隔离。
+    #[test]
+    fn environment_and_variable_tolerate_missing_identity_fields() {
+        let sets: VariableSets =
+            serde_json::from_str(r#"{"environments":[{"variables":[]}]}"#).unwrap();
+        assert_eq!(sets.environments.len(), 1);
+        assert_eq!(sets.environments[0].name, "");
+        assert!(sets.environments[0].variables.is_empty());
+        let other: VariableSets =
+            serde_json::from_str(r#"{"environments":[{"variables":[]}]}"#).unwrap();
+        assert_ne!(
+            sets.environments[0].id, other.environments[0].id,
+            "缺 id 时每次生成新的"
+        );
+        let v: Variable = serde_json::from_str(r#"{"value":"x"}"#).unwrap();
+        assert_eq!(v.key, "");
+        assert_eq!(v.value, "x");
+    }
+
+    #[test]
+    fn rename_group_moves_and_merges_target_wins() {
+        let mut sets = VariableSets::default();
+        sets.groups.insert(
+            "a".into(),
+            vec![Variable::new("x", "from-a"), Variable::new("only_a", "1")],
+        );
+        sets.groups
+            .insert("b".into(), vec![Variable::new("x", "from-b")]);
+        sets.rename_group("a", "b");
+        assert!(!sets.groups.contains_key("a"));
+        let b = sets.group_vars(Some("b"));
+        assert_eq!(b.len(), 2);
+        assert_eq!(b.iter().find(|v| v.key == "x").unwrap().value, "from-b");
+        assert!(b.iter().any(|v| v.key == "only_a"));
+        // 目标不存在：整体搬过去
+        sets.rename_group("b", "c");
+        assert_eq!(sets.group_vars(Some("c")).len(), 2);
+        sets.remove_group("c");
+        assert!(sets.groups.is_empty());
+    }
+
+    #[test]
+    fn unique_env_name_appends_counter() {
+        let mut sets = VariableSets::default();
+        assert_eq!(sets.unique_env_name("dev"), "dev");
+        sets.environments.push(Environment::new("dev"));
+        assert_eq!(sets.unique_env_name("dev"), "dev 2");
+        sets.environments.push(Environment::new("dev 2"));
+        assert_eq!(sets.unique_env_name("dev"), "dev 3");
     }
 }

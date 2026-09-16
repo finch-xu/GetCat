@@ -2336,6 +2336,7 @@ dependencies = [
  "tracing",
  "ulid",
  "url",
+ "uuid",
  "wiremock",
  "x509-parser",
 ]

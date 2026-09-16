@@ -25,12 +25,18 @@ pub const ICON_WRAP_TEXT: &str = "icons/wrap-text.svg";
 pub const ICON_FILE_INPUT: &str = "icons/file-input.svg";
 /// 标签栏「多行展示」切换按钮的图标。
 pub const ICON_ROWS_3: &str = "icons/rows-3.svg";
+/// 变量表「标记为敏感值」按钮：未锁（可标记）状态。
+pub const ICON_LOCK_OPEN: &str = "icons/lock-open.svg";
+/// 变量表「标记为敏感值」按钮：已锁（已掩码）状态。
+pub const ICON_LOCK: &str = "icons/lock.svg";
+/// 右侧图标栏「变量」的图标（`{}` 呼应 `{{var}}` 占位符）。
+pub const ICON_BRACES: &str = "icons/braces.svg";
 
 /// 应用自带的资源表。上游 `gpui-component-assets` 没有的图标补在这里——
-/// 三个都取自 Lucide（ISC），与上游图标集同源，风格与 24px 网格自然一致。
+/// 都取自 Lucide（ISC），与上游图标集同源，风格与 24px 网格自然一致。
 ///
-/// 补图标而不是拿现成的凑：`wrap-text` / `file-input` / `rows-3` 各自都是一眼能认出
-/// 语义的标准图形，用意思相近的替代只会让按钮更难懂。
+/// 补图标而不是拿现成的凑：`wrap-text` / `file-input` / `rows-3` / `lock` / `lock-open` / `braces`
+/// 各自都是一眼能认出语义的标准图形，用意思相近的替代只会让按钮更难懂。
 const ASSETS: &[(&str, &[u8])] = &[
     (LOGO_PATH, LOGO_PNG),
     (
@@ -42,6 +48,12 @@ const ASSETS: &[(&str, &[u8])] = &[
         include_bytes!("../assets/icons/file-input.svg"),
     ),
     (ICON_ROWS_3, include_bytes!("../assets/icons/rows-3.svg")),
+    (
+        ICON_LOCK_OPEN,
+        include_bytes!("../assets/icons/lock-open.svg"),
+    ),
+    (ICON_LOCK, include_bytes!("../assets/icons/lock.svg")),
+    (ICON_BRACES, include_bytes!("../assets/icons/braces.svg")),
 ];
 
 pub struct AppAssets;
@@ -76,10 +88,17 @@ mod tests {
         assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
-    /// 补的三个图标要真的能取到，而且是 gpui 的 `svg()` 认得的 SVG。
+    /// 补的图标要真的能取到，而且是 gpui 的 `svg()` 认得的 SVG。
     #[test]
     fn app_icons_are_served_as_svg() {
-        for path in [ICON_WRAP_TEXT, ICON_FILE_INPUT, ICON_ROWS_3] {
+        for path in [
+            ICON_WRAP_TEXT,
+            ICON_FILE_INPUT,
+            ICON_ROWS_3,
+            ICON_LOCK_OPEN,
+            ICON_LOCK,
+            ICON_BRACES,
+        ] {
             let bytes = AppAssets
                 .load(path)
                 .unwrap()

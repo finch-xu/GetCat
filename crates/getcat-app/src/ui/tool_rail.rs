@@ -14,7 +14,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 
-use crate::assets::ICON_FILE_INPUT;
+use crate::assets::{ICON_BRACES, ICON_FILE_INPUT};
 use crate::i18n::tr;
 use crate::state::workspace::{ToolSection, Workspace};
 
@@ -23,6 +23,7 @@ impl ToolSection {
         match self {
             ToolSection::CodeGen => tr!("tools.code.title"),
             ToolSection::ImportCurl => tr!("tools.import_curl.title"),
+            ToolSection::Variables => tr!("tools.variables.title"),
         }
     }
 
@@ -31,6 +32,7 @@ impl ToolSection {
             ToolSection::CodeGen => Icon::new(IconName::SquareTerminal),
             // 内置图标集里没有合适的「导入」图形，用补进 AppAssets 的那枚
             ToolSection::ImportCurl => Icon::empty().path(ICON_FILE_INPUT),
+            ToolSection::Variables => Icon::empty().path(ICON_BRACES),
         }
     }
 }
@@ -56,6 +58,9 @@ impl Workspace {
                 Button::new(("rail-tool", section as usize))
                     .ghost()
                     .icon(section.icon().size_4())
+                    // 纯图标按钮：gpui-component 的可访问名称取 accessibility_label.or(label)，
+                    // 不会退回 tooltip，必须显式给一份，否则屏幕阅读器读不到名字。
+                    .accessibility_label(section.title())
                     .tooltip(section.title())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_tool_section(section, window, cx)

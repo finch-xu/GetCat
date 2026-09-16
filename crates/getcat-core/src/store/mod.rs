@@ -12,12 +12,14 @@ use std::{
 
 pub use codec::{FORMAT_VERSION, StoreError};
 pub use disk::{
-    DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, SETTINGS_FILE, WORKSPACE_FILE,
-    copy_atomic, copy_atomic_user, load_all, write_atomic, write_atomic_user,
+    DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, SETTINGS_FILE, VARIABLES_FILE,
+    WORKSPACE_FILE, copy_atomic, copy_atomic_user, load_all, write_atomic, write_atomic_user,
 };
 pub use writer::{COALESCE_WINDOW, FLUSH_TIMEOUT, StoreWriter};
 
-use crate::model::{AppSettings, SavedRequest, TabDraft, TabId, Ulid, WorkspaceState};
+use crate::model::{
+    AppSettings, SavedRequest, TabDraft, TabId, Ulid, VariableSets, WorkspaceState,
+};
 
 /// 持久化门面：路径布局 + 写入线程。可 Clone（共享同一线程）。
 #[derive(Clone)]
@@ -78,6 +80,11 @@ impl Store {
     pub fn write_settings(&self, settings: AppSettings) {
         let path = self.layout.settings_path();
         self.writer.write(path, move || codec::encode(&settings));
+    }
+
+    pub fn write_variables(&self, sets: VariableSets) {
+        let path = self.layout.variables_path();
+        self.writer.write(path, move || codec::encode(&sets));
     }
 
     pub fn delete_request(&self, id: Ulid) {
@@ -195,6 +202,18 @@ mod tests {
         let loaded = store.load_all();
         assert!(loaded.requests.is_empty() && loaded.drafts.is_empty());
         assert!(!store.layout().request_path(req.id).exists());
+    }
+
+    #[test]
+    fn write_variables_round_trips() {
+        let (_dir, store) = open(Duration::ZERO);
+        let mut sets = crate::model::VariableSets::default();
+        let env = crate::model::Environment::new("dev");
+        sets.active_environment = Some(env.id);
+        sets.environments.push(env);
+        store.write_variables(sets.clone());
+        assert!(store.flush());
+        assert_eq!(store.load_all().variables, Some(sets));
     }
 
     #[cfg(unix)]

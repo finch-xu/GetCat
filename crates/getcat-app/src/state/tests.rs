@@ -19,38 +19,47 @@ use getcat_core::body::tier::{EDITOR_MAX_LINES, ViewTier};
 use getcat_core::codegen::{CodeTarget, PLACEHOLDER_URL};
 use getcat_core::http::{BodyStore, RequestError};
 use getcat_core::model::{
-    AppSettings, BodyKind, FormField, FormValue, HttpVersionPref, KeyValue, Method, RawFormat,
-    RequestDraft, ResponseMeta, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid,
-    WorkspaceState,
+    AppSettings, AssertOp, BodyKind, Environment, FormField, FormValue, HttpVersionPref, KeyValue,
+    Method, PostOp, PostOpKind, PreOp, PreOpKind, RawFormat, RequestDraft, ResponseMeta,
+    ResponseSource, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid, VarScope,
+    Variable, WorkspaceState,
 };
+use getcat_core::ops::{OpFailure, OpOutcome, OpSkip};
 use getcat_core::store::{Store, codec::decode};
 use getcat_core::tls::{CertWarning, CertificateInfo};
 use gpui_kit::base::TextSelection;
-use gpui_kit::component::{ActiveTheme, Root, input::InputEvent};
+use gpui_kit::component::{
+    ActiveTheme, IndexPath, Root, WindowExt,
+    input::{InputEvent, InputState},
+    select::{SelectEvent, SelectState},
+};
 use gpui_kit::{
-    AppContext, Entity, Focusable, IntoElement, Modifiers, MouseButton, TestAppContext,
-    VisualTestContext, point, px, size,
+    AppContext, Entity, Focusable, IntoElement, Modifiers, MouseButton, SharedString,
+    TestAppContext, VisualTestContext, point, px, size,
 };
 use tempfile::TempDir;
 
 use crate::i18n::Locale;
 use crate::state::request_tab::{
-    BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestTab, ResponseSection,
-    SseBodyMode,
+    BODY_HINT_BYTES, BodyHint, BodyMode, DRAFT_DEBOUNCE, Notice, RequestSection, RequestTab,
+    ResponseSection, SseBodyMode,
 };
-use crate::state::response::{ResponseState, ResponseView};
+use crate::state::response::{OpsReport, ResponseState, ResponseView};
 use crate::state::saved_filter::SavedFilter;
 use crate::state::settings;
 use crate::state::store;
 use crate::state::update::{self, InstallKind};
+use crate::state::variables;
 use crate::state::workspace::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarSection, ToolSection,
     Workspace,
 };
 use crate::ui::body_view::{LINE_HEIGHT_PX, gutter_px};
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
+use crate::ui::ops_table::{OpsMode, OpsTable, OpsTableEvent, PostRowKind};
 use crate::ui::sidebar::SAVED_ROW_HEIGHT;
 use crate::ui::tab_strip::{page_count, tabs_per_page};
+use crate::ui::variables_sheet::{SheetScope, VariablesSheet};
 use getcat_core::model::{LanguagePref, MAX_TAB_ROWS};
 
 pub(crate) fn init(cx: &mut TestAppContext) -> &mut VisualTestContext {
@@ -154,7 +163,7 @@ fn copy_target_follows_the_response_section(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
             // Body：跟随 Pretty / Raw
             assert_eq!(t.copy_target_text().as_deref(), Some("{\n  \"a\": 1\n}"));
             t.set_pretty(false, window, cx);
@@ -612,7 +621,7 @@ fn large_text_body_renders_as_virtual_rows(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((body.clone(), view)), window, cx);
+            t.apply_outcome(g, Ok((body.clone(), view, None)), window, cx);
         })
     });
 
@@ -693,7 +702,7 @@ fn sse_events_view_scrolls_horizontally(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((BodyStore::in_memory(body), view)), window, cx);
+            t.apply_outcome(g, Ok((BodyStore::in_memory(body), view, None)), window, cx);
             // 该流拼不出 delta：Text 模式自动回落到事件列表
             assert_eq!(t.sse_mode, SseBodyMode::Text);
         })
@@ -736,7 +745,7 @@ fn long_header_values_wrap_instead_of_truncating(cx: &mut TestAppContext) {
             let g = t.generation;
             t.apply_outcome(
                 g,
-                Ok((BodyStore::in_memory(b"ok".to_vec()), view)),
+                Ok((BodyStore::in_memory(b"ok".to_vec()), view, None)),
                 window,
                 cx,
             );
@@ -842,7 +851,7 @@ pub(crate) fn install_done_with(
         tab.update(cx, |t, cx| {
             t.generation += 1;
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
         })
     });
 }
@@ -1320,6 +1329,8 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
                 format: RawFormat::Xml,
                 text: "<a/>".into(),
             },
+            pre_ops: Vec::new(),
+            post_ops: Vec::new(),
         },
         RequestDraft {
             method: Method::Put,
@@ -2244,6 +2255,572 @@ fn disabling_a_default_header_shows_up_in_the_generated_code(cx: &mut TestAppCon
     assert!(code.contains("Accept"), "其余默认头还在：{code}");
 }
 
+/// 生成的 curl 必须等于真正发出去的请求：变量已展开，但不执行前置操作。
+#[gpui_kit::test]
+fn code_sheet_uses_resolved_variables_without_running_pre_ops(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| s.globals.push(Variable::new("host", "api.test")))
+    });
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://{{host}}/v1", cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(
+                    &[PreOp {
+                        enabled: true,
+                        kind: PreOpKind::SetVariable {
+                            scope: VarScope::Global,
+                            key: "side_effect".into(),
+                            value: "1".into(),
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.refresh_code_sheet(window, cx)));
+    let code = cx.read(|app| ws.read(app).code_sheet.read(app).text().clone());
+    assert!(code.contains("'https://api.test/v1'"), "{code}");
+    cx.read(|app| {
+        assert!(
+            variables::variables(app)
+                .globals
+                .iter()
+                .all(|v| v.key != "side_effect")
+        )
+    });
+}
+
+/// 抽屉：编辑表格写回对应作用域；导入 environment 建新环境、导入 globals 合并；导出能被 parse 读回。
+#[gpui_kit::test]
+fn variables_sheet_edits_import_and_export(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    // 全局页：表格改动 → 写回
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Global, None, vec![], window, cx);
+            s.table().update(cx, |t, cx| {
+                t.set_variables(&[Variable::new("host", "h")], window, cx)
+            });
+            s.commit_table_for_test(cx);
+        })
+    });
+    cx.read(|app| assert_eq!(variables::variables(app).globals[0].value, "h"));
+    // 抽屉开着时后台写入变量（模拟响应到达后的提取）：表格跟上，之后的编辑不会把它抹掉
+    cx.update(|_, app| variables::update(app, |s| s.globals.push(Variable::new("token", "T"))));
+    cx.run_until_parked();
+    cx.read(|app| {
+        let keys: Vec<String> = sheet
+            .read(app)
+            .table()
+            .read(app)
+            .variables(app)
+            .into_iter()
+            .map(|v| v.key)
+            .collect();
+        assert_eq!(keys, vec!["host".to_string(), "token".to_string()]);
+    });
+    cx.update(|_, cx| sheet.update(cx, |s, cx| s.commit_table_for_test(cx)));
+    cx.read(|app| {
+        assert!(
+            variables::variables(app)
+                .globals
+                .iter()
+                .any(|v| v.key == "token" && v.value == "T")
+        )
+    });
+    // 导入 environment → 新环境并激活
+    let n = cx
+        .update(|window, cx| {
+            sheet.update(cx, |s, cx| {
+                s.import_from_text(
+                    r#"{"name":"Dev","values":[{"key":"code","value":"200","type":"secret"}],"_postman_variable_scope":"environment"}"#,
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    assert_eq!(n, 1);
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments[0].name, "Dev");
+        assert!(sets.environments[0].variables[0].secret);
+        assert_eq!(sets.active_environment, Some(sets.environments[0].id));
+    });
+    // 再导一次同名：名字加后缀
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.import_from_text(r#"{"name":"Dev","values":[]}"#, window, cx)
+        })
+    })
+    .unwrap();
+    cx.read(|app| assert_eq!(variables::variables(app).environments[1].name, "Dev 2"));
+    // 导入 globals：合并、同 key 覆盖
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.import_from_text(
+                r#"{"values":[{"key":"host","value":"new"},{"key":"x","value":"1"}],"_postman_variable_scope":"globals"}"#,
+                window,
+                cx,
+            )
+        })
+    })
+    .unwrap();
+    cx.read(|app| {
+        let g = &variables::variables(app).globals;
+        assert_eq!(g.len(), 3);
+        assert_eq!(g.iter().find(|v| v.key == "host").unwrap().value, "new");
+    });
+    // 导出环境页：打开时定位到激活环境（刚导入的 Dev 2），经下拉切回 Dev 再导出
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Environment, None, vec![], window, cx)
+        })
+    });
+    let (name, _) = cx.read(|app| sheet.read(app).export_text(app)).unwrap();
+    assert_eq!(name, "Dev_2.postman_environment.json");
+    let env_select = cx.read(|app| sheet.read(app).env_select().clone());
+    pick_select(cx, &env_select, 0);
+    cx.run_until_parked();
+    let (name, text) = cx.read(|app| sheet.read(app).export_text(app)).unwrap();
+    assert!(name.ends_with(".postman_environment.json"), "{name}");
+    let parsed = getcat_core::postman_env::parse(&text).unwrap();
+    assert_eq!(parsed.name, "Dev");
+    assert_eq!(parsed.variables[0].key, "code");
+    assert!(parsed.variables[0].secret);
+    // 分类页没有 Postman 对应格式，不导出
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Group, None, vec!["api".into()], window, cx)
+        })
+    });
+    assert!(cx.read(|app| sheet.read(app).export_text(app)).is_none());
+    // 坏文件报错，不改变量
+    let before = cx.read(|app| variables::variables(app).clone());
+    let err = cx.update(|window, cx| sheet.update(cx, |s, cx| s.import_from_text("{", window, cx)));
+    assert!(err.is_err());
+    cx.read(|app| assert_eq!(*variables::variables(app), before));
+    assert!(store.flush());
+}
+
+/// 文件对话框路径：读文件与解析都在后台线程，结果回到抽屉；文件不对 / 读不出来时提示翻译过的原因；
+/// 导出写出的文件能被 parse 读回。
+#[gpui_kit::test]
+fn variables_sheet_imports_and_exports_through_file_dialogs(cx: &mut TestAppContext) {
+    let _locale = crate::i18n::locale_test_lock();
+    let (cx, _store, dir) = init_with_store(cx);
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Global, None, vec![], window, cx)
+        })
+    });
+    let good = dir.path().join("dev.postman_environment.json");
+    std::fs::write(
+        &good,
+        r#"{"name":"Dev","values":[{"key":"code","value":"200","type":"secret"}]}"#,
+    )
+    .unwrap();
+    let collection = dir.path().join("collection.json");
+    std::fs::write(&collection, r#"{"info":{"name":"not an environment"}}"#).unwrap();
+    let import = |cx: &mut VisualTestContext, path: PathBuf| {
+        cx.update(|window, cx| sheet.update(cx, |s, cx| s.import_file_for_test(window, cx)));
+        assert!(cx.did_prompt_for_paths());
+        cx.simulate_path_prompt_response(move |_| Some(vec![path]));
+    };
+    let notice_is = |cx: &mut VisualTestContext, pred: &dyn Fn(&str) -> bool| {
+        cx.read(|app| sheet.read(app).notice_text().is_some_and(|t| pred(&t)))
+    };
+
+    import(cx, good);
+    wait_until(cx, |cx| notice_is(cx, &|t| t == "Variables imported: 1"));
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments[0].name, "Dev");
+        assert!(sets.environments[0].variables[0].secret);
+    });
+
+    // 不是 environment 的 JSON：原因走翻译，不漏 core 的英文 Display
+    import(cx, collection);
+    wait_until(cx, |cx| {
+        notice_is(cx, &|t| {
+            t == "This file isn't a Postman environment or globals export"
+        })
+    });
+    // 读不出来：io 原话保留在 import_failed 里
+    import(cx, dir.path().join("missing.json"));
+    wait_until(cx, |cx| {
+        notice_is(cx, &|t| t.starts_with("Import failed: "))
+    });
+    cx.read(|app| assert_eq!(variables::variables(app).environments.len(), 1));
+
+    // 导出当前页（导入后抽屉停在 Dev 环境页）
+    let dest = dir.path().join("out.postman_environment.json");
+    cx.update(|window, cx| sheet.update(cx, |s, cx| s.export_file_for_test(window, cx)));
+    assert!(cx.did_prompt_for_new_path());
+    let chosen = dest.clone();
+    cx.simulate_new_path_selection(move |_| Some(chosen));
+    wait_until(cx, |cx| notice_is(cx, &|t| t.starts_with("Exported to ")));
+    let parsed = getcat_core::postman_env::parse(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+    assert_eq!(parsed.name, "Dev");
+    assert!(parsed.variables[0].secret);
+}
+
+/// 抽屉：下拉切环境换表；改名边打字边写回，观察者不会把输入框重置（尾随空格不被吃掉）；
+/// 分类页写回该分类，清空后不留空条目。
+#[gpui_kit::test]
+fn variables_sheet_switches_renames_and_edits_groups(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            let mut a = Environment::new("A");
+            a.variables.push(Variable::new("k", "a"));
+            let mut b = Environment::new("B");
+            b.variables.push(Variable::new("k", "b"));
+            s.active_environment = Some(b.id);
+            s.environments = vec![a, b];
+            s.groups
+                .insert("orphan".into(), vec![Variable::new("g", "1")]);
+        })
+    });
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    let table_values = |cx: &mut VisualTestContext| {
+        cx.read(|app| {
+            sheet
+                .read(app)
+                .table()
+                .read(app)
+                .variables(app)
+                .into_iter()
+                .map(|v| (v.key, v.value))
+                .collect::<Vec<_>>()
+        })
+    };
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Environment, None, vec![], window, cx)
+        })
+    });
+    // 默认定位到激活环境
+    assert_eq!(table_values(cx), vec![("k".to_string(), "b".to_string())]);
+    let env_select = cx.read(|app| sheet.read(app).env_select().clone());
+    pick_select(cx, &env_select, 0);
+    cx.run_until_parked();
+    assert_eq!(table_values(cx), vec![("k".to_string(), "a".to_string())]);
+
+    // 真实写回路径：表格自己发 `Changed`，经抽屉的订阅写回当前环境（不走 commit_table_for_test）
+    let table = cx.read(|app| sheet.read(app).table().clone());
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_row_secret(0, true, window, cx)));
+    cx.run_until_parked();
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert!(
+            sets.environments[0].variables[0].secret,
+            "选中的环境 A 被写回"
+        );
+        assert!(
+            !sets.environments[1].variables[0].secret,
+            "激活环境 B 不受影响"
+        );
+    });
+
+    // 改名：中间态 "Alpha " 存为 "Alpha"，但输入框里的尾随空格保留，接着打字不受影响
+    let name_input = cx.read(|app| sheet.read(app).env_name().clone());
+    type_input(cx, &name_input, "Alpha ");
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(variables::variables(app).environments[0].name, "Alpha");
+        assert_eq!(name_input.read(app).value().as_ref(), "Alpha ");
+    });
+    type_input(cx, &name_input, "Alpha 2");
+    cx.run_until_parked();
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments[0].name, "Alpha 2");
+        // 改名不动激活状态
+        assert_eq!(sets.active_environment, Some(sets.environments[1].id));
+    });
+    // 激活当前选中的环境
+    cx.update(|_, cx| sheet.update(cx, |s, cx| s.activate_env_for_test(cx)));
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.active_environment, Some(sets.environments[0].id));
+    });
+
+    // 分类页：定位到给定分类，改动写回该分类
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(
+                SheetScope::Group,
+                Some("orphan".into()),
+                vec!["api".into(), "orphan".into()],
+                window,
+                cx,
+            )
+        })
+    });
+    assert_eq!(table_values(cx), vec![("g".to_string(), "1".to_string())]);
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.table().update(cx, |t, cx| {
+                t.set_variables(&[Variable::new("g", "2")], window, cx)
+            });
+            s.commit_table_for_test(cx);
+        })
+    });
+    cx.read(|app| assert_eq!(variables::variables(app).groups["orphan"][0].value, "2"));
+    // 切到另一个分类再清空：不留空条目
+    let group_select = cx.read(|app| sheet.read(app).group_select().clone());
+    pick_select(cx, &group_select, 0);
+    cx.run_until_parked();
+    assert!(table_values(cx).is_empty());
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.table().update(cx, |t, cx| {
+                t.set_variables(&[Variable::new("x", "1")], window, cx)
+            });
+            s.commit_table_for_test(cx);
+            s.table()
+                .update(cx, |t, cx| t.set_variables(&[], window, cx));
+            s.commit_table_for_test(cx);
+        })
+    });
+    cx.read(|app| assert!(!variables::variables(app).groups.contains_key("api")));
+    assert!(store.flush());
+}
+
+/// 分类页的候选 = 已保存请求推导出的分类 ∪ 变量表里挂着变量的分类（成员移走后变量仍可见可删）。
+#[gpui_kit::test]
+fn variables_sheet_group_candidates_include_orphaned_group_vars(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.groups.insert("api".into(), vec![Variable::new("a", "1")]);
+            s.groups
+                .insert("orphan".into(), vec![Variable::new("o", "1")]);
+        })
+    });
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab.clone(), "r".into(), Some("api".into()), cx)
+        })
+    });
+    let groups = cx.read(|app| ws.read(app).variable_group_names(app));
+    assert_eq!(groups, vec!["api".to_string(), "orphan".to_string()]);
+}
+
+/// 真实 `Root` 窗口里走一遍：图标栏打开抽屉 → 抽屉上弹删除确认 → 整窗画帧 → 确认删除 → 再点图标收起。
+/// Sheet / Dialog 的 builder 都在 `Workspace::render` 内部每帧执行，谁在里面碰宿主，画帧时就会
+/// 二次借用 panic（「点一下就闪退」）。
+#[gpui_kit::test]
+fn variables_sheet_and_delete_dialog_draw_over_the_workspace(cx: &mut TestAppContext) {
+    init_globals(cx);
+    cx.update(|app| {
+        variables::update(app, |s| {
+            let dev = Environment::new("Dev");
+            s.active_environment = Some(dev.id);
+            s.environments = vec![dev, Environment::new("Prod")];
+        })
+    });
+    let slot: Rc<RefCell<Option<Entity<Workspace>>>> = Rc::new(RefCell::new(None));
+    let slot_for_root = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let ws = cx.new(|cx| Workspace::new(window, cx));
+        *slot_for_root.borrow_mut() = Some(ws.clone());
+        Root::new(ws, window, cx)
+    });
+    let ws = slot
+        .borrow_mut()
+        .take()
+        .expect("workspace created inside the root view");
+    let draw = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        })
+    };
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_tool_section(ToolSection::Variables, window, cx)
+        })
+    });
+    draw(cx);
+    assert!(cx.update(|window, cx| window.has_active_sheet(cx)));
+
+    let sheet = cx.read(|app| ws.read(app).variables_sheet.clone());
+    cx.update(|window, cx| {
+        sheet.update(cx, |s, cx| {
+            s.load(SheetScope::Environment, None, vec![], window, cx);
+            s.confirm_delete_env_for_test(window, cx);
+        })
+    });
+    draw(cx);
+    cx.update(|window, cx| {
+        assert!(window.has_active_dialog(cx));
+        assert!(
+            window.has_active_sheet(cx),
+            "确认框叠在抽屉上，不该把抽屉关掉"
+        );
+    });
+    // 与按下确认键同一条路：对话框聚焦时派发 Confirm
+    cx.update(|window, cx| {
+        window.dispatch_action(
+            Box::new(gpui_kit::component::dialog::Confirm { secondary: false }),
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    draw(cx);
+    cx.read(|app| {
+        let sets = variables::variables(app);
+        assert_eq!(sets.environments.len(), 1);
+        assert_eq!(sets.environments[0].name, "Prod");
+        assert_eq!(sets.active_environment, None, "删掉的是激活环境");
+    });
+    // 抽屉退到剩下的环境
+    let (name, _) = cx.read(|app| sheet.read(app).export_text(app)).unwrap();
+    assert_eq!(name, "Prod.postman_environment.json");
+
+    // 再点一次同一个图标：收起
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_tool_section(ToolSection::Variables, window, cx)
+        })
+    });
+    draw(cx);
+    assert!(!cx.update(|window, cx| window.has_active_sheet(cx)));
+}
+
+/// 抽屉正文与 CodeSheet 同一条约束：自己就是 `Render`，三个作用域页都能单独画出来。
+#[gpui_kit::test]
+fn variables_sheet_renders_every_scope_on_its_own(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.environments.push(Environment::new("Dev"));
+        })
+    });
+    let sheet = cx.update(|window, cx| cx.new(|cx| VariablesSheet::new(window, cx)));
+    for (scope, groups) in [
+        (SheetScope::Global, vec![]),
+        (SheetScope::Environment, vec![]),
+        (SheetScope::Group, vec![]),
+        (SheetScope::Group, vec!["api".to_string()]),
+    ] {
+        cx.update(|window, cx| sheet.update(cx, |s, cx| s.load(scope, None, groups, window, cx)));
+        cx.draw(point(px(0.), px(0.)), size(px(640.), px(700.)), |_, _| {
+            sheet.clone().into_any_element()
+        });
+    }
+}
+
+/// 断言操作的期望值（原文或已替换）。
+fn assert_expected(op: &PostOp) -> &str {
+    match &op.kind {
+        PostOpKind::Assert { expected, .. } => expected,
+        other => panic!("not an assert op: {other:?}"),
+    }
+}
+
+/// 保存 / 重开都带着操作列表，且存的是原文；重开后发送一次，草稿里仍是原文。
+#[gpui_kit::test]
+fn saved_requests_keep_ops_and_raw_placeholders(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://{{host}}/x", cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[PostOp {
+                        enabled: true,
+                        kind: PostOpKind::Assert {
+                            subject: ResponseSource::Status,
+                            op: AssertOp::Equals,
+                            expected: "{{code}}".into(),
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "x".into(), None, cx)
+            })
+        })
+        .unwrap();
+    assert!(store.flush());
+    let saved = read_request(&store, id).unwrap();
+    assert_eq!(saved.draft.url, "https://{{host}}/x");
+    assert_eq!(saved.draft.post_ops.len(), 1);
+    assert_eq!(assert_expected(&saved.draft.post_ops[0]), "{{code}}");
+    // 重开：操作跟着回来
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.close_tab(0, window, cx);
+            ws.open_saved(id, window, cx);
+        })
+    });
+    let reopened = cx.read(|app| ws.read(app).active_tab());
+    cx.read(|app| {
+        let t = reopened.read(app);
+        let post_ops = t.post_ops.read(app).post_ops(app);
+        assert_eq!(post_ops.len(), 1);
+        assert_eq!(assert_expected(&post_ops[0]), "{{code}}");
+    });
+
+    // 重开的 Tab 发送一次：host 指向拒绝连接的端口，code 有值
+    let refused = refused_url();
+    let host = refused
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string();
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals.push(Variable::new("host", host));
+            s.globals.push(Variable::new("code", "200"));
+        })
+    });
+    cx.update(|window, cx| reopened.update(cx, |t, cx| t.send(window, cx)));
+    wait_until(cx, |cx| {
+        cx.read(|app| !reopened.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = reopened.read(app);
+        // 执行用的是替换后的期望值……
+        match &t.response {
+            ResponseState::Failed {
+                ops: Some(report), ..
+            } => assert_eq!(assert_expected(&report.post.results[0].0), "200"),
+            _ => panic!("expected Failed with ops, got {:?}", t.response.error()),
+        }
+        // ……Tab 里仍是原文
+        assert_eq!(assert_expected(&t.draft(app).post_ops[0]), "{{code}}");
+    });
+    // 草稿文件也是原文
+    cx.update(|_, cx| reopened.update(cx, |t, cx| t.save_draft_now(cx)));
+    assert!(store.flush());
+    let tab_id = cx.read(|app| reopened.read(app).id);
+    assert_eq!(
+        assert_expected(&read_draft(&store, tab_id).unwrap().draft.post_ops[0]),
+        "{{code}}"
+    );
+}
+
 #[gpui_kit::test]
 fn delete_saved_removes_file_and_detaches_tabs(cx: &mut TestAppContext) {
     let (cx, store, _dir) = init_with_store(cx);
@@ -2339,6 +2916,7 @@ fn clear_response_resets_everything_including_the_editor(cx: &mut TestAppContext
         tab.update(cx, |t, cx| {
             t.response_section = ResponseSection::Headers;
             t.notice = Some(Notice::NoResponse);
+            t.unresolved_vars.insert("ghost".to_string());
             let before = t.generation;
             assert!(
                 !t.response_editor_for("json")
@@ -2358,6 +2936,8 @@ fn clear_response_resets_everything_including_the_editor(cx: &mut TestAppContext
             );
             assert_eq!(t.response_section, ResponseSection::Body);
             assert!(t.notice.is_none());
+            // 未定义变量提示描述的是刚清掉的那份响应，一起清空
+            assert!(t.unresolved_vars.is_empty());
             // generation 必须往前走，否则在途请求的回调还能把旧响应写回来
             assert_eq!(t.generation, before + 1);
         })
@@ -2415,7 +2995,7 @@ fn find_in_response_only_notices_on_virtual_tier(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         tab.update(cx, |t, cx| {
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
             t.find_in_response(window, cx);
             assert_eq!(t.notice, Some(Notice::VirtualSearch));
             assert!(
@@ -2622,16 +3202,35 @@ fn url_bar_with_split_save_and_version_picker_draws(cx: &mut TestAppContext) {
     });
 }
 
+/// URL 栏未解析变量提示能正常渲染。
+#[gpui_kit::test]
+fn url_bar_unresolved_vars_warning_draws(cx: &mut TestAppContext) {
+    let (tab, cx) = tab_in_root_window(cx);
+    // 设置两个未解析变量
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.unresolved_vars.insert("var_a".to_string());
+            t.unresolved_vars.insert("var_b".to_string());
+            cx.notify();
+        })
+    });
+
+    // 绘制一帧，确保不 panic
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        tab.clone().into_any_element()
+    });
+}
+
 /// 证书页签只在拿到证书时出现，且体检有结论时上方挂横幅。
 #[gpui_kit::test]
 fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
     // 纯函数部分：http 请求不该多出一页
     assert_eq!(
-        ResponseSection::visible(false),
+        ResponseSection::visible(false, false),
         vec![ResponseSection::Body, ResponseSection::Headers]
     );
     assert_eq!(
-        ResponseSection::visible(true),
+        ResponseSection::visible(true, false),
         vec![
             ResponseSection::Body,
             ResponseSection::Headers,
@@ -2650,7 +3249,7 @@ fn certificate_tab_appears_only_with_a_certificate(cx: &mut TestAppContext) {
         tab.update(cx, |t, cx| {
             t.generation += 1;
             let g = t.generation;
-            t.apply_outcome(g, Ok((body, view)), window, cx);
+            t.apply_outcome(g, Ok((body, view, None)), window, cx);
             // 切到证书页：横幅 + 字段表都要能画
             t.response_section = ResponseSection::Certificate;
             cx.notify();
@@ -2682,6 +3281,220 @@ fn certificate_section_falls_back_to_body_without_a_certificate(cx: &mut TestApp
     let element = tab.clone();
     cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
         element.into_any_element()
+    });
+}
+
+/// 请求面板「操作」页签：两张操作表各带几行也要能画出来（此前从未被任何测试渲染过）。
+#[gpui_kit::test]
+fn request_pane_ops_tab_draws_with_rows(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.request_section = RequestSection::Ops;
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(
+                    &[
+                        pre_set(VarScope::Global, "who", "cat"),
+                        pre_set(VarScope::Environment, "req", "{{$timestamp}}"),
+                    ],
+                    window,
+                    cx,
+                )
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[
+                        extract_status("code"),
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Assert {
+                                subject: ResponseSource::Status,
+                                op: AssertOp::Equals,
+                                expected: "200".into(),
+                            },
+                        },
+                    ],
+                    window,
+                    cx,
+                )
+            });
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.request_section, RequestSection::Ops);
+        assert_eq!(t.pre_ops.read(app).count(app), 2);
+        assert_eq!(t.post_ops.read(app).count(app), 2);
+    });
+}
+
+/// 响应面板「操作」页签、Done 分支：一条通过的提取（目标已标敏感，触发掩码分支）、
+/// 一条失败的断言（`op_detail` + `mask_secrets` 分支）、一条因没有激活环境被跳过的
+/// 前置行，三种行样式一起画出来。
+#[gpui_kit::test]
+fn response_pane_ops_tab_draws_done_report_with_masked_and_failed_rows(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    // 提前把 "token" 标成敏感值：后置提取写回时按 key 命中旧行，secret 标记保留
+    // （`VariableSets::set_var` 的约定，见 core::model 测试）。
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals.push(Variable {
+                secret: true,
+                ..Variable::new("token", "")
+            })
+        })
+    });
+    let (base, _rx) = echo_server(r#"{"data":{"token":"T"}}"#);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                // 没有激活环境：这条前置行执行后落成跳过
+                o.set_pre_ops(&[pre_set(VarScope::Environment, "req", "x")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Extract {
+                                scope: VarScope::Global,
+                                key: "token".into(),
+                                source: ResponseSource::JsonPath {
+                                    path: "$.data.token".into(),
+                                },
+                            },
+                        },
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Assert {
+                                subject: ResponseSource::Status,
+                                op: AssertOp::Equals,
+                                expected: "201".into(),
+                            },
+                        },
+                    ],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    set_url_and_send(&tab, &base, cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Ops;
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        let ResponseState::Done {
+            ops: Some(report), ..
+        } = &t.response
+        else {
+            panic!(
+                "expected Done with ops report, got {:?}",
+                t.response.error()
+            );
+        };
+        assert_eq!(
+            report.pre[0].1,
+            OpOutcome::Skipped(OpSkip::NoActiveEnvironment)
+        );
+        assert_eq!(report.post.results[0].1, OpOutcome::Passed);
+        assert!(matches!(
+            report.post.results[1].1,
+            OpOutcome::Failed(OpFailure::Mismatch { .. })
+        ));
+    });
+}
+
+/// 响应面板「操作」页签、Failed 分支（非取消）：前置结果保留、后置操作全落成
+/// 「请求失败，未执行」，这条渲染路径此前没有测试画过。
+#[gpui_kit::test]
+fn response_pane_ops_tab_draws_failed_report(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(&[extract_status("leak")], window, cx)
+            });
+        })
+    });
+    set_url_and_send(&tab, &refused_url(), cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response_section = ResponseSection::Ops;
+            cx.notify();
+        })
+    });
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = tab.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(1200.), px(800.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(
+            matches!(t.response, ResponseState::Failed { ops: Some(_), .. }),
+            "{:?}",
+            t.response.error()
+        );
+    });
+}
+
+/// 变量表：`secret_capable` 打开时锁按钮与掩码值输入框两条分支（敏感行 + 普通行）
+/// 一起画出来，此前只有不画帧的读断言测试覆盖过这张表。
+#[gpui_kit::test]
+fn kv_table_secret_capable_draws_masked_and_plain_rows(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Variable, window, cx).secret_capable(true))
+    });
+    let vars = vec![
+        Variable::new("host", "h"),
+        Variable {
+            secret: true,
+            ..Variable::new("token", "t")
+        },
+    ];
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_variables(&vars, window, cx)));
+
+    cx.update(|window, cx| window.blur(cx));
+    let element = table.clone();
+    cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
+        element.into_any_element()
+    });
+    cx.read(|app| {
+        let t = table.read(app);
+        assert!(!t.row_secret(0));
+        assert!(t.row_secret(1));
     });
 }
 
@@ -2727,6 +3540,357 @@ fn kv_table_form_fields_roundtrip_and_refresh_size(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.read(|app| assert_eq!(table.read(app).row_file_size(1), Some(2)));
     let _ = std::fs::remove_file(&file);
+}
+
+/// 变量表：secret 行掩码显示、往返保留 secret 标记。
+#[gpui_kit::test]
+fn kv_table_variables_round_trip_with_secret(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Variable, window, cx).secret_capable(true))
+    });
+    let vars = vec![
+        Variable::new("host", "h"),
+        Variable {
+            secret: true,
+            ..Variable::new("token", "t")
+        },
+    ];
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_variables(&vars, window, cx)));
+    cx.read(|app| {
+        let t = table.read(app);
+        assert_eq!(t.variables(app), vars);
+        assert!(!t.row_secret(0));
+        assert!(t.row_secret(1));
+        assert!(t.row_value_masked(1, app));
+        // 没有 `$` 开头的 key：不提示
+        assert!(!t.has_builtin_name_hint(app));
+    });
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_row_secret(0, true, window, cx)));
+    cx.read(|app| {
+        let t = table.read(app);
+        assert!(t.variables(app)[0].secret);
+        assert!(t.row_value_masked(0, app));
+    });
+}
+
+/// 变量表：key 以 `$` 开头（内置动态变量命名空间）会触发提示；普通表（非 secret_capable）不提示。
+#[gpui_kit::test]
+fn kv_table_dynamic_name_clash_triggers_builtin_hint(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| {
+        cx.new(|cx| KvTable::new(KvPlaceholder::Variable, window, cx).secret_capable(true))
+    });
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_variables(&[Variable::new("$timestamp", "")], window, cx)
+        })
+    });
+    cx.read(|app| assert!(table.read(app).has_builtin_name_hint(app)));
+
+    // 非变量表（未开 secret_capable）即便凑巧撞上 `$` 前缀也不提示：这条提示只对变量表有意义
+    let plain = cx.update(|window, cx| cx.new(|cx| KvTable::new(KvPlaceholder::Param, window, cx)));
+    cx.update(|window, cx| {
+        plain.update(cx, |t, cx| {
+            t.set_values(&[KeyValue::new("$timestamp", "")], window, cx)
+        })
+    });
+    cx.read(|app| assert!(!plain.read(app).has_builtin_name_hint(app)));
+}
+
+#[gpui_kit::test]
+fn ops_table_round_trips_pre_and_post_ops(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let pre = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Pre, window, cx)));
+    let post = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let pre_ops = vec![PreOp {
+        enabled: false,
+        kind: PreOpKind::SetVariable {
+            scope: VarScope::Environment,
+            key: "ts".into(),
+            value: "{{$timestamp}}".into(),
+        },
+    }];
+    let post_ops = vec![
+        PostOp {
+            enabled: true,
+            kind: PostOpKind::Extract {
+                scope: VarScope::Global,
+                key: "tok".into(),
+                source: ResponseSource::JsonPath { path: "$.t".into() },
+            },
+        },
+        PostOp {
+            enabled: true,
+            kind: PostOpKind::Assert {
+                subject: ResponseSource::Status,
+                op: AssertOp::Equals,
+                expected: "200".into(),
+            },
+        },
+    ];
+    cx.update(|window, cx| {
+        pre.update(cx, |t, cx| t.set_pre_ops(&pre_ops, window, cx));
+        post.update(cx, |t, cx| t.set_post_ops(&post_ops, window, cx));
+    });
+    cx.read(|app| {
+        assert_eq!(pre.read(app).pre_ops(app), pre_ops);
+        assert_eq!(post.read(app).post_ops(app), post_ops);
+        // 末尾各有一个空行，不进结果
+        assert_eq!(pre.read(app).row_count(), 2);
+        assert_eq!(post.read(app).row_count(), 3);
+    });
+}
+
+/// 删掉前面的行之后，下拉的订阅必须按实体找行而不是按创建时的行号：
+/// 否则后面的行整体上移，改第 0 行的下拉会落到原来的第 2 行上。
+#[gpui_kit::test]
+fn ops_table_select_changes_after_removing_a_row_land_on_the_right_row(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let extract = |source: ResponseSource, key: &str| PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Global,
+            key: key.into(),
+            source,
+        },
+    };
+    let ops = vec![
+        extract(ResponseSource::JsonPath { path: "$.a".into() }, "k1"),
+        extract(ResponseSource::Header { name: "b".into() }, "k2"),
+        PostOp {
+            enabled: true,
+            kind: PostOpKind::Assert {
+                subject: ResponseSource::JsonPath { path: "$.c".into() },
+                op: AssertOp::Equals,
+                expected: "v".into(),
+            },
+        },
+    ];
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_post_ops(&ops, window, cx)));
+    cx.update(|window, cx| table.update(cx, |t, cx| t.remove_row(0, window, cx)));
+    cx.read(|app| assert_eq!(table.read(app).post_ops(app), ops[1..].to_vec()));
+
+    // 第 0 行（原第 1 行）作用域 → 当前环境
+    let scope_select = cx.read(|app| table.read(app).row_scope_select(0));
+    pick_select(cx, &scope_select, VarScope::Environment.index());
+    let row0_extract = PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Environment,
+            key: "k2".into(),
+            source: ResponseSource::Header { name: "b".into() },
+        },
+    };
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![row0_extract.clone(), ops[2].clone()]
+        )
+    });
+
+    // 第 1 行（原第 2 行）算子 → 包含
+    let op_select = cx.read(|app| table.read(app).row_op_select(1));
+    pick_select(cx, &op_select, AssertOp::Contains.index());
+    let row1_contains = PostOp {
+        enabled: true,
+        kind: PostOpKind::Assert {
+            subject: ResponseSource::JsonPath { path: "$.c".into() },
+            op: AssertOp::Contains,
+            expected: "v".into(),
+        },
+    };
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![row0_extract.clone(), row1_contains.clone()]
+        )
+    });
+
+    // 第 0 行类型 → 断言响应头：参数 A / B 原样沿用，第 1 行不受影响
+    let kind_select = cx.read(|app| table.read(app).row_kind_select(0));
+    pick_select(cx, &kind_select, PostRowKind::AssertHeader.index());
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![
+                PostOp {
+                    enabled: true,
+                    kind: PostOpKind::Assert {
+                        subject: ResponseSource::Header { name: "b".into() },
+                        op: AssertOp::Equals,
+                        expected: "k2".into(),
+                    },
+                },
+                row1_contains,
+            ]
+        );
+        assert_eq!(table.read(app).row_count(), 3);
+    });
+}
+
+/// 与用户在下拉里选中一项走同一条路：改选中项并发出 Confirm，由表格的订阅处理。
+fn pick_select(
+    cx: &mut VisualTestContext,
+    sel: &Entity<SelectState<Vec<SharedString>>>,
+    ix: usize,
+) {
+    cx.update(|window, cx| {
+        sel.update(cx, |s, cx| {
+            s.set_selected_index(Some(IndexPath::new(ix)), window, cx);
+            let value = s.selected_value().cloned();
+            cx.emit(SelectEvent::Confirm(value));
+        })
+    });
+}
+
+/// 与用户打字走同一条路：`set_value` 本身不发事件，改完值再补发 Change，由表格的订阅处理。
+fn type_input(cx: &mut VisualTestContext, input: &Entity<InputState>, text: &str) {
+    let text = text.to_string();
+    cx.update(|window, cx| {
+        input.update(cx, |s, cx| {
+            s.set_value(text, window, cx);
+            cx.emit(InputEvent::Change);
+        })
+    });
+}
+
+/// 被禁用的输入框（Status 类型的参数 A）文字保留，但不参与判空与生成操作；切回来文字还在。
+#[gpui_kit::test]
+fn ops_table_disabled_source_input_keeps_text_but_produces_no_op(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let a = cx.read(|app| table.read(app).row_a_input(0));
+    type_input(cx, &a, "$.data.token");
+    cx.read(|app| {
+        assert_eq!(table.read(app).post_ops(app).len(), 1);
+        assert_eq!(table.read(app).row_count(), 2);
+    });
+
+    // 切到「断言状态码」：参数 A 禁用，这一行没有任何生效的输入 → 不产出操作
+    let kind_select = cx.read(|app| table.read(app).row_kind_select(0));
+    pick_select(cx, &kind_select, PostRowKind::AssertStatus.index());
+    cx.read(|app| {
+        assert!(table.read(app).post_ops(app).is_empty());
+        assert_eq!(a.read(app).value().as_ref(), "$.data.token");
+    });
+
+    // 切回「提取 JSON 路径」并填变量名：路径原样恢复，操作重新出现
+    pick_select(cx, &kind_select, PostRowKind::ExtractJson.index());
+    let b = cx.read(|app| table.read(app).row_b_input(0));
+    type_input(cx, &b, "tok");
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![PostOp {
+                enabled: true,
+                kind: PostOpKind::Extract {
+                    scope: VarScope::Global,
+                    key: "tok".into(),
+                    source: ResponseSource::JsonPath {
+                        path: "$.data.token".into()
+                    },
+                },
+            }]
+        )
+    });
+}
+
+/// 算子切到 Exists 后期望值输入框禁用：残留文字不进 `expected`，切回来又生效。
+#[gpui_kit::test]
+fn ops_table_exists_ignores_leftover_expected_value(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let assert_with = |op: AssertOp, expected: &str| PostOp {
+        enabled: true,
+        kind: PostOpKind::Assert {
+            subject: ResponseSource::JsonPath {
+                path: "$.ok".into(),
+            },
+            op,
+            expected: expected.into(),
+        },
+    };
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| {
+            t.set_post_ops(&[assert_with(AssertOp::Equals, "true")], window, cx)
+        })
+    });
+
+    let op_select = cx.read(|app| table.read(app).row_op_select(0));
+    pick_select(cx, &op_select, AssertOp::Exists.index());
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![assert_with(AssertOp::Exists, "")]
+        );
+        let b = table.read(app).row_b_input(0);
+        assert_eq!(b.read(app).value().as_ref(), "true");
+    });
+
+    pick_select(cx, &op_select, AssertOp::Equals.index());
+    cx.read(|app| {
+        assert_eq!(
+            table.read(app).post_ops(app),
+            vec![assert_with(AssertOp::Equals, "true")]
+        )
+    });
+}
+
+/// 空行上挑下拉 / 删空行不影响 `post_ops()`，不该发 `Changed`（任务 3 会拿它置脏）；非空行上改下拉要发。
+#[gpui_kit::test]
+fn ops_table_only_emits_changed_when_ops_can_change(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let table = cx.update(|window, cx| cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx)));
+    let changed = Rc::new(Cell::new(0));
+    let _sub = cx.update(|_, cx| {
+        let changed = changed.clone();
+        cx.subscribe(&table, move |_, _: &OpsTableEvent, _| {
+            changed.set(changed.get() + 1)
+        })
+    });
+
+    // 末尾空行（第 0 行）上改三个下拉、再删掉它：都不发
+    let (kind_select, scope_select, op_select) = cx.read(|app| {
+        let t = table.read(app);
+        (
+            t.row_kind_select(0),
+            t.row_scope_select(0),
+            t.row_op_select(0),
+        )
+    });
+    pick_select(cx, &scope_select, VarScope::Environment.index());
+    pick_select(cx, &kind_select, PostRowKind::AssertHeader.index());
+    pick_select(cx, &op_select, AssertOp::Contains.index());
+    cx.update(|window, cx| table.update(cx, |t, cx| t.remove_row(0, window, cx)));
+    assert_eq!(changed.get(), 0);
+    cx.read(|app| {
+        assert!(table.read(app).post_ops(app).is_empty());
+        assert_eq!(table.read(app).row_count(), 1);
+    });
+
+    // 程序化载入一条非空行：不发
+    let op = PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Global,
+            key: "k".into(),
+            source: ResponseSource::Header { name: "h".into() },
+        },
+    };
+    cx.update(|window, cx| table.update(cx, |t, cx| t.set_post_ops(&[op], window, cx)));
+    assert_eq!(changed.get(), 0);
+
+    // 非空行（第 0 行）改作用域：发一次
+    let scope_select = cx.read(|app| table.read(app).row_scope_select(0));
+    pick_select(cx, &scope_select, VarScope::Group.index());
+    assert_eq!(changed.get(), 1);
+
+    // 新的末尾空行（第 1 行）改类型：不发
+    let kind_select = cx.read(|app| table.read(app).row_kind_select(1));
+    pick_select(cx, &kind_select, PostRowKind::AssertJson.index());
+    assert_eq!(changed.get(), 1);
 }
 
 #[gpui_kit::test]
@@ -3520,7 +4684,8 @@ fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.toggle_tab_rows(cx)));
     cx.read(|app| assert_eq!(ws.read(app).tab_rows(), MAX_TAB_ROWS));
 
-    // 画一帧，标签区才量得到可用宽度；900 px 下每行 4 个（TAB_WIDTH = 200）、每页 12 个
+    // 画一帧，标签区才量得到可用宽度（900 px 减去新建按钮与环境切换器等控件后还剩多少，
+    // 不摆死成常量——控件多一个 / 宽一点都不该让这条测试跟着改数字）
     let ws_element = ws.clone();
     cx.draw(point(px(0.), px(0.)), size(px(900.), px(600.)), |_, _| {
         ws_element.into_any_element()
@@ -3534,9 +4699,18 @@ fn tab_rows_toggle_pages_through_tabs_and_persists(cx: &mut TestAppContext) {
         );
     });
 
-    // 翻到下一页，再翻回来；两端都不该越界
+    // 翻到下一页，再翻回来；两端都不该越界。`toggle_tab_rows` 那一下是在布局量出来
+    // 之前调的 `reveal_active_tab`（`strip_width` 还是 0），算出来的页码本来就偏大，
+    // 所以这一步的期望值不是「+1」，而是「撞到量出真实宽度后的末页就停住」。
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.step_tabs(1, cx)));
-    cx.read(|app| assert_eq!(ws.read(app).tab_page(), 1));
+    cx.read(|app| {
+        let ws = ws.read(app);
+        let pages = page_count(
+            ws.tab_count(),
+            tabs_per_page(ws.strip_width(), MAX_TAB_ROWS),
+        );
+        assert_eq!(ws.tab_page(), pages - 1, "翻到底就停住，不越界");
+    });
     cx.update(|_, cx| {
         ws.update(cx, |ws, cx| {
             for _ in 0..10 {
@@ -3990,4 +5164,897 @@ fn sidebar_width_constants_match_spec() {
     assert_eq!(SIDEBAR_DEFAULT_WIDTH, 360.);
     assert_eq!(SIDEBAR_MIN_WIDTH, 280.);
     assert_eq!(SIDEBAR_MAX_WIDTH, 560.);
+}
+
+/// 没装全局时返回空集；`update` 写盘 + 装全局；无变化不写。
+#[gpui_kit::test]
+fn variables_update_persists_and_no_change_skips_write(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    cx.read(|app| assert!(variables::variables(app).globals.is_empty()));
+    cx.update(|_, app| {
+        variables::update(app, |s| s.globals.push(Variable::new("host", "h")));
+    });
+    assert!(store.flush());
+    assert_eq!(store.write_count(), 1);
+    let on_disk = store.load_all().variables.unwrap();
+    assert_eq!(on_disk.globals[0].value, "h");
+    cx.update(|_, app| variables::update(app, |_| {}));
+    assert!(store.flush());
+    assert_eq!(store.write_count(), 1, "没变化不该再写一次");
+}
+
+#[gpui_kit::test]
+fn resolve_layers_environment_over_group_over_global(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals = vec![Variable::new("code", "200"), Variable::new("host", "h")];
+            s.groups
+                .insert("g".into(), vec![Variable::new("code", "418")]);
+            let mut env = Environment::new("dev");
+            env.variables.push(Variable::new("code", "503"));
+            s.active_environment = Some(env.id);
+            s.environments.push(env);
+        });
+    });
+    let draft = RequestDraft {
+        url: "http://{{host}}/status/{{code}}?x={{nope}}".into(),
+        ..Default::default()
+    };
+    cx.read(|app| {
+        let r = variables::resolve(app, Some("g"), draft.clone());
+        assert_eq!(r.draft.url, "http://h/status/503?x={{nope}}");
+        assert!(r.unresolved.contains("nope"));
+        let r = variables::resolve(app, None, draft.clone());
+        assert_eq!(r.draft.url, "http://h/status/503?x={{nope}}");
+    });
+    cx.update(|_, app| variables::set_active_environment(app, None));
+    cx.read(|app| {
+        assert_eq!(
+            variables::resolve(app, Some("g"), draft.clone()).draft.url,
+            "http://h/status/418?x={{nope}}"
+        );
+        assert_eq!(
+            variables::resolve(app, None, draft.clone()).draft.url,
+            "http://h/status/200?x={{nope}}"
+        );
+    });
+}
+
+/// 切换器菜单动作：选环境 → 激活；选「无环境」→ 清空。`environment_label` 直接读全局，
+/// 但标签栏要跟着重绘，所以顺带断言 `Workspace` 在全局变化（哪怕不经 `select_environment`）
+/// 时也会被 `cx.notify()` 唤醒。
+#[gpui_kit::test]
+fn environment_switcher_activates_and_clears(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let id = cx.update(|_, app| {
+        let mut id = None;
+        variables::update(app, |s| {
+            let env = Environment::new("dev");
+            id = Some(env.id);
+            s.environments.push(env);
+        });
+        id.unwrap()
+    });
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.select_environment(Some(id), window, cx)));
+    cx.read(|app| {
+        assert_eq!(variables::variables(app).active_environment, Some(id));
+        assert_eq!(ws.read(app).environment_label(app).as_ref(), "dev");
+    });
+
+    // 不经 `select_environment`、直接改全局：`environment_label` 自己读全局，不管有没有
+    // 订阅都会返回新值，所以真正要钉住的是「标签栏会不会重绘」——数一数 `Workspace` 收到
+    // 几次 `cx.notify()`，而不是再读一遍 `environment_label`（那样订阅摘掉测试也照样绿）。
+    let notified = Rc::new(Cell::new(0));
+    let counter = notified.clone();
+    let _sub = cx.update(|_, cx| cx.observe(&ws, move |_, _| counter.set(counter.get() + 1)));
+    cx.update(|_, app| variables::set_active_environment(app, None));
+    cx.run_until_parked();
+    assert!(
+        notified.get() > 0,
+        "Workspace 必须观察 VariablesHandle 并在它变化时 notify，标签栏才会跟着重绘"
+    );
+    cx.read(|app| {
+        let _locale = crate::i18n::locale_test_lock();
+        assert_eq!(variables::variables(app).active_environment, None);
+        assert_eq!(
+            ws.read(app).environment_label(app).as_ref(),
+            "No environment"
+        );
+    });
+}
+
+/// `select_environment` 在「生成代码」抽屉开着时要立刻刷新，否则抽屉里显示的还是切换前
+/// 那个环境展开出来的请求（`refresh_code_sheet` 本身只在 `open_tool == CodeGen` 时才调用，
+/// 见 `Workspace::select_environment`）。
+#[gpui_kit::test]
+fn select_environment_refreshes_the_open_code_sheet(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let (_dev_id, prod_id) = cx.update(|_, app| {
+        let mut dev = Environment::new("dev");
+        dev.variables.push(Variable::new("host", "dev.test"));
+        let mut prod = Environment::new("prod");
+        prod.variables.push(Variable::new("host", "prod.test"));
+        let (dev_id, prod_id) = (dev.id, prod.id);
+        variables::update(app, |s| {
+            s.active_environment = Some(dev_id);
+            s.environments = vec![dev, prod];
+        });
+        (dev_id, prod_id)
+    });
+
+    // `open_code_sheet` 走 `window.open_sheet`，落到 `Root::update`——没有 `Root` 的裸测试
+    // 窗口会直接 panic，所以这里要跟变量抽屉的测试一样套一层 `Root`。
+    let slot: Rc<RefCell<Option<Entity<Workspace>>>> = Rc::new(RefCell::new(None));
+    let slot_for_root = slot.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        let ws = cx.new(|cx| Workspace::new(window, cx));
+        *slot_for_root.borrow_mut() = Some(ws.clone());
+        Root::new(ws, window, cx)
+    });
+    let ws = slot
+        .borrow_mut()
+        .take()
+        .expect("workspace created inside the root view");
+
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://{{host}}/v1", cx);
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_tool_section(ToolSection::CodeGen, window, cx)
+        })
+    });
+    let code_sheet = cx.read(|app| ws.read(app).code_sheet.clone());
+    let code_text = |cx: &mut VisualTestContext| cx.read(|app| code_sheet.read(app).text().clone());
+    let before = code_text(cx);
+    assert!(before.contains("dev.test"), "{before}");
+
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.select_environment(Some(prod_id), window, cx)
+        })
+    });
+    let after = code_text(cx);
+    assert!(after.contains("prod.test"), "{after}");
+    assert!(!after.contains("dev.test"), "{after}");
+}
+
+/// Tab 记住自己所属分类：保存 / 打开 / 改名 / 解散 / 删除都要同步，变量表也跟着联动。
+#[gpui_kit::test]
+fn saved_group_follows_the_request_and_variables_follow_the_group(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/a", cx);
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "a".into(), Some("订单".into()), cx)
+            })
+        })
+        .unwrap();
+    cx.read(|app| assert_eq!(tab.read(app).saved_group.as_deref(), Some("订单")));
+
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.groups
+                .insert("订单".into(), vec![Variable::new("code", "418")]);
+        });
+    });
+    // 改名：Tab 与变量表一起搬
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.rename_group("订单", "订单2", cx)));
+    cx.read(|app| {
+        assert_eq!(tab.read(app).saved_group.as_deref(), Some("订单2"));
+        let sets = variables::variables(app);
+        assert!(!sets.groups.contains_key("订单"));
+        assert_eq!(sets.group_vars(Some("订单2"))[0].value, "418");
+    });
+    // 移动到未分类
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.move_saved_to_group(id, None, cx)));
+    cx.read(|app| assert_eq!(tab.read(app).saved_group, None));
+    // 分类变量在成员走光后仍保留
+    cx.read(|app| assert_eq!(variables::variables(app).group_vars(Some("订单2")).len(), 1));
+    // 解散：变量删除
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(id, Some("订单2".into()), cx)
+        })
+    });
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.dissolve_group("订单2", cx)));
+    cx.read(|app| {
+        assert_eq!(tab.read(app).saved_group, None);
+        assert!(variables::variables(app).groups.is_empty());
+    });
+    // 重启恢复：从已保存请求反查
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.move_saved_to_group(id, Some("g".into()), cx)
+        })
+    });
+    assert!(store.flush());
+    let loaded = store.load_all();
+    let ws2 = cx.update(|window, cx| cx.new(|cx| Workspace::restore(loaded, window, cx)));
+    cx.read(|app| {
+        let t = ws2.read(app).active_tab();
+        assert_eq!(t.read(app).saved_group.as_deref(), Some("g"));
+    });
+    // 删除已保存请求：分类清空
+    cx.update(|_, cx| ws2.update(cx, |ws, cx| ws.delete_saved(id, cx)));
+    cx.read(|app| assert_eq!(ws2.read(app).active_tab().read(app).saved_group, None));
+}
+
+/// 回一次固定 JSON，并把收到的请求首行（`GET /path?x HTTP/1.1`）与全部头送回来。
+pub(crate) fn echo_server(body: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 8192];
+            let mut got = Vec::new();
+            while let Ok(n) = stream.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&buf[..n]);
+                if got.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = tx.send(String::from_utf8_lossy(&got).into_owned());
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Req: abc\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    (format!("http://{addr}"), rx)
+}
+
+/// 发送时按激活环境替换 URL / 头；未解析的名字记在 Tab 上；草稿与已保存请求仍是原文。
+#[gpui_kit::test]
+fn send_resolves_variables_and_keeps_the_draft_verbatim(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, rx) = echo_server("{}");
+    cx.update(|_, app| {
+        variables::update(app, |s| {
+            s.globals.push(Variable::new("base", base.clone()));
+            s.globals.push(Variable::new("tok", "T"));
+        });
+    });
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.headers.update(cx, |h, cx| {
+                h.set_values(
+                    &[KeyValue::new("Authorization", "Bearer {{tok}}")],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    set_url_and_send(&tab, "{{base}}/users/{{missing}}", cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    // 先确认请求成功：失败时服务端收不到请求，直接 recv 会永远卡住而看不到原因
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.response.is_done(), "{:?}", t.response.error());
+    });
+    let received = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("echo server should have received the request");
+    assert!(
+        received.starts_with("GET /users/%7B%7Bmissing%7D%7D HTTP/1.1"),
+        "{received}"
+    );
+    assert!(
+        received.to_lowercase().contains("authorization: bearer t"),
+        "{received}"
+    );
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(
+            t.unresolved_vars.iter().cloned().collect::<Vec<_>>(),
+            vec!["missing".to_string()]
+        );
+        assert_eq!(t.draft(app).url, "{{base}}/users/{{missing}}");
+        assert_eq!(t.draft(app).headers[0].value, "Bearer {{tok}}");
+    });
+    // 草稿文件也是原文
+    cx.update(|_, cx| tab.update(cx, |t, cx| t.save_draft_now(cx)));
+    assert!(store.flush());
+    let id = cx.read(|app| tab.read(app).id);
+    assert_eq!(
+        read_draft(&store, id).unwrap().draft.url,
+        "{{base}}/users/{{missing}}"
+    );
+}
+
+/// 前置操作在发送前写变量并落盘，同一次发送里后面的替换就能用上。
+#[gpui_kit::test]
+fn pre_ops_write_variables_before_the_request_goes_out(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, rx) = echo_server("{}");
+    cx.update(|_, app| {
+        variables::update(app, |s| s.globals.push(Variable::new("base", base.clone())))
+    });
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(
+                    &[PreOp {
+                        enabled: true,
+                        kind: PreOpKind::SetVariable {
+                            scope: VarScope::Global,
+                            key: "who".into(),
+                            value: "cat-{{$randomInt}}".into(),
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    set_url_and_send(&tab, "{{base}}/hi/{{who}}", cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.response.is_done(), "{:?}", t.response.error());
+    });
+    let received = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("echo server should have received the request");
+    assert!(received.starts_with("GET /hi/cat-"), "{received}");
+    assert!(store.flush());
+    let who = store
+        .load_all()
+        .variables
+        .unwrap()
+        .globals
+        .iter()
+        .find(|v| v.key == "who")
+        .unwrap()
+        .value
+        .clone();
+    assert!(who.starts_with("cat-"), "{who}");
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.unresolved_vars.is_empty());
+        match &t.response {
+            ResponseState::Done {
+                ops: Some(report), ..
+            } => {
+                assert_eq!(report.pre.len(), 1);
+                assert_eq!(report.pre[0].1, OpOutcome::Passed);
+                assert!(report.post.results.is_empty());
+            }
+            _ => panic!("expected Done with ops report"),
+        }
+    });
+}
+
+/// 后置操作从响应里提取变量并断言；提取结果写进 variables.json。
+#[gpui_kit::test]
+fn post_ops_extract_and_assert_then_persist(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, _rx) = echo_server(r#"{"data":{"token":"T"}}"#);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Extract {
+                                scope: VarScope::Global,
+                                key: "token".into(),
+                                source: ResponseSource::JsonPath {
+                                    path: "$.data.token".into(),
+                                },
+                            },
+                        },
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Extract {
+                                scope: VarScope::Environment,
+                                key: "req".into(),
+                                source: ResponseSource::Header {
+                                    name: "x-req".into(),
+                                },
+                            },
+                        },
+                        PostOp {
+                            enabled: true,
+                            kind: PostOpKind::Assert {
+                                subject: ResponseSource::Status,
+                                op: AssertOp::Equals,
+                                expected: "201".into(),
+                            },
+                        },
+                    ],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    set_url_and_send(&tab, &base, cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        match &tab.read(app).response {
+            ResponseState::Done {
+                ops: Some(report), ..
+            } => {
+                assert_eq!(report.total(), 3);
+                // 全局提取通过；环境提取因没有激活环境被改写为跳过；断言失败
+                assert_eq!(report.passed(), 1);
+                assert_eq!(report.post.results[0].1, OpOutcome::Passed);
+                assert_eq!(
+                    report.post.results[1].1,
+                    OpOutcome::Skipped(OpSkip::NoActiveEnvironment)
+                );
+                assert!(matches!(
+                    report.post.results[2].1,
+                    OpOutcome::Failed(OpFailure::Mismatch { .. })
+                ));
+                // 只剩真正写入的提取，index 指回它的结果行
+                assert_eq!(report.post.extracted.len(), 1);
+                assert_eq!(report.post.extracted[0].index, 0);
+            }
+            _ => panic!("expected Done with ops report"),
+        }
+        // 没有激活环境：环境作用域的提取写不进去，但全局的写了
+        let sets = variables::variables(app);
+        assert_eq!(
+            sets.globals
+                .iter()
+                .find(|v| v.key == "token")
+                .unwrap()
+                .value,
+            "T"
+        );
+        assert!(sets.environments.is_empty());
+    });
+    assert!(store.flush());
+    assert_eq!(store.load_all().variables.unwrap().globals[0].key, "token");
+}
+
+/// 过期的完成回调（取消 / 重发后 generation 不匹配）不得写回提取的变量。
+#[gpui_kit::test]
+fn stale_outcome_does_not_apply_extracted_variables(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let body = BodyStore::in_memory(b"{}".to_vec());
+    let meta = ResponseMeta {
+        status: 200,
+        status_text: "OK".into(),
+        headers: vec![],
+        duration: Duration::from_millis(1),
+        ttfb: None,
+        body_len: 2,
+        content_type: Some("application/json".into()),
+        http_version: None,
+        certificate: None,
+    };
+    let view = ResponseView::prepare(meta, &body);
+    let report = getcat_core::ops::PostReport {
+        results: vec![],
+        extracted: vec![getcat_core::ops::Extracted {
+            index: 0,
+            scope: VarScope::Global,
+            key: "leak".into(),
+            value: "x".into(),
+        }],
+    };
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            let stale = t.generation + 1;
+            t.generation = stale + 1;
+            t.apply_outcome(stale, Ok((body, view, Some(report))), window, cx);
+        })
+    });
+    cx.read(|app| assert!(variables::variables(app).globals.is_empty()));
+}
+
+fn pre_set(scope: VarScope, key: &str, value: &str) -> PreOp {
+    PreOp {
+        enabled: true,
+        kind: PreOpKind::SetVariable {
+            scope,
+            key: key.into(),
+            value: value.into(),
+        },
+    }
+}
+
+/// URL 非法、请求根本发不出去：前置操作在副本上执行后整份丢弃，变量表不变、不写盘。
+#[gpui_kit::test]
+fn pre_ops_are_discarded_when_the_request_cannot_be_prepared(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
+        })
+    });
+    assert!(store.flush());
+    let writes = store.write_count();
+    // 反复点发送也一样
+    for _ in 0..2 {
+        set_url_and_send(&tab, "ftp://x", cx);
+    }
+    cx.run_until_parked();
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes, "发不出去的请求不该写盘");
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(
+            matches!(t.prepare_error, Some(RequestError::InvalidUrl(_))),
+            "{:?}",
+            t.prepare_error
+        );
+        assert!(matches!(t.response, ResponseState::Idle));
+        assert!(variables::variables(app).globals.is_empty());
+    });
+}
+
+/// 前置操作值里引用的未定义变量，与草稿里的一起进 URL 栏的「未定义变量」提示。
+#[gpui_kit::test]
+fn unresolved_vars_include_names_from_pre_op_values(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "{{ghost}}")], window, cx)
+            });
+        })
+    });
+    set_url_and_send(&tab, &format!("{}{{{{missing}}}}", refused_url()), cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(
+            t.unresolved_vars.iter().cloned().collect::<Vec<_>>(),
+            vec!["ghost".to_string(), "missing".to_string()]
+        );
+    });
+}
+
+fn extract_status(key: &str) -> PostOp {
+    PostOp {
+        enabled: true,
+        kind: PostOpKind::Extract {
+            scope: VarScope::Global,
+            key: key.into(),
+            source: ResponseSource::Status,
+        },
+    }
+}
+
+/// 网络错误：前置结果保留（写入照常生效）；后置操作全部记为「请求失败，未执行」，不提取。
+#[gpui_kit::test]
+fn request_failure_keeps_pre_results_and_marks_post_ops_not_run(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(&[extract_status("leak")], window, cx)
+            });
+        })
+    });
+    set_url_and_send(&tab, &refused_url(), cx);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        let ResponseState::Failed {
+            error,
+            ops: Some(report),
+        } = &t.response
+        else {
+            panic!("expected Failed with ops, got {:?}", t.response.error());
+        };
+        assert!(
+            matches!(error, RequestError::ConnectionRefused(_)),
+            "{error:?}"
+        );
+        assert_eq!(report.pre.len(), 1);
+        assert_eq!(report.pre[0].1, OpOutcome::Passed);
+        assert_eq!(report.post.results.len(), 1);
+        assert_eq!(
+            report.post.results[0].1,
+            OpOutcome::Skipped(OpSkip::RequestFailed)
+        );
+        assert!(report.post.extracted.is_empty());
+        let sets = variables::variables(app);
+        assert!(
+            sets.globals
+                .iter()
+                .any(|v| v.key == "who" && v.value == "cat")
+        );
+        assert!(sets.globals.iter().all(|v| v.key != "leak"));
+    });
+}
+
+/// 取消是用户主动放弃：前后置结果一并丢弃。
+#[gpui_kit::test]
+fn cancel_discards_the_ops_report(cx: &mut TestAppContext) {
+    let (cx, _store, _dir) = init_with_store(cx);
+    let tab = new_tab(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.pre_ops.update(cx, |o, cx| {
+                o.set_pre_ops(&[pre_set(VarScope::Global, "who", "cat")], window, cx)
+            });
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(&[extract_status("leak")], window, cx)
+            });
+        })
+    });
+    set_url_and_send(&tab, &hanging_server(), cx);
+    cx.update(|_, cx| tab.update(cx, |t, cx| t.cancel(cx)));
+    std::thread::sleep(Duration::from_millis(50));
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert!(matches!(
+            tab.read(app).response,
+            ResponseState::Failed {
+                error: RequestError::Cancelled,
+                ops: None
+            }
+        ));
+    });
+}
+
+/// 「操作」页签只在这次响应真的挂了报告时出现（纯函数部分）。
+#[test]
+fn ops_section_only_appears_when_a_report_exists() {
+    assert_eq!(
+        ResponseSection::visible(false, false),
+        vec![ResponseSection::Body, ResponseSection::Headers]
+    );
+    assert_eq!(
+        ResponseSection::visible(true, true),
+        vec![
+            ResponseSection::Body,
+            ResponseSection::Headers,
+            ResponseSection::Certificate,
+            ResponseSection::Ops
+        ]
+    );
+}
+
+/// 请求失败时前置结果与「请求失败，未执行」的后置结果一起挂在 `Failed` 上，
+/// `ops_report()` 认得到，「操作」页签也该出现。
+#[gpui_kit::test]
+fn failed_response_still_exposes_the_ops_report(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let post_ops = vec![PostOp {
+        enabled: true,
+        kind: PostOpKind::Assert {
+            subject: ResponseSource::Status,
+            op: AssertOp::Equals,
+            expected: "200".into(),
+        },
+    }];
+    cx.update(|_, cx| {
+        tab.update(cx, |t, cx| {
+            t.response = ResponseState::Failed {
+                error: RequestError::Timeout,
+                ops: Some(OpsReport {
+                    pre: vec![],
+                    post: getcat_core::ops::skip_all(&post_ops),
+                }),
+            };
+            cx.notify();
+        })
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.ops_report().is_some());
+    });
+    assert!(ResponseSection::visible(false, true).contains(&ResponseSection::Ops));
+}
+
+/// `persist == false`（variables.json 在但读不出来）时只改内存、不写盘；正常安装照常写。
+#[gpui_kit::test]
+fn variables_installed_without_persist_never_write(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let writes = store.write_count();
+    cx.update(|_, app| {
+        variables::install(app, None, false);
+        variables::update(app, |s| s.globals.push(Variable::new("a", "1")));
+    });
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes, "不可写时不该写盘");
+    cx.read(|app| assert_eq!(variables::variables(app).globals[0].value, "1"));
+    // 后续改动也保持不写
+    cx.update(|_, app| variables::update(app, |s| s.globals[0].value = "2".into()));
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes);
+
+    cx.update(|_, app| {
+        variables::install(app, None, true);
+        variables::update(app, |s| s.globals.push(Variable::new("b", "2")));
+    });
+    assert!(store.flush());
+    assert_eq!(store.write_count(), writes + 1);
+    assert_eq!(store.load_all().variables.unwrap().globals[0].key, "b");
+}
+
+/// 读取失败且文件仍在原处 → 不落盘；隔离改名后的损坏文件、别的文件出错 → 照常落盘。
+#[test]
+fn variables_persist_only_when_the_file_is_not_left_unreadable() {
+    use getcat_core::store::LoadError;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("variables.json");
+    let err = |p: &std::path::Path| LoadError {
+        path: p.to_path_buf(),
+        message: "Couldn't read file".into(),
+    };
+    // 没有错误
+    assert!(variables::should_persist(&path, &[]));
+    // 出错但文件已不在原处（损坏文件被改名隔离）
+    assert!(variables::should_persist(&path, &[err(&path)]));
+    std::fs::write(&path, b"{}").unwrap();
+    // 文件在、但读取失败
+    assert!(!variables::should_persist(&path, &[err(&path)]));
+    // 出错的是别的文件
+    assert!(variables::should_persist(
+        &path,
+        &[err(&dir.path().join("settings.json"))]
+    ));
+}
+
+/// 保存到分类的请求：后置提取到「分类」作用域，写进该分类的变量表并落盘。
+#[gpui_kit::test]
+fn post_ops_extract_into_the_saved_group(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let (base, _rx) = echo_server(r#"{"data":{"token":"T"}}"#);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, &base, cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.post_ops.update(cx, |o, cx| {
+                o.set_post_ops(
+                    &[PostOp {
+                        enabled: true,
+                        kind: PostOpKind::Extract {
+                            scope: VarScope::Group,
+                            key: "token".into(),
+                            source: ResponseSource::JsonPath {
+                                path: "$.data.token".into(),
+                            },
+                        },
+                    }],
+                    window,
+                    cx,
+                )
+            });
+        })
+    });
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.finish_save(tab.clone(), "login".into(), Some("g".into()), cx)
+        })
+    })
+    .unwrap();
+    cx.update(|window, cx| tab.update(cx, |t, cx| t.send(window, cx)));
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        match &t.response {
+            ResponseState::Done {
+                ops: Some(report), ..
+            } => {
+                assert_eq!(report.post.results[0].1, OpOutcome::Passed);
+                assert_eq!(report.post.extracted.len(), 1);
+            }
+            _ => panic!("expected Done with ops, got {:?}", t.response.error()),
+        }
+        let sets = variables::variables(app);
+        assert_eq!(sets.group_vars(Some("g")), [Variable::new("token", "T")]);
+        assert!(sets.globals.is_empty());
+    });
+    assert!(store.flush());
+    let on_disk = store.load_all().variables.unwrap();
+    assert_eq!(on_disk.group_vars(Some("g")), [Variable::new("token", "T")]);
+}
+
+/// 前后置操作表是子实体：程序化载入草稿不置脏，但用户在表格里改动（发出 `Changed`）要置脏，
+/// 且改动经 `draft()` 能读回来。
+#[gpui_kit::test]
+fn editing_ops_marks_the_tab_dirty_and_round_trips_through_draft(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let ops = vec![PreOp {
+        enabled: true,
+        kind: PreOpKind::SetVariable {
+            scope: VarScope::Global,
+            key: "a".into(),
+            value: "1".into(),
+        },
+    }];
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.load_draft(
+                &RequestDraft {
+                    pre_ops: ops.clone(),
+                    ..Default::default()
+                },
+                window,
+                cx,
+            );
+            assert!(!t.dirty, "程序化载入不置脏");
+            assert_eq!(t.draft(cx).pre_ops, ops);
+            // 模拟用户改动：表格发 Changed → Tab 置脏
+            t.pre_ops.update(cx, |_, cx| {
+                cx.emit(crate::ui::ops_table::OpsTableEvent::Changed)
+            });
+        })
+    });
+    cx.read(|app| assert!(tab.read(app).dirty));
+}
+
+/// 改 URL / 重新载入草稿时，上一次发送留下的未定义变量提示与校验错误一起清掉。
+#[gpui_kit::test]
+fn url_edits_and_load_draft_clear_unresolved_vars(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let send_bad = |cx: &mut VisualTestContext| {
+        set_url_and_send(&tab, "ftp://{{nope}}/", cx);
+        cx.read(|app| {
+            let t = tab.read(app);
+            assert!(t.prepare_error.is_some());
+            assert!(t.unresolved_vars.contains("nope"));
+        });
+    };
+    send_bad(cx);
+    change_url(&tab, "https://api.test/", cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.prepare_error.is_none());
+        assert!(t.unresolved_vars.is_empty(), "{:?}", t.unresolved_vars);
+    });
+
+    send_bad(cx);
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.load_draft(&RequestDraft::default(), window, cx)
+        })
+    });
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert!(t.prepare_error.is_none());
+        assert!(t.unresolved_vars.is_empty(), "{:?}", t.unresolved_vars);
+    });
 }
