@@ -45,7 +45,7 @@ use crate::templates;
 use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
 use crate::ui::curl_sheet::{CURL_SHEET_WIDTH, CurlSheet, import_button};
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
-use crate::ui::tab_strip::{next_tab_rows, page_count, tabs_per_page};
+use crate::ui::tab_strip::{TabDragState, next_tab_rows, page_count, tabs_per_page};
 use crate::ui::variables_sheet::{SheetScope, VARIABLES_SHEET_WIDTH, VariablesSheet};
 use crate::{
     CloseTab, DuplicateTab, FindInResponse, NewTab, OpenSettings, SaveRequest, SendRequest,
@@ -132,6 +132,7 @@ pub struct Workspace {
     /// `Cell` 而不是普通字段：这是在 prepaint 里写的，走 `&mut self` 会让每帧的
     /// 布局测量都触发一次重绘（gpui-component 的 TabBar 出于同样理由用 `Rc<RefCell>`）。
     strip_width: Rc<Cell<f32>>,
+    pub(crate) tab_drag: TabDragState,
     focus_handle: FocusHandle,
     /// 全局更新器状态的副本（观察到变化时同步），状态栏提示与「关于」页据此渲染。
     update_status: UpdateStatus,
@@ -191,6 +192,7 @@ impl Workspace {
             tab_rows: state.tab_rows.clamp(1, MAX_TAB_ROWS),
             tab_page: 0,
             strip_width: Rc::new(Cell::new(0.)),
+            tab_drag: TabDragState::default(),
             focus_handle: cx.focus_handle(),
             update_status: update::status(cx),
             code_sheet: cx.new(|cx| CodeSheet::new(window, cx)),
@@ -479,6 +481,28 @@ impl Workspace {
         }
     }
 
+    pub(crate) fn tab_index(&self, id: TabId, cx: &App) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.read(cx).id == id)
+    }
+
+    /// 拖动只搬实体，当前请求、编辑器和响应仍然属于原来的标签。
+    pub(crate) fn move_tab(&mut self, source: TabId, target: TabId, cx: &mut Context<Self>) {
+        let (Some(from), Some(to)) = (self.tab_index(source, cx), self.tab_index(target, cx))
+        else {
+            return;
+        };
+        if from == to {
+            return;
+        }
+        let active = self.active_tab();
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        self.active = self.tabs.iter().position(|tab| *tab == active).unwrap_or(0);
+        // 不 reveal_active_tab：拖其他标签时不能把视口拉回当前请求。
+        self.persist_workspace(cx);
+        cx.notify();
+    }
+
     /// 让激活的标签露出来。标签多到装不下时，不这么做就会出现「新建了标签却看不见」。
     ///
     /// 单行滚动、多行翻页——两种模式各有各的「露出来」。
@@ -585,12 +609,12 @@ impl Workspace {
     }
 
     /// 渲染标签栏需要的每个 Tab 的信息。
-    pub(crate) fn tabs_meta(&self, cx: &App) -> Vec<(Method, SharedString, bool)> {
+    pub(crate) fn tabs_meta(&self, cx: &App) -> Vec<(TabId, Method, SharedString, bool)> {
         self.tabs
             .iter()
             .map(|t| {
                 let t = t.read(cx);
-                (t.current_method(cx), t.title(cx), t.dirty)
+                (t.id, t.current_method(cx), t.title(cx), t.dirty)
             })
             .collect()
     }
