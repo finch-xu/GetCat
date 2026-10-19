@@ -44,8 +44,11 @@ impl XdgDirs {
     }
 
     /// [`from_env`](Self::from_env) 的纯函数形态，便于测试。规范要求相对路径的 `$XDG_DATA_HOME` 视同未设置。
+    ///
+    /// 「绝对」按 XDG 的字面意思判断（以 `/` 开头），不用 `Path::is_absolute`：后者按宿主平台算，
+    /// Windows 上 `/data` 没有盘符不算绝对路径，这个纯函数的单测就只能在 Unix 上过。Linux 上两者等价。
     fn resolve(xdg_data_home: Option<String>, home: Option<String>) -> Option<Self> {
-        if let Some(data_home) = xdg_data_home.filter(|v| Path::new(v).is_absolute()) {
+        if let Some(data_home) = xdg_data_home.filter(|v| v.starts_with('/')) {
             return Some(Self::new(data_home));
         }
         home.map(|h| Self::new(Path::new(&h).join(".local/share")))
