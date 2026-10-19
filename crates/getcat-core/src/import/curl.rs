@@ -146,10 +146,16 @@ fn from_argv(argv: Vec<String>) -> Result<CurlImport, CurlParseError> {
             }
             "-u" | "--user" => {
                 let raw = take(&flag)?;
-                c.headers.push(KeyValue::new(
-                    "Authorization",
-                    format!("Basic {}", base64(raw.as_bytes())),
-                ));
+                // 导入时就要编码成 Basic 头，`{{var}}` 编进去之后发送时再也替换不了
+                if raw.contains("{{") {
+                    c.warnings
+                        .push(CurlWarning::Unsupported(format!("-u {raw}")));
+                } else {
+                    c.headers.push(KeyValue::new(
+                        "Authorization",
+                        format!("Basic {}", base64(raw.as_bytes())),
+                    ));
+                }
             }
             "--url" => c.url = Some(take(&flag)?),
             "-d" | "--data" | "--data-raw" | "--data-ascii" | "--data-binary" => {
@@ -364,8 +370,22 @@ fn parse_form_field(raw: &str, literal: bool) -> FormField {
 
 /// `--data-urlencode` 的几种写法，返回已编码的 `k=v` 片段。
 /// 只编码值那一半，`name=` 前缀原样保留（curl 也是这么干的）。
+/// 值里的 `{{var}}` 占位跳过不编，否则发送时认不出来。
 fn urlencode_data(raw: &str) -> String {
-    let encode = |s: &str| utf8_percent_encode(s, NON_ALPHANUMERIC).to_string();
+    let encode = |s: &str| {
+        let mut out = String::with_capacity(s.len());
+        let mut rest = s;
+        while let Some(start) = rest.find("{{")
+            && let Some(len) = rest[start..].find("}}")
+        {
+            let end = start + len + 2;
+            out.extend(utf8_percent_encode(&rest[..start], NON_ALPHANUMERIC));
+            out.push_str(&rest[start..end]);
+            rest = &rest[end..];
+        }
+        out.extend(utf8_percent_encode(rest, NON_ALPHANUMERIC));
+        out
+    };
     match raw.split_once('=') {
         // `=content`：整串都是值，没有名字
         Some(("", value)) => encode(value),
@@ -647,6 +667,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, CurlParseError> {
                             }
                             None => return Err(CurlParseError::UnterminatedQuote),
                         },
+                        Some('$') => shell_variable(&mut chars, &mut cur),
                         Some(c) => cur.push(c),
                         None => return Err(CurlParseError::UnterminatedQuote),
                     }
@@ -674,13 +695,21 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, CurlParseError> {
                     }
                 }
             }
+            '$' if dialect == Dialect::Posix => {
+                has_token = true;
+                shell_variable(&mut chars, &mut cur);
+            }
             '\\' => {
                 has_token = true;
-                // 引号外的反斜杠：只有转义空白与引号时才当转义符。其余原样保留，
-                // 这样 `C:\tools\curl.exe` 这种裸路径不会被啃掉一半——
+                // 引号外的反斜杠：只有转义空白与引号（POSIX 下还有 `$`）时才当转义符。
+                // 其余原样保留，这样 `C:\tools\curl.exe` 这种裸路径不会被啃掉一半——
                 // 命令行里出现 Windows 路径远比转义普通字符常见。
                 match chars.peek() {
-                    Some(c) if c.is_whitespace() || matches!(c, '\'' | '"' | '\\') => {
+                    Some(c)
+                        if c.is_whitespace()
+                            || matches!(c, '\'' | '"' | '\\')
+                            || (*c == '$' && dialect == Dialect::Posix) =>
+                    {
                         cur.push(chars.next().unwrap_or_default());
                     }
                     _ => cur.push('\\'),
@@ -696,6 +725,41 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, CurlParseError> {
         out.push(cur);
     }
     Ok(out)
+}
+
+/// POSIX shell 会展开 `$` 的位置（双引号内、引号外）读到了 `$`：
+/// `$NAME` / `${NAME}` 改写成 GetCat 的 `{{NAME}}`，这样文档里
+/// `"Authorization: Bearer $API_KEY"` 这类示例导入后填个变量就能发。
+///
+/// 只认简单变量名（`[A-Za-z_][A-Za-z0-9_]*`）。位置参数 `$1`、特殊参数 `$?`、
+/// 带操作符的 `${NAME:-x}`、命令替换 `$(…)` 都没有对应概念，`$` 原样留下，
+/// 后面的字符交回调用方照常处理。
+fn shell_variable(chars: &mut std::iter::Peekable<std::str::Chars>, cur: &mut String) {
+    let is_start = |c: char| c.is_ascii_alphabetic() || c == '_';
+    let is_name = |c: char| c.is_ascii_alphanumeric() || c == '_';
+
+    if chars.peek() == Some(&'{') {
+        // 先在副本上看完整个 `{NAME}`，不成立就一个字符都不吃
+        let mut ahead = chars.clone();
+        ahead.next();
+        let name: String = std::iter::from_fn(|| ahead.next_if(|&c| is_name(c))).collect();
+        if name.starts_with(is_start) && ahead.next() == Some('}') {
+            *chars = ahead;
+            push_placeholder(cur, &name);
+            return;
+        }
+    } else if chars.peek().is_some_and(|&c| is_start(c)) {
+        let name: String = std::iter::from_fn(|| chars.next_if(|&c| is_name(c))).collect();
+        push_placeholder(cur, &name);
+        return;
+    }
+    cur.push('$');
+}
+
+fn push_placeholder(cur: &mut String, name: &str) {
+    cur.push_str("{{");
+    cur.push_str(name);
+    cur.push_str("}}");
 }
 
 #[cfg(test)]
@@ -776,6 +840,67 @@ mod tests {
         );
         // 但转义空白仍然要认，否则带空格的裸 URL 会被切开
         assert_eq!(tokenize(r"a\ b").unwrap(), ["a b"]);
+    }
+
+    /// shell 会展开的 `$VAR` / `${VAR}` 改写成 GetCat 的 `{{VAR}}`；
+    /// shell 不展开的（单引号、转义、`$'…'`）原样保留。
+    #[test]
+    fn shell_variables_become_placeholders() {
+        let cases = [
+            // 双引号与裸词里会展开
+            (r#""Bearer ${KEY}""#, "Bearer {{KEY}}"),
+            (r#""Bearer $KEY""#, "Bearer {{KEY}}"),
+            (r"https://$HOST/v1", "https://{{HOST}}/v1"),
+            (r"${A}${B_2}", "{{A}}{{B_2}}"),
+            // 名字只到标识符字符为止
+            (r#""$KEY.json""#, "{{KEY}}.json"),
+            (r#""$KEY-x""#, "{{KEY}}-x"),
+            // 单引号、`$'…'` 里不展开
+            (r"'Bearer ${KEY}'", "Bearer ${KEY}"),
+            (r"$'$KEY'", "$KEY"),
+            // 转义的 `$` 是字面量
+            (r#""\${KEY}""#, "${KEY}"),
+            (r"\$KEY", "$KEY"),
+            // 不是简单变量名的一律不动：位置参数、特殊参数、带操作符的展开、命令替换
+            (r#""$1 $? $$ $@""#, "$1 $? $$ $@"),
+            (r#""${KEY:-dev}""#, "${KEY:-dev}"),
+            (r#""${KEY""#, "${KEY"),
+            (r#""$(whoami)""#, "$(whoami)"),
+            (r#""cost: 5$""#, "cost: 5$"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(tokenize(input).unwrap(), [want], "输入：{input}");
+        }
+        // cmd 不认 `$`，它的变量是 `%VAR%`
+        assert_eq!(tokenize("curl ^\n  \"$KEY\"").unwrap(), ["curl", "$KEY"]);
+    }
+
+    #[test]
+    fn shell_variables_in_a_pasted_command() {
+        let d = draft_of(
+            r#"curl https://api.deepseek.com/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${DEEPSEEK_API_KEY}" \
+  -d '{"model": "deepseek-chat", "note": "$literal"}'"#,
+        );
+        assert_eq!(
+            d.headers[1],
+            KeyValue::new("Authorization", "Bearer {{DEEPSEEK_API_KEY}}")
+        );
+        // 请求体在单引号里，`$literal` 原样保留
+        assert!(matches!(&d.body, BodyKind::Raw { text, .. } if text.contains("\"$literal\"")));
+    }
+
+    /// `-u` 在导入时就编码成 Basic 头，变量一旦编进去就再也替换不了，
+    /// 只能如实告诉用户，不能悄悄生成一个错的头。
+    #[test]
+    fn basic_auth_with_a_variable_is_reported() {
+        let r = parse(r#"curl https://x.com -u "user:$PASS""#).unwrap();
+        assert!(r.draft.headers.is_empty());
+        assert_eq!(
+            r.warnings,
+            vec![CurlWarning::Unsupported("-u user:{{PASS}}".into())]
+        );
     }
 
     #[test]
@@ -971,6 +1096,9 @@ mod tests {
     fn data_urlencode_encodes_only_the_value() {
         let d = draft_of("curl -G https://x.com --data-urlencode 'q=a b&c'");
         assert_eq!(d.params, vec![KeyValue::new("q", "a%20b%26c")]);
+        // `{{var}}` 占位不编码，否则发送时认不出来
+        let d = draft_of(r#"curl -G https://x.com --data-urlencode "q=a b $Q!""#);
+        assert_eq!(d.params, vec![KeyValue::new("q", "a%20b%20{{Q}}%21")]);
     }
 
     #[test]
@@ -1058,6 +1186,13 @@ mod tests {
                 url: "https://api.example.com/users".into(),
                 params: vec![KeyValue::new("q", "hello world"), KeyValue::new("n", "1")],
                 headers: vec![KeyValue::new("X-Token", "abc")],
+                ..Default::default()
+            },
+            // 值里的 `$` 是字面量，读回来不能被当成 shell 变量
+            RequestDraft {
+                method: Method::Get,
+                url: "https://api.example.com/price".into(),
+                headers: vec![KeyValue::new("X-Note", "$5 ${KEY} $HOME")],
                 ..Default::default()
             },
             RequestDraft {
