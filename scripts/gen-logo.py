@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 assets/logo/ 下的两份 SVG 原画合成成应用 logo，输出三份 PNG 与一份 ICO。
+"""把 assets/logo/ 下的两份 SVG 原画合成成应用 logo，输出浅 / 深两套 PNG 与一份 ICO。
 
   scripts/gen-logo.py
 
@@ -8,13 +8,22 @@
   crates/getcat-app/assets/logo/getcat-art-mini.svg  简化版 —— ≤ 32 px：去掉脸部细节与条纹，
                                                      吊绳、爪子、四肢加粗，缩小后仍认得出
 
+两套配色：
+  浅色（默认）  浅雾蓝底板，爪子压暗一档 —— README、三平台系统图标、app 浅色主题
+  深色          夜蓝底板，原画原色      —— 只给 app 深色主题用
+原画按深色底板配色；浅色版不另存一份 SVG，而是在栅格化前把爪子的两种金属灰
+替换掉（LIGHT.recolor）：原来的浅灰压在浅底板上会糊成一片。
+
 产物：
-  crates/getcat-app/assets/logo/getcat.png       512×512，超椭圆底板铺满画布 —— Linux 窗口图标与 README 用
-  crates/getcat-app/assets/logo/getcat-mini.png  128×128，简化版 —— app 图标栏（26 px 显示）用
+  crates/getcat-app/assets/logo/getcat.png            512×512，浅色，超椭圆底板铺满画布
+                                                      —— README、Linux 窗口图标、app 浅色主题的关于页
+  crates/getcat-app/assets/logo/getcat-dark.png       512×512，深色 —— app 深色主题的关于页
+  crates/getcat-app/assets/logo/getcat-mini.png       128×128，浅色简化版 —— app 浅色主题的图标栏（26 px 显示）
+  crates/getcat-app/assets/logo/getcat-mini-dark.png  128×128，深色简化版 —— app 深色主题的图标栏
   crates/getcat-app/resources/macos/getcat-1024.png
-                                                 1024×1024，底板缩到 824 居中 —— macOS .icns 用
-  crates/getcat-app/resources/windows/getcat.ico 多尺寸（16…256），底板铺满画布；16/24/32 用简化版
-                                                 —— build.rs 嵌进 exe 资源（资源管理器 / 任务栏 / 窗口图标）
+                                                      1024×1024，浅色，底板缩到 824 居中 —— macOS .icns 用
+  crates/getcat-app/resources/windows/getcat.ico      多尺寸（16…256），浅色，底板铺满画布；16/24/32 用简化版
+                                                      —— build.rs 嵌进 exe 资源（资源管理器 / 任务栏 / 窗口图标）
 
 只在 logo 改动时由开发者手动跑一次并提交产物；CI 不调用本脚本。依赖：
   pip install pillow numpy
@@ -35,6 +44,7 @@ squircle，圆弧角在角落有肉眼可见的曲率突变，一眼就不像系
 
 import subprocess
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -45,7 +55,9 @@ LOGO_DIR = REPO_ROOT / "crates/getcat-app/assets/logo"
 ART_FULL = LOGO_DIR / "getcat-art.svg"
 ART_MINI = LOGO_DIR / "getcat-art-mini.svg"
 APP_LOGO = LOGO_DIR / "getcat.png"
+APP_LOGO_DARK = LOGO_DIR / "getcat-dark.png"
 APP_LOGO_MINI = LOGO_DIR / "getcat-mini.png"
+APP_LOGO_MINI_DARK = LOGO_DIR / "getcat-mini-dark.png"
 MACOS_ICON = REPO_ROOT / "crates/getcat-app/resources/macos/getcat-1024.png"
 WINDOWS_ICON = REPO_ROOT / "crates/getcat-app/resources/windows/getcat.ico"
 RASTER_TOOL_DIR = REPO_ROOT / "tools/svg-raster"
@@ -53,7 +65,6 @@ RASTER_TOOL = RASTER_TOOL_DIR / "target/release/svg-raster"
 
 SUPERSAMPLE = 4          # 底板边缘的抗锯齿倍率
 SQUIRCLE_EXPONENT = 5.0  # 超椭圆指数，越大越方；5 最接近 macOS 图标
-TILE_COLOR = (0x1A, 0x25, 0x40)  # 夜蓝底板，与画布 Logo 画板一致
 GLINT_OPACITY = 0.05     # 左上角那道玻璃反光（抓娃娃机的玻璃罩）的不透明度
 GLINT_EXTENT = 300 / 512  # 反光三角形两条直角边占边长的比例
 MINI_MAX_SIDE = 32       # 不超过这个边长的产物用简化版
@@ -64,6 +75,23 @@ APP_LOGO_SIZE = 512
 APP_LOGO_MINI_SIZE = 128
 # Windows 图标习惯提供的档位；256 那档 Pillow 会自动用 PNG 压缩存放
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
+@dataclass(frozen=True)
+class Variant:
+    tile: tuple[int, int, int]
+    # 原画里的色值 → 这套配色下的色值，栅格化前做纯文本替换
+    recolor: dict[str, str] = field(default_factory=dict)
+
+
+# 夜蓝底板，与画布 Logo 画板一致；原画就是按它配的色
+DARK = Variant(tile=(0x1A, 0x25, 0x40))
+# 浅雾蓝底板：与夜蓝同一色相，橘猫在上面依旧跳；在浅色主题的窗口底 #F2F3F5
+# 与 GitHub 的白底上都还看得出方块轮廓。爪子的两档金属灰各压暗一档
+LIGHT = Variant(
+    tile=(0xD6, 0xE2, 0xF3),
+    recolor={"#AEB9CC": "#7C89A1", "#D9E0EB": "#A4B0C4"},
+)
 
 
 def ensure_raster_tool() -> Path:
@@ -77,12 +105,19 @@ def ensure_raster_tool() -> Path:
     return RASTER_TOOL
 
 
-def render_art(svg: Path, side: int) -> Image.Image:
-    """把原画栅格化成 side×side 的 RGBA。"""
+def render_art(svg: Path, side: int, variant: Variant) -> Image.Image:
+    """把原画按 variant 换色后栅格化成 side×side 的 RGBA。"""
+    text = svg.read_text(encoding="utf-8")
+    for old, new in variant.recolor.items():
+        # 色值写错（原画改过色）时宁可报错，也别悄悄产出一份没换色的浅色版
+        assert old in text, f"{svg.name} 里没有 {old}，同步改 Variant.recolor"
+        text = text.replace(old, new)
     with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "art.svg"
+        src.write_text(text, encoding="utf-8")
         out = Path(tmp) / "art.png"
         subprocess.run(
-            [str(ensure_raster_tool()), str(svg), str(out), str(side)],
+            [str(ensure_raster_tool()), str(src), str(out), str(side)],
             check=True,
         )
         return Image.open(out).convert("RGBA")
@@ -109,14 +144,15 @@ def glint(side: int) -> Image.Image:
     return layer
 
 
-def render_tile(side: int, mini: bool | None = None) -> Image.Image:
+def render_tile(side: int, variant: Variant = LIGHT, mini: bool | None = None) -> Image.Image:
     """铺满 side×side 的 logo（超椭圆外透明）。mini 为 None 时按边长自动选原画。"""
     if mini is None:
         mini = side <= MINI_MAX_SIDE
-    tile = Image.new("RGBA", (side, side), TILE_COLOR + (255,))
+    tile = Image.new("RGBA", (side, side), variant.tile + (255,))
     if not mini:
         tile = Image.alpha_composite(tile, glint(side))
-    tile = Image.alpha_composite(tile, render_art(ART_MINI if mini else ART_FULL, side))
+    art = render_art(ART_MINI if mini else ART_FULL, side, variant)
+    tile = Image.alpha_composite(tile, art)
     tile.putalpha(squircle_mask(side))
     return tile
 
@@ -129,7 +165,9 @@ def save(image: Image.Image, path: Path) -> None:
 
 def main() -> None:
     save(render_tile(APP_LOGO_SIZE), APP_LOGO)
+    save(render_tile(APP_LOGO_SIZE, DARK), APP_LOGO_DARK)
     save(render_tile(APP_LOGO_MINI_SIZE, mini=True), APP_LOGO_MINI)
+    save(render_tile(APP_LOGO_MINI_SIZE, DARK, mini=True), APP_LOGO_MINI_DARK)
 
     icon = Image.new("RGBA", (MACOS_CANVAS, MACOS_CANVAS), (0, 0, 0, 0))
     offset = (MACOS_CANVAS - MACOS_TILE) // 2

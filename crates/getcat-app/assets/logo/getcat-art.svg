@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- GetCat logo：被抓娃娃机从腰上拎起来的胖橘猫。
-     只画猫与爪子（透明底），超椭圆底板（#1A2540）由 scripts/gen-logo.py 合成。
+     只画猫与爪子（透明底），超椭圆底板由 scripts/gen-logo.py 合成。
+     色值按深色夜蓝底板（#1A2540）配；浅色版的爪子换色见 gen-logo.py 的 LIGHT。
      坐标系是 512×512 的底板；吊绳从 y<0 伸出，合成时被底板裁掉。 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <path d="M256 -8V140" stroke="#AEB9CC" stroke-width="8" stroke-linecap="round" fill="none"/>

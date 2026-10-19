@@ -25,7 +25,7 @@ use gpui_kit::{
 };
 use gpui_updater::UpdateStatus;
 
-use crate::assets::LOGO_PATH;
+use crate::assets::logo_path;
 use crate::brand;
 use crate::i18n::tr;
 use crate::state::settings;
@@ -430,7 +430,11 @@ fn about_page() -> SettingPage {
                                 .gap_3()
                                 .items_center()
                                 // 位图 logo 走 img()：svg() 是单色蒙版，多色 logo 用不了
-                                .child(img(LOGO_PATH).size(px(LOGO_SIZE)).flex_none())
+                                .child(
+                                    img(logo_path(cx.theme().is_dark()))
+                                        .size(px(LOGO_SIZE))
+                                        .flex_none(),
+                                )
                                 .child(
                                     v_flex()
                                         .min_w_0()

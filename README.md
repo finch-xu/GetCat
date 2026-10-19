@@ -169,7 +169,7 @@ crates/
 ### 构建与调试
 
 - Rust ≥ 1.97（edition 2024）。macOS 不需要额外工具链；Linux 需要 Vulkan 与 Wayland / X11 / fontconfig 头文件（清单见 `.github/workflows/ci.yml`）；Windows 需要 MSVC 工具链，Direct3D 11 已含在 Windows SDK 里。
-- 应用 logo：`crates/getcat-app/assets/logo/getcat-art.svg`（完整版）与 `getcat-art-mini.svg`（≤ 32 px 用的简化版）是原画，`scripts/gen-logo.py` 把它们合成成四份产物 —— app 内嵌的 `getcat.png` 与 `getcat-mini.png`、macOS 图标源 `resources/macos/getcat-1024.png`、Windows exe 图标 `resources/windows/getcat.ico`；改 logo 后手动重跑脚本并提交产物（CI 不生成，需要 `pip install pillow numpy`，SVG 栅格化由 `tools/svg-raster` 完成）。
+- 应用 logo：`crates/getcat-app/assets/logo/getcat-art.svg`（完整版）与 `getcat-art-mini.svg`（≤ 32 px 用的简化版）是原画，`scripts/gen-logo.py` 把它们合成成浅 / 深两套配色的产物 —— app 内嵌的 `getcat.png` 与 `getcat-mini.png`（浅色，另有 `-dark` 深色版，app 按主题切换）、macOS 图标源 `resources/macos/getcat-1024.png`、Windows exe 图标 `resources/windows/getcat.ico`；改 logo 后手动重跑脚本并提交产物（CI 不生成，需要 `pip install pillow numpy`，SVG 栅格化由 `tools/svg-raster` 完成）。
 - Windows 的 exe 图标与版本信息由 `crates/getcat-app/build.rs` 嵌入，只在 Windows 上原生编译时生效（从 macOS 交叉编译出的 exe 没有图标）。安装包定义在 `crates/getcat-app/resources/windows/GetCat.wxs`，需要 WiX v6：`dotnet tool install --global wix --version 6.*`。
 
 ```bash

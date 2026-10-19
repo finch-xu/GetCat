@@ -9,18 +9,37 @@ use std::borrow::Cow;
 use gpui_kit::assets::Assets;
 use gpui_kit::{AssetSource, Result, SharedString};
 
-/// Logo 的资源路径（`img(LOGO_PATH)`）。位图走 `img()`：整张栅格化、保留原色；
-/// `svg()` 是单色蒙版，只会被 `text_color` 染成一种颜色，多色 logo 用不了。
+/// Logo 的资源路径（浅色版，`img(LOGO_PATH)`）。位图走 `img()`：整张栅格化、保留原色；
+/// `svg()` 是单色蒙版，只会被 `text_color` 染成一种颜色，多色 logo 用不了——
+/// 所以跟随主题靠换整张位图，界面里一律经 [`logo_path`] / [`logo_mini_path`] 取。
 ///
-/// 这份 PNG 由 `scripts/gen-logo.py` 从 `assets/logo/getcat-art.svg` 合成，改 logo 要重跑脚本。
+/// 浅 / 深两套 PNG 都由 `scripts/gen-logo.py` 从 `assets/logo/getcat-art.svg` 合成，改 logo 要重跑脚本。
 pub const LOGO_PATH: &str = "logo/getcat.png";
+/// 深色版 logo（夜蓝底板）：只给深色主题用，系统图标与 README 都是浅色版。
+pub const LOGO_DARK_PATH: &str = "logo/getcat-dark.png";
 
 /// 小尺寸 logo（128 px 见方，简化版原画 `getcat-art-mini.svg`）：图标栏里只显示 26 px，
 /// 完整版的脸和条纹在这个尺寸下糊成一团，换成加粗过的简化版。
 pub const LOGO_MINI_PATH: &str = "logo/getcat-mini.png";
+/// 深色版的小尺寸 logo。
+pub const LOGO_MINI_DARK_PATH: &str = "logo/getcat-mini-dark.png";
 
-/// Logo 的原始 PNG 字节（512 px 见方）。除了作为 [`LOGO_PATH`] 资源，Linux 上还直接用它：
-/// 解码后作 X11 的窗口图标，原样写进 hicolor 主题目录给 .desktop 用。
+/// 当前主题该用的 logo（512 px 版）。
+pub fn logo_path(dark: bool) -> &'static str {
+    if dark { LOGO_DARK_PATH } else { LOGO_PATH }
+}
+
+/// 当前主题该用的小尺寸 logo。
+pub fn logo_mini_path(dark: bool) -> &'static str {
+    if dark {
+        LOGO_MINI_DARK_PATH
+    } else {
+        LOGO_MINI_PATH
+    }
+}
+
+/// 浅色 logo 的原始 PNG 字节（512 px 见方）。除了作为 [`LOGO_PATH`] 资源，Linux 上还直接用它：
+/// 解码后作 X11 的窗口图标，原样写进 hicolor 主题目录给 .desktop 用（系统图标不随 app 主题变）。
 pub const LOGO_PNG: &[u8] = include_bytes!("../assets/logo/getcat.png");
 
 /// 「自动换行」切换按钮的图标。
@@ -44,8 +63,16 @@ pub const ICON_BRACES: &str = "icons/braces.svg";
 const ASSETS: &[(&str, &[u8])] = &[
     (LOGO_PATH, LOGO_PNG),
     (
+        LOGO_DARK_PATH,
+        include_bytes!("../assets/logo/getcat-dark.png"),
+    ),
+    (
         LOGO_MINI_PATH,
         include_bytes!("../assets/logo/getcat-mini.png"),
+    ),
+    (
+        LOGO_MINI_DARK_PATH,
+        include_bytes!("../assets/logo/getcat-mini-dark.png"),
     ),
     (
         ICON_WRAP_TEXT,
@@ -92,8 +119,31 @@ mod tests {
 
     #[test]
     fn logo_is_served_from_the_embedded_bytes() {
-        let bytes = AppAssets.load(LOGO_PATH).unwrap().expect("logo present");
-        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        for path in [
+            LOGO_PATH,
+            LOGO_DARK_PATH,
+            LOGO_MINI_PATH,
+            LOGO_MINI_DARK_PATH,
+        ] {
+            let bytes = AppAssets
+                .load(path)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{path} missing"));
+            assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{path} 不是 PNG");
+        }
+    }
+
+    /// 浅色主题（以及系统图标）用浅色版，深色主题才换夜蓝底板那套。
+    #[test]
+    fn logo_follows_theme() {
+        assert_eq!(logo_path(false), LOGO_PATH);
+        assert_eq!(logo_path(true), LOGO_DARK_PATH);
+        assert_eq!(logo_mini_path(false), LOGO_MINI_PATH);
+        assert_eq!(logo_mini_path(true), LOGO_MINI_DARK_PATH);
+        assert_ne!(
+            AppAssets.load(LOGO_PATH).unwrap(),
+            AppAssets.load(LOGO_DARK_PATH).unwrap()
+        );
     }
 
     /// 补的图标要真的能取到，而且是 gpui 的 `svg()` 认得的 SVG。
@@ -141,7 +191,9 @@ mod tests {
             AppAssets.list("logo").unwrap(),
             vec![
                 SharedString::from(LOGO_PATH),
-                SharedString::from(LOGO_MINI_PATH)
+                SharedString::from(LOGO_DARK_PATH),
+                SharedString::from(LOGO_MINI_PATH),
+                SharedString::from(LOGO_MINI_DARK_PATH),
             ]
         );
         // 前缀过滤要把应用图标和上游图标一起列出来
