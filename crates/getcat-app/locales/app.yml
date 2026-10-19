@@ -2262,6 +2262,18 @@ settings:
     zh-TW: 以 gpui 與 gpui-component 建構的 HTTP 除錯工具。
     ja: gpui と gpui-component で作られた HTTP デバッグツールです。
     fr: Un outil de débogage HTTP construit avec gpui et gpui-component.
+  star_prompt:
+    en: Enjoying GetCat? A star on GitHub would mean a lot to the author.
+    zh-CN: 如果喜欢 GetCat，欢迎到 GitHub 点个 Star 鼓励一下作者。
+    zh-TW: 如果喜歡 GetCat，歡迎到 GitHub 按個 Star 鼓勵一下作者。
+    ja: GetCat を気に入っていただけたら、GitHub でスターをつけて作者を応援してください。
+    fr: GetCat vous plaît ? Une étoile sur GitHub encouragera beaucoup l’auteur.
+  star_button:
+    en: Star on GitHub
+    zh-CN: 在 GitHub 上点 Star
+    zh-TW: 在 GitHub 上按 Star
+    ja: GitHub でスターをつける
+    fr: Mettre une étoile sur GitHub
   version:
     en: Version
     zh-CN: 版本

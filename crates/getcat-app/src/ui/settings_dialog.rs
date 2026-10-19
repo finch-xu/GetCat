@@ -463,9 +463,36 @@ fn about_page() -> SettingPage {
                                 .item(tr!("settings.author"), brand::AUTHOR, 1)
                                 .item(tr!("settings.license"), brand::LICENSE, 1),
                         )
-                        .child(repo_link())
+                        // 加星邀请：一句话 + 加星按钮，项目主页链接并排放在按钮右侧
+                        .child(
+                            v_flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child(tr!("settings.star_prompt")),
+                                )
+                                .child(
+                                    h_flex()
+                                        .gap_3()
+                                        .items_center()
+                                        .child(star_button())
+                                        .child(repo_link()),
+                                ),
+                        )
                 })),
         )
+}
+
+/// 「在 GitHub 上加星」按钮：GitHub 的加星入口就在仓库首页，所以直接打开 [`brand::REPO_URL`]。
+fn star_button() -> Button {
+    Button::new("star-repo")
+        .outline()
+        .small()
+        .icon(IconName::Star)
+        .label(tr!("settings.star_button"))
+        .on_click(|_, _, cx| cx.open_url(brand::REPO_URL))
 }
 
 /// 项目主页链接：和发布页链接同一个形状（`Link` + 外链图标），只是换了图标与地址。
