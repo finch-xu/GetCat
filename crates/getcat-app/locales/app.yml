@@ -503,6 +503,10 @@ url_bar:
     en: Request URL
     zh-CN: 请求 URL
     ja: リクエスト URL
+  unsaved_changes:
+    en: Unsaved changes
+    zh-CN: 未保存的修改
+    ja: 未保存の変更
   send:
     en: Send
     zh-CN: 发送

@@ -16,11 +16,13 @@ pub mod tool_rail;
 pub mod url_bar;
 pub mod variables_sheet;
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use getcat_core::model::Method;
-use gpui_kit::component::ActiveTheme;
-use gpui_kit::{App, Hsla};
+use gpui_kit::base::{ResizablePanelGroup, ResizeHandleState};
+use gpui_kit::component::{ActiveTheme, resizable::resize_handle_appearance};
+use gpui_kit::{App, Axis, Div, ElementId, Hsla, Styled as _, div};
 
 use crate::theme::palette;
 
@@ -47,6 +49,37 @@ pub fn format_duration(d: Duration) -> String {
     } else {
         format!("{:.2} s", ms / 1000.0)
     }
+}
+
+/// 压在窗口底上的卡片：请求、响应与侧栏面板都用它，圆角取主题的 `radius_lg`。
+/// 内容自己负责滚动；这里只裁圆角。
+pub fn card(cx: &App) -> Div {
+    div()
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .bg(cx.theme().background)
+        .border_1()
+        .border_color(cx.theme().border)
+        .rounded(cx.theme().radius_lg)
+        .overflow_hidden()
+}
+
+/// 卡片之间的分栏：静止时不画分隔线——两张卡片之间的缝本身就是分隔，再压一条
+/// 1 px 细线反而显脏；悬停 / 按下 / 拖动时才交回上游外观（细线 + 指示条）。
+pub fn card_gap_resizable(id: impl Into<ElementId>, axis: Axis) -> ResizablePanelGroup {
+    let appearance = resize_handle_appearance();
+    let group = match axis {
+        Axis::Horizontal => gpui_kit::base::h_resizable(id),
+        Axis::Vertical => gpui_kit::base::v_resizable(id),
+    };
+    group.with_handle_appearance(Rc::new(move |handle, window, cx| {
+        if handle.state() == ResizeHandleState::Idle {
+            None
+        } else {
+            appearance(handle, window, cx)
+        }
+    }))
 }
 
 /// HTTP 方法的语义色，取自产品 token 层（见 [`crate::theme::Palette`]）。
@@ -157,9 +190,9 @@ mod tests {
         (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
     }
 
-    /// 选中标签的底色从「纯白 / 纯背景色」换成了淡主题色——原来它与标签栏底色只差
-    /// 1.02:1，扫一眼根本认不出当前是哪个标签。方法角标压在这层新底色上，可读性
-    /// 必须一并钉住：调色时任何一支方法色跌破 4.8:1，这条就会红。
+    /// 选中标签取卡片面，从窗口底（标签栏底色）上浮起来，2026-10 重设计后不再有顶部
+    /// 主题色指示条，层次全靠这两层底色的亮度差。方法角标压在卡片面上，可读性要一并
+    /// 钉住：调色时任何一支方法色跌破 4.8:1，或两层底色拉不开，这条就会红。
     #[gpui_kit::test]
     fn method_colors_stay_readable_on_the_active_tab(cx: &mut TestAppContext) {
         cx.update(|cx| {

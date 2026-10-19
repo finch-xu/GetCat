@@ -20,13 +20,13 @@ use getcat_core::url::extract_path_params;
 // `#[test]` 属性同名冲突，导致该属性宏对自身生成的 `#[test]` 反复展开直至递归上限溢出。
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::input::{EditorState, InputEvent, InputState, Search};
-use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
+use gpui_kit::component::resizable::resizable_panel;
 use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
-    App, AppContext, Context, Entity, Global, IntoElement, ListAlignment, ListState, ParentElement,
-    PathPromptOptions, Render, ScrollStrategy, SharedString, Styled, Subscription, Task,
-    UniformListScrollHandle, Window, div, px,
+    App, AppContext, Axis, Context, Div, Entity, Global, IntoElement, ListAlignment, ListState,
+    ParentElement, PathPromptOptions, Render, ScrollStrategy, SharedString, Styled, Subscription,
+    Task, UniformListScrollHandle, Window, div, px,
 };
 
 use tokio::sync::mpsc;
@@ -42,6 +42,7 @@ use crate::state::variables;
 use crate::ui::kv_table::{KvPlaceholder, KvTable, KvTableEvent};
 use crate::ui::ops_table::{OpsMode, OpsTable, OpsTableEvent};
 use crate::ui::selectable_lines::LinesSelection;
+use crate::ui::{card, card_gap_resizable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestSection {
@@ -1344,8 +1345,10 @@ impl Render for RequestTab {
         self.sync_body_wrap(window, cx);
         // 两个方向各用一个 id：ResizablePanelGroup 按 id 记住拖出来的尺寸，上下与左右互不串扰
         let group = match self.split {
-            SplitDirection::Vertical => v_resizable("request-response-v"),
-            SplitDirection::Horizontal => h_resizable("request-response-h"),
+            SplitDirection::Vertical => card_gap_resizable("request-response-v", Axis::Vertical),
+            SplitDirection::Horizontal => {
+                card_gap_resizable("request-response-h", Axis::Horizontal)
+            }
         };
         // 请求 / 响应默认各占一半：两块面板都不给初始像素尺寸，而是把 flex-basis 压到 0，
         // 剩余空间由同为 flex-grow 1 的两者均分（basis 留 auto 时会按内容宽度分，不均）。
@@ -1355,13 +1358,35 @@ impl Render for RequestTab {
                 .flex_basis(px(0.))
                 .size_range(px(140.)..px(4000.))
         };
-        v_flex().size_full().child(self.render_url_bar(cx)).child(
-            div().flex_1().min_h_0().min_w_0().child(
-                group
-                    .child(half().child(self.render_request_pane(cx)))
-                    .child(half().child(self.render_response_pane(window, cx))),
-            ),
-        )
+        // 两张卡片之间的缝（12 px）由各自朝对方那侧的半缝拼成，分栏手柄正好落在缝的中线上
+        let horizontal = self.split == SplitDirection::Horizontal;
+        let first_gap = |d: Div| if horizontal { d.pr_1p5() } else { d.pb_1p5() };
+        let second_gap = |d: Div| if horizontal { d.pl_1p5() } else { d.pt_1p5() };
+        v_flex()
+            .size_full()
+            .gap_3()
+            // 左侧紧贴图标栏（它自带留白），右、下留出与卡片间同宽的缝
+            .pr_3()
+            .pb_3()
+            .child(self.render_title_row(cx))
+            .child(self.render_url_bar(cx))
+            .child(
+                div().flex_1().min_h_0().min_w_0().child(
+                    group
+                        .child(
+                            half().child(
+                                first_gap(div().size_full())
+                                    .child(card(cx).child(self.render_request_pane(cx))),
+                            ),
+                        )
+                        .child(
+                            half().child(
+                                second_gap(div().size_full())
+                                    .child(card(cx).child(self.render_response_pane(window, cx))),
+                            ),
+                        ),
+                ),
+            )
     }
 }
 

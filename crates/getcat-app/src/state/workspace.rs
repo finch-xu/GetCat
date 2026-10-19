@@ -18,21 +18,18 @@ use gpui_kit::component::{
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
     h_flex,
     input::{Input, InputState},
-    resizable::{ResizableState, h_resizable, resizable_panel},
+    resizable::{ResizableState, resizable_panel},
     select::{Select, SelectState},
-    status_bar::StatusBar,
-    v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    App, AppContext, Axis, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
     Subscription, UniformListScrollHandle, WeakEntity, Window, div, point, px,
 };
 
 use gpui_updater::UpdateStatus;
 
-use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
 use crate::state::saved_filter::{self, SavedFilter};
@@ -41,6 +38,7 @@ use crate::state::store::{banner, store};
 use crate::state::update;
 use crate::state::variables;
 use crate::templates;
+use crate::ui::card_gap_resizable;
 use crate::ui::code_sheet::{CODE_SHEET_WIDTH, CodeSheet};
 use crate::ui::curl_sheet::{CURL_SHEET_WIDTH, CurlSheet, import_button};
 use crate::ui::settings_dialog::{SettingsPage, open_settings, open_settings_page};
@@ -1324,53 +1322,47 @@ impl Workspace {
         input_for_focus.update(cx, |s, cx| s.focus(window, cx));
     }
 
-    /// 标题栏副标题：当前 Tab 的标题（已保存请求名或 URL 末段）。
-    pub(crate) fn title_bar_subtitle(&self, cx: &App) -> SharedString {
-        self.active_tab().read(cx).title(cx)
-    }
-
-    /// 自绘标题栏（spec §7.2）：居中显示 `GetCat · 当前 Tab 标题`；
-    /// 拖动 / 双击 / 平台控制按钮由 TitleBar 处理。
+    /// 自绘标题栏（画布「主界面」）：标签栏直接占据标题栏，右侧是全局动作
+    /// （更新提示、生成代码 / 导入 cURL / 变量、请求与响应的分栏方向）。拖动 / 双击 /
+    /// 平台控制按钮仍由 TitleBar 处理；标签自己拦下 mouse_down（见 `tab_strip::render_tab`），
+    /// 拖标签是排序而不是拖窗口。
     ///
-    /// 品牌名用更重的字重与主前景色，Tab 标题降到 muted——窗口变窄时只有 Tab 标题被截断，
-    /// `GetCat ·` 始终完整（品牌段 `flex_none`，标题段才 `min_w_0` + `truncate`）。
+    /// 高度不写死：多行标签模式下标题栏跟着标签行数长高，`min_h` 保证单行时的 44 px，
+    /// 红绿灯位置（`main.rs`）按 44 px 居中。
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        TitleBar::new().child(
-            h_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap_1p5()
-                // macOS 的 TitleBar 左侧给红绿灯留了 80 px，右侧补同样的量才是窗口正中
-                .when(cfg!(target_os = "macos"), |h| h.pr(px(80.)))
-                .text_sm()
-                .min_w_0()
-                .child(
-                    div()
-                        .flex_none()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().foreground)
-                        .child(APP_NAME),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("·"),
-                )
-                .child(
-                    // flex 子项默认 min-width:auto，不会收缩到内容宽度以下，truncate 因此失效：
-                    // 必须显式 min_w_0()
-                    div()
-                        .min_w_0()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(cx.theme().muted_foreground)
-                        .truncate()
-                        .child(self.title_bar_subtitle(cx)),
-                ),
-        )
+        TitleBar::new()
+            .h_auto()
+            .min_h(px(TITLE_BAR_HEIGHT))
+            .bg(cx.theme().title_bar)
+            .border_b_0()
+            .child(
+                // TitleBar 内层容器是 `flex_1` + `flex_shrink_0`，最小宽度跟着内容走：十几个标签的
+                // 内容宽度会把整条标题栏撑出窗口，单行模式的横向滚动永远不会触发（有测试钉住：
+                // restore_scrolls_active_tab_into_view_in_single_row）。宽度定成 0 再长满，并让这层
+                // 横向裁剪——taffy 只在它是裁剪容器时才不把内容宽度算进父级的最小宽度。
+                // 菜单 / 下拉都走 deferred 弹层，不受这层裁剪影响。
+                h_flex()
+                    .flex_grow(1.)
+                    .w_0()
+                    .overflow_x_hidden()
+                    .min_w_0()
+                    .items_center()
+                    .gap_2()
+                    .pr_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .py_1p5()
+                            .child(self.render_tab_strip(cx)),
+                    )
+                    .child(self.render_title_actions(cx)),
+            )
     }
 }
+
+/// 标题栏高度（单行标签时）。红绿灯纵向位置按它居中，见 `main.rs`。
+pub const TITLE_BAR_HEIGHT: f32 = 44.;
 
 /// 关闭 `closing` 后新的 active 下标；`len` 为关闭前的 Tab 数（≥ 2）。
 pub(crate) fn active_after_close(active: usize, closing: usize, len: usize) -> usize {
@@ -1615,63 +1607,68 @@ impl Workspace {
     }
 }
 
-/// 底部状态栏：右侧是请求 / 响应的分栏方向（两段式），左侧留给以后的功能按钮。
+/// 标题栏右侧的全局动作：更新提示、工具按钮、请求 / 响应的分栏方向（两段式）。
+/// 原先分在底部状态栏与右侧工具栏，2026-10 重设计并进标题栏，窗口少掉一行一列。
 impl Workspace {
-    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_title_actions(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // 只在"有新版本"与"已装好待重启"时提示；下载 / 安装进度只在「检查更新」页显示，
         // 离线启动得到的错误也不在这里冒出来
         let update_hint = update::hint_version(&self.update_status)
             .map(|(version, staged)| (version.clone(), staged));
-        StatusBar::new().py_0p5().right(
-            h_flex()
-                .items_center()
-                .gap_0p5()
-                .when_some(update_hint, |bar, (version, staged)| {
-                    bar.child(if staged {
-                        Button::new("update-restart")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::ArrowUp)
-                            .label(tr!("status.update_restart", version = version))
-                            .tooltip(tr!("status.update_restart_tooltip"))
-                            .on_click(|_, _, cx| update::restart(cx))
-                    } else {
-                        Button::new("update-available")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::ArrowUp)
-                            .label(tr!("status.update_available", version = version))
-                            .tooltip(tr!("status.update_available_tooltip"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_settings_page(SettingsPage::Updates, window, cx)
-                            }))
-                    })
+        h_flex()
+            .flex_none()
+            .items_center()
+            .gap_0p5()
+            .when_some(update_hint, |bar, (version, staged)| {
+                bar.child(if staged {
+                    Button::new("update-restart")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::ArrowUp)
+                        .label(tr!("status.update_restart", version = version))
+                        .tooltip(tr!("status.update_restart_tooltip"))
+                        .on_click(|_, _, cx| update::restart(cx))
+                } else {
+                    Button::new("update-available")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::ArrowUp)
+                        .label(tr!("status.update_available", version = version))
+                        .tooltip(tr!("status.update_available_tooltip"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_settings_page(SettingsPage::Updates, window, cx)
+                        }))
                 })
-                // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
-                // 不用先读懂图标才知道按下去会变成什么。
-                .child(
-                    Button::new("split-right")
-                        .ghost()
-                        .xsmall()
-                        .selected(self.split == SplitDirection::Horizontal)
-                        .icon(IconName::PanelRight)
-                        .tooltip(tr!("status.split_right"))
-                        .on_click(cx.listener(|this, _, _, cx| {
+            })
+            .child(self.render_tool_buttons(cx))
+            // 1 px 细线是物理分隔，长度走 rem 刻度
+            .child(div().w(px(1.)).h_4().mx_1().bg(cx.theme().border))
+            // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
+            // 不用先读懂图标才知道按下去会变成什么。
+            .child(
+                Button::new("split-right")
+                    .ghost()
+                    .xsmall()
+                    .selected(self.split == SplitDirection::Horizontal)
+                    .icon(IconName::PanelRight)
+                    .tooltip(tr!("status.split_right"))
+                    .on_click(
+                        cx.listener(|this, _, _, cx| {
                             this.set_split(SplitDirection::Horizontal, cx)
-                        })),
-                )
-                .child(
-                    Button::new("split-bottom")
-                        .ghost()
-                        .xsmall()
-                        .selected(self.split == SplitDirection::Vertical)
-                        .icon(IconName::PanelBottom)
-                        .tooltip(tr!("status.split_bottom"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_split(SplitDirection::Vertical, cx)
-                        })),
-                ),
-        )
+                        }),
+                    ),
+            )
+            .child(
+                Button::new("split-bottom")
+                    .ghost()
+                    .xsmall()
+                    .selected(self.split == SplitDirection::Vertical)
+                    .icon(IconName::PanelBottom)
+                    .tooltip(tr!("status.split_bottom"))
+                    .on_click(
+                        cx.listener(|this, _, _, cx| this.set_split(SplitDirection::Vertical, cx)),
+                    ),
+            )
     }
 }
 
@@ -1703,7 +1700,8 @@ impl Render for Workspace {
             .size_full()
             .flex()
             .flex_col()
-            .bg(cx.theme().background)
+            // 窗口底：标题栏、图标栏、卡片之间的缝都是这一层；卡片自己是 background
+            .bg(cx.theme().title_bar)
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(|this, _: &NewTab, window, cx| this.new_tab(window, cx)))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
@@ -1740,7 +1738,7 @@ impl Render for Workspace {
                     .child(self.render_sidebar_rail(cx))
                     .child(
                         div().flex_1().min_w_0().h_full().child(
-                            h_resizable("workspace")
+                            card_gap_resizable("workspace", Axis::Horizontal)
                                 .with_state(&self.sidebar_state)
                                 .on_resize(cx.listener(
                                     |this, state: &Entity<ResizableState>, _, cx| {
@@ -1766,20 +1764,12 @@ impl Render for Workspace {
                                         .child(self.render_sidebar(window, cx)),
                                 )
                                 .child(
-                                    resizable_panel().child(
-                                        v_flex()
-                                            .size_full()
-                                            .min_w_0()
-                                            .child(self.render_tab_strip(cx))
-                                            .child(div().flex_1().min_h_0().child(active)),
-                                    ),
+                                    resizable_panel()
+                                        .child(div().size_full().min_w_0().child(active)),
                                 ),
                         ),
-                    )
-                    // 与最左的图标栏对称，固定在最右、从不移动
-                    .child(self.render_tool_rail(cx)),
+                    ),
             )
-            .child(self.render_status_bar(cx))
     }
 }
 

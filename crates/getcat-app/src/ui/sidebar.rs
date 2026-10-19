@@ -32,9 +32,9 @@ use crate::state::request_tab::tab_title;
 use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::workspace::{SidebarSection, Workspace};
 use crate::templates::{self, TemplateGroup};
-use crate::ui::method_color;
 use crate::ui::text::theme_label;
 use crate::ui::variables_sheet::SheetScope;
+use crate::ui::{card, method_color};
 use crate::{OpenSettings, SaveRequest, ToggleSidebar};
 
 /// 列表行高：布局用 `h_11()`（2.75 rem），默认 rem 下等于 44 px；
@@ -84,9 +84,8 @@ impl Workspace {
             .items_center()
             .py_2()
             .gap_1()
+            // 与标题栏、卡片间的缝同属窗口底，不画分隔线（2026-10 重设计）
             .bg(cx.theme().sidebar)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
             .child(
                 div()
                     .id("logo")
@@ -149,9 +148,23 @@ impl Workspace {
             // 反映不出 flex 收缩），非测试构建下这是内联空操作
             .debug_selector(|| "sidebar-panel".into())
             .size_full()
-            .bg(cx.theme().sidebar)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
+            // 面板本体是一张卡片，与请求 / 响应卡片同款；外层这圈内边距就是卡片之间的缝。
+            // 内边距放在 `#sidebar-panel` 里面而不是外面：回归测试量的是这一层的渲染宽度。
+            .pr_3()
+            .pb_3()
+            .child(
+                card(cx)
+                    .flex()
+                    .flex_col()
+                    .child(self.render_sidebar_body(window, cx)),
+            )
+    }
+
+    /// 卡片里的内容：标题行 + 当前功能的列表。
+    fn render_sidebar_body(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let section = self.sidebar_section();
+        v_flex()
+            .size_full()
             .child(
                 h_flex()
                     .h_10()

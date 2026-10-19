@@ -418,9 +418,6 @@ impl Workspace {
             .aria_label(tr!("tab.strip_aria"))
             .w_full()
             .flex_none()
-            .bg(cx.theme().tokens.tab_bar)
-            .border_b_1()
-            .border_color(cx.theme().border)
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<TabDrag>, window, cx| {
                     let drag = event.drag(cx).clone();
@@ -435,7 +432,7 @@ impl Workspace {
                         // 新建按钮固定在最左，不跟着翻页跑
                         div().flex_none().px_1().py_1().child(
                             Button::new("new-tab")
-                                .outline()
+                                .ghost()
                                 .small()
                                 .icon(IconName::Plus)
                                 .tooltip_with_action(tr!("tab.new"), &NewTab, None)
@@ -522,7 +519,7 @@ impl Workspace {
             dirty: tab.dirty,
         };
 
-        div()
+        let tab = div()
             .id(format!("tab-{id}"))
             .role(Role::Tab)
             .aria_label(aria)
@@ -562,17 +559,16 @@ impl Workspace {
                     d.max_w(px(TAB_WIDTH))
                 }
             })
-            // 左右各一条细线把标签隔开，与 TabVariant::Tab 的处理一致
-            .border_l_1()
-            .border_r_1()
+            // 标题栏里的胶囊标签：选中的那个是卡片面 + 一层轻阴影，从窗口底上「浮」起来；
+            // 卡片面与窗口底的亮度差有对比度测试钉住（ui::tests）。
+            .rounded(cx.theme().radius)
             .map(|d| {
                 if selected {
                     d.bg(active_bg)
-                        .border_color(cx.theme().border)
+                        .shadow_xs()
                         .text_color(cx.theme().tab_active_foreground)
                 } else {
-                    d.border_color(cx.theme().transparent)
-                        .text_color(cx.theme().tab_foreground)
+                    d.text_color(cx.theme().tab_foreground)
                         // 未选中的悬停给一层更淡的同色，好过只改文字色
                         .hover(|s| s.bg(active_bg.opacity(0.5)))
                 }
@@ -627,20 +623,6 @@ impl Workspace {
                             })),
                     ),
             )
-            .when(selected, |d| {
-                // 顶部主题色指示条。只靠底色是不够的：底色能加深的幅度被方法角标的
-                // 对比度卡死（再深一档 PUT 就跌破 4.8:1），而这条线是纯增量的信号——
-                // 一眼就能定位当前标签，又不占用任何对比度预算。VS Code / Chrome 同款。
-                d.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .h(px(2.))
-                        .bg(cx.theme().primary),
-                )
-            })
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 if let Some(ix) = this.tab_index(id, cx) {
                     this.activate(ix, cx);
@@ -658,7 +640,14 @@ impl Workspace {
             .context_menu(move |menu, _, _| tab_menu(menu, id, owner.clone()))
             .child(measure_drag_bounds(move |bounds| {
                 layout.borrow_mut().tabs.push((id, bounds))
-            }))
+            }));
+        // 标签栏在标题栏里：TitleBar 收到 mouse_down 就会在下一次移动时 start_window_move，
+        // 拖标签会变成拖窗口，双击标签还会缩放窗口。标签自己的按下（含拖动起点）先处理完，
+        // 再在这层包装截断，不让它冒泡到 TitleBar；标签之外的空白处照样能拖窗口。
+        div()
+            .flex_none()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(tab)
             .into_any_element()
     }
 
