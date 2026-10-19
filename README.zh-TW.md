@@ -23,7 +23,7 @@ GPU 繪製 · 低資源占用 · 免帳號 · 資料全在本機 · No Electron,
 
 [DeepWiki 文件](https://deepwiki.com/finch-xu/GetCat) · [官方網站](https://getcat.io/)
 
-<img src="assets/screenshot.png" width="900" alt="GetCat 主畫面：左側建構請求，右側檢視回應">
+<img src="assets/screenshot.webp" width="900" alt="GetCat 主畫面：左側建構請求，右側檢視回應">
 
 </div>
 

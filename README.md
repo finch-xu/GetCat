@@ -23,7 +23,7 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 
 [DeepWiki Docs](https://deepwiki.com/finch-xu/GetCat) · [Official Site](https://getcat.io/)
 
-<img src="assets/screenshot.png" width="900" alt="GetCat main window: request builder on the left, response viewer on the right">
+<img src="assets/screenshot.webp" width="900" alt="GetCat main window: request builder on the left, response viewer on the right">
 
 </div>
 

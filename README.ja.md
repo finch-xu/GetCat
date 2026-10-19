@@ -23,7 +23,7 @@ GPU レンダリング · 低リソース · アカウント不要 · データ�
 
 [DeepWiki ドキュメント](https://deepwiki.com/finch-xu/GetCat) · [公式サイト](https://getcat.io/)
 
-<img src="assets/screenshot.png" width="900" alt="GetCat のメインウィンドウ：左がリクエストビルダー、右がレスポンスビューア">
+<img src="assets/screenshot.webp" width="900" alt="GetCat のメインウィンドウ：左がリクエストビルダー、右がレスポンスビューア">
 
 </div>
 

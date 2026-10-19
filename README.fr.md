@@ -23,7 +23,7 @@ Rendu GPU · Léger en ressources · Sans compte · Vos données restent en loca
 
 [Documentation DeepWiki](https://deepwiki.com/finch-xu/GetCat) · [Site officiel](https://getcat.io/)
 
-<img src="assets/screenshot.png" width="900" alt="Fenêtre principale de GetCat : construction de la requête à gauche, réponse à droite">
+<img src="assets/screenshot.webp" width="900" alt="Fenêtre principale de GetCat : construction de la requête à gauche, réponse à droite">
 
 </div>
 

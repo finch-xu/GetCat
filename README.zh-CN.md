@@ -23,7 +23,7 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 
 [DeepWiki 文档](https://deepwiki.com/finch-xu/GetCat) · [官方网站](https://getcat.io/)
 
-<img src="assets/screenshot.png" width="900" alt="GetCat 主界面：左侧请求构造，右侧响应查看">
+<img src="assets/screenshot.webp" width="900" alt="GetCat 主界面：左侧请求构造，右侧响应查看">
 
 </div>
 
