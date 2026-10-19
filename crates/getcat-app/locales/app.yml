@@ -336,6 +336,10 @@ sidebar:
       en: Open
       zh-CN: 打开
       ja: 開く
+    menu_rename:
+      en: Rename…
+      zh-CN: 重命名…
+      ja: 名前を変更…
     menu_delete:
       en: Delete…
       zh-CN: 删除…
@@ -511,6 +515,18 @@ url_bar:
     en: Request URL
     zh-CN: 请求 URL
     ja: リクエスト URL
+  request_name:
+    en: Request name
+    zh-CN: 请求名
+    ja: リクエスト名
+  rename_hint:
+    en: Click to rename
+    zh-CN: 点击重命名
+    ja: クリックして名前を変更
+  rename_aria:
+    en: "Rename request “%{name}”"
+    zh-CN: "重命名请求「%{name}」"
+    ja: "リクエスト「%{name}」の名前を変更"
   unsaved_changes:
     en: Unsaved changes
     zh-CN: 未保存的修改
@@ -1262,6 +1278,11 @@ dialog:
       en: Category name
       zh-CN: 分类名称
       ja: カテゴリ名
+  rename_request:
+    title:
+      en: "Rename “%{name}”"
+      zh-CN: "重命名「%{name}」"
+      ja: "「%{name}」の名前を変更"
   rename_group:
     title:
       en: "Rename category “%{name}”"

@@ -52,7 +52,7 @@ use crate::state::update::{self, InstallKind};
 use crate::state::variables;
 use crate::state::workspace::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarSection, ToolSection,
-    Workspace,
+    Workspace, save_dialog_default_name,
 };
 use crate::ui::body_view::{LINE_HEIGHT_PX, gutter_px};
 use crate::ui::kv_table::{KvPlaceholder, KvTable, RowKind};
@@ -1791,6 +1791,179 @@ fn finish_save_writes_request_file_and_marks_tab_clean(cx: &mut TestAppContext) 
     let tab_id = cx.read(|app| tab.read(app).id);
     let draft = read_draft(&store, tab_id).unwrap();
     assert_eq!((draft.saved_id, draft.dirty), (Some(id), false));
+}
+
+/// 在标题行里改名：点标题进入编辑、填入 `name`、回车 / 失焦提交。
+fn edit_title(ws: &Entity<Workspace>, name: &str, cx: &mut VisualTestContext) {
+    let name = name.to_string();
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.start_title_edit(window, cx);
+            ws.title_editor
+                .update(cx, |input, cx| input.set_value(name, window, cx));
+            ws.commit_title_edit(cx);
+        })
+    });
+}
+
+/// 已保存的请求在标题行改名：写回请求文件，同步 Tab 标题与侧栏列表；
+/// 改名是整理操作——`updated_at` 不变，Tab 原本有未保存的改动也照旧是脏的，
+/// 文件里的草稿仍是上次保存的内容。
+#[gpui_kit::test]
+fn renaming_a_saved_request_writes_the_file_but_keeps_updated_at_and_dirty(
+    cx: &mut TestAppContext,
+) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users", cx);
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "原名".into(), None, cx)
+            })
+        })
+        .unwrap();
+    assert!(store.flush());
+    let before = read_request(&store, id).unwrap();
+    // 保存之后又改了内容：Tab 是脏的
+    change_url(&tab, "https://api.test/users?page=2", cx);
+    cx.read(|app| assert!(tab.read(app).dirty));
+    // 隔开至少一毫秒，改名若误碰 updated_at 就一定看得出来
+    std::thread::sleep(Duration::from_millis(5));
+
+    edit_title(&ws, "  用户列表  ", cx);
+
+    assert!(store.flush());
+    let after = read_request(&store, id).unwrap();
+    assert_eq!(after.name, "用户列表");
+    assert_eq!(after.updated_at, before.updated_at);
+    assert_eq!(after.draft.url, "https://api.test/users");
+    cx.read(|app| {
+        let ws = ws.read(app);
+        assert_eq!(ws.editing_title, None);
+        assert_eq!(ws.saved()[0].name, "用户列表");
+        let t = tab.read(app);
+        assert!(t.dirty, "改名不该把 Tab 洗干净");
+        assert_eq!(t.title(app).as_ref(), "用户列表");
+    });
+}
+
+/// 去掉首尾空白后为空：不提交，标题恢复原名。
+#[gpui_kit::test]
+fn blank_title_edit_keeps_the_old_name(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users", cx);
+    edit_title(&ws, "   ", cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.pending_name, None);
+        assert_eq!(t.title(app).as_ref(), "/users");
+    });
+
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "原名".into(), None, cx)
+            })
+        })
+        .unwrap();
+    edit_title(&ws, "", cx);
+    assert!(store.flush());
+    assert_eq!(read_request(&store, id).unwrap().name, "原名");
+    cx.read(|app| assert_eq!(tab.read(app).title(app).as_ref(), "原名"));
+}
+
+/// Esc 取消：输入框里改了什么都不算；之后输入框失焦触发的提交也不会再生效。
+#[gpui_kit::test]
+fn escape_cancels_the_title_edit(cx: &mut TestAppContext) {
+    let cx = init(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users", cx);
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.start_title_edit(window, cx);
+            // 进入编辑：预填当前标题并全选，直接打字就是替换
+            let input = ws.title_editor.read(cx);
+            assert_eq!(input.value().as_ref(), "/users");
+            assert_eq!(input.selected_range(), 0.."/users".len());
+            ws.title_editor
+                .update(cx, |input, cx| input.set_value("不要了", window, cx));
+            ws.cancel_title_edit(cx);
+            // 输入框随之消失、失焦：订阅里会再调一次提交，必须是空操作
+            ws.commit_title_edit(cx);
+        })
+    });
+    cx.read(|app| {
+        assert_eq!(ws.read(app).editing_title, None);
+        let t = tab.read(app);
+        assert_eq!(t.pending_name, None);
+        assert_eq!(t.title(app).as_ref(), "/users");
+    });
+}
+
+/// 未保存的请求：名字只记在 Tab 上，标签显示它；首次保存时是名字对话框的默认值，
+/// 名字留空确认也按它保存；保存后这个临时名字清掉（此后以已保存请求名为准）。
+#[gpui_kit::test]
+fn pending_name_becomes_the_save_dialog_default(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users", cx);
+    edit_title(&ws, "我的请求", cx);
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.saved_id, None);
+        assert_eq!(t.pending_name.as_deref(), Some("我的请求"));
+        assert_eq!(save_dialog_default_name(&tab, app).as_ref(), "我的请求");
+        let titles: Vec<_> = ws
+            .read(app)
+            .tabs_meta(app)
+            .into_iter()
+            .map(|m| m.2)
+            .collect();
+        assert!(titles.iter().any(|t| t.as_ref() == "我的请求"));
+    });
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), String::new(), None, cx)
+            })
+        })
+        .unwrap();
+    assert!(store.flush());
+    assert_eq!(read_request(&store, id).unwrap().name, "我的请求");
+    cx.read(|app| assert_eq!(tab.read(app).pending_name, None));
+}
+
+/// 侧栏「重命名…」走 `rename_saved`：已经在 Tab 里打开着的同一条请求跟着改标题。
+#[gpui_kit::test]
+fn renaming_from_the_sidebar_syncs_the_open_tab(cx: &mut TestAppContext) {
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+    let tab = cx.read(|app| ws.read(app).active_tab());
+    change_url(&tab, "https://api.test/users", cx);
+    let id = cx
+        .update(|_, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.finish_save(tab.clone(), "原名".into(), None, cx)
+            })
+        })
+        .unwrap();
+    // 再开一个 Tab 并切过去：被改名的那条不在当前 Tab 里也要同步
+    cx.update(|window, cx| ws.update(cx, |ws, cx| ws.new_tab(window, cx)));
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.rename_saved(id, "新名字", cx)));
+    assert!(store.flush());
+    assert_eq!(read_request(&store, id).unwrap().name, "新名字");
+    cx.read(|app| {
+        let t = tab.read(app);
+        assert_eq!(t.saved_name.as_deref(), Some("新名字"));
+        assert!(!t.dirty);
+        assert_eq!(ws.read(app).saved()[0].name, "新名字");
+    });
 }
 
 /// 保存时带分类：finish_save 的 group 参数进文件，分类列表随之出现。

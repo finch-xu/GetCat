@@ -611,6 +611,7 @@ impl Workspace {
                                 // 键盘与辅助技术用户多一条可达路径
                                 .context_menu(move |menu, window, cx| {
                                     let open = menu_ws.clone();
+                                    let rename = menu_ws.clone();
                                     let delete = menu_ws.clone();
                                     let move_ws = menu_ws.clone();
                                     let names = names.clone();
@@ -621,6 +622,16 @@ impl Workspace {
                                                 if let Some(ws) = open.upgrade() {
                                                     ws.update(cx, |ws, cx| {
                                                         ws.open_saved(id, window, cx)
+                                                    });
+                                                }
+                                            }),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new(tr!("sidebar.saved.menu_rename"))
+                                            .on_click(move |_, window, cx| {
+                                                if let Some(ws) = rename.upgrade() {
+                                                    ws.update(cx, |ws, cx| {
+                                                        ws.prompt_rename_saved(id, window, cx)
                                                     });
                                                 }
                                             }),

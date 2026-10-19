@@ -53,9 +53,15 @@ impl RequestTab {
     /// 标题行：已保存请求显示「分类 › 请求名」（未分类只有名字），未保存的显示 URL 末段；
     /// 有未保存的改动时跟一句提示。只是展示，改名仍走保存对话框。
     ///
-    /// 由 Workspace 渲染（右端挂环境切换器 `trailing`，正好落在「保存」按钮上方），
-    /// 所以这里只拿 `&App`。标题会截断，永远不会压到右端的切换器。
-    pub fn render_title_row(&self, trailing: AnyElement, cx: &App) -> impl IntoElement {
+    /// 由 Workspace 渲染：标题本身（`title`，展示态可点、编辑态是输入框）与右端的
+    /// 环境切换器（`trailing`，正好落在「保存」按钮上方）都由它给，所以这里只拿 `&App`。
+    /// 标题会截断，永远不会压到右端的切换器。
+    pub fn render_title_row(
+        &self,
+        title: AnyElement,
+        trailing: AnyElement,
+        cx: &App,
+    ) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         h_flex()
             .h_7()
@@ -72,14 +78,7 @@ impl RequestTab {
                             .flex_none(),
                     )
             })
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_base()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.title(cx)),
-            )
+            .child(title)
             .when(self.dirty, |h| {
                 h.child(
                     div()

@@ -271,6 +271,9 @@ pub struct RequestTab {
     pub saved_id: Option<Ulid>,
     /// 已保存请求的名字：有则作为 Tab 标题。
     pub saved_name: Option<SharedString>,
+    /// 还没保存的请求在标题行里起的名字：只记在这个 Tab 上（不落盘），
+    /// 有则作为 Tab 标题，首次保存时作为名字对话框的默认值；保存后清空。
+    pub pending_name: Option<SharedString>,
     /// 对应已保存请求的分类（分类级变量按它取）；未保存 / 未分类为 None。
     /// 缓存在 Tab 上是因为 ⌘⏎ 的 listener 在 `Workspace::update` 内部 `update` 本实体，
     /// 这里没法回读 Workspace（重入会 panic）。同步点与 `saved_name` 相同。
@@ -433,6 +436,7 @@ impl RequestTab {
             id,
             saved_id: None,
             saved_name: None,
+            pending_name: None,
             saved_group: None,
             dirty: false,
             method,
@@ -649,10 +653,11 @@ impl RequestTab {
         }
     }
 
-    /// Tab 标题：已保存请求名优先，否则取 URL 末段（spec §7.1）。
+    /// Tab 标题：已保存请求名优先，其次是未保存时起的名字，否则取 URL 末段（spec §7.1）。
     pub fn title(&self, cx: &App) -> SharedString {
         self.saved_name
             .clone()
+            .or_else(|| self.pending_name.clone())
             .unwrap_or_else(|| tab_title(&self.url.read(cx).value()))
     }
 

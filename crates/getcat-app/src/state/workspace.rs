@@ -17,17 +17,19 @@ use gpui_kit::component::{
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
     h_flex,
-    input::{Input, InputState},
+    input::{Escape, Input, InputEvent, InputState},
     resizable::{ResizableState, resizable_panel},
     select::{Select, SelectState},
     status_bar::StatusBar,
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext, Axis, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, UniformListScrollHandle, WeakEntity, Window, div, point, px,
+    AnyElement, App, AppContext, Axis, Context, Entity, FocusHandle, FontWeight,
+    InteractiveElement, IntoElement, ParentElement, Render, Role, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, UniformListScrollHandle, WeakEntity, Window,
+    div, point, px,
 };
 
 use gpui_updater::UpdateStatus;
@@ -146,6 +148,11 @@ pub struct Workspace {
     /// 当前打开着的是哪个抽屉。`Sheet` 是窗口级单例，只靠 `has_active_sheet`
     /// 分不清「点的是同一个（该收起）」还是「点的是另一个（该换内容）」。
     open_tool: Option<ToolSection>,
+    /// 标题行原地改名用的输入框（窗口里同时只会编辑一个标题，全局一份）。
+    pub(crate) title_editor: Entity<InputState>,
+    /// 正在改名的是哪个 Tab；None = 标题行在展示状态。提交 / 取消都先清掉它，
+    /// 随后到来的失焦事件因此不会再提交一次。
+    pub(crate) editing_title: Option<TabId>,
     _subs: Vec<Subscription>,
 }
 
@@ -198,8 +205,22 @@ impl Workspace {
             curl_sheet: cx.new(|cx| CurlSheet::new(window, cx)),
             variables_sheet: cx.new(|cx| VariablesSheet::new(window, cx)),
             open_tool: None,
+            title_editor: cx.new(|cx| InputState::new(window, cx)),
+            editing_title: None,
             _subs: Vec::new(),
         };
+
+        // 标题行改名：回车或失焦提交（Esc 取消走 `render_title`里的 action，不经过这里）
+        let title_editor = ws.title_editor.clone();
+        ws._subs.push(cx.subscribe_in(
+            &title_editor,
+            window,
+            |this, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                    this.commit_title_edit(cx);
+                }
+            },
+        ));
 
         // 任意 Tab 发出请求 → 重绘图标栏，让 logo 晃一下（见 `ui::sidebar::render_logo`）
         ws._subs
@@ -829,6 +850,203 @@ impl Workspace {
         cx.notify();
     }
 
+    /// 已保存请求改名：写回请求文件，同步打开着它的 Tab 的标题。
+    /// 与 `retag_saved` 同一规则：改名是整理操作，**不碰 `updated_at`**（spec §3），
+    /// 也不把 Tab 置脏——Tab 里的草稿内容没变。去掉首尾空白后为空、或与原名相同则什么都不做。
+    pub fn rename_saved(&mut self, id: Ulid, name: &str, cx: &mut Context<Self>) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let list = Rc::make_mut(&mut self.saved);
+        let Some(request) = list.iter_mut().find(|r| r.id == id) else {
+            return;
+        };
+        if request.name == name {
+            return;
+        }
+        request.name = name.to_string();
+        let request = request.clone();
+        for tab in &self.tabs {
+            if tab.read(cx).saved_id == Some(id) {
+                let name: SharedString = request.name.clone().into();
+                tab.update(cx, |t, cx| {
+                    t.saved_name = Some(name);
+                    cx.notify();
+                });
+            }
+        }
+        if let Some(store) = store(cx) {
+            store.write_request(request);
+        }
+        cx.notify();
+    }
+
+    /// 给某个 Tab 改名：保存过的改已保存请求本身（[`Self::rename_saved`]），
+    /// 没保存的只记在 Tab 上（`pending_name`，首次保存时当默认名）。空名不提交。
+    pub fn rename_tab(&mut self, tab: &Entity<RequestTab>, name: &str, cx: &mut Context<Self>) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        match tab.read(cx).saved_id {
+            Some(id) => self.rename_saved(id, name, cx),
+            None => {
+                let name: SharedString = name.to_string().into();
+                tab.update(cx, |t, cx| {
+                    t.pending_name = Some(name);
+                    cx.notify();
+                });
+                cx.notify();
+            }
+        }
+    }
+
+    /// 点标题：标题行变成输入框，预填当前名并全选、拿到焦点。
+    pub fn start_title_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab = self.active_tab();
+        let (id, title) = {
+            let t = tab.read(cx);
+            (t.id, t.title(cx))
+        };
+        // 先聚焦再全选：聚焦会把光标放回末尾、清掉已有选区
+        self.title_editor.update(cx, |input, cx| {
+            input.set_value(title, window, cx);
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+        self.editing_title = Some(id);
+        cx.notify();
+    }
+
+    /// 回车或失焦：把输入框里的名字交给 [`Self::rename_tab`]（空名在那里被丢掉，
+    /// 标题自然恢复原名）。编辑期间那个 Tab 被关掉了就什么也不做。
+    pub fn commit_title_edit(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.editing_title.take() else {
+            return;
+        };
+        let name = self.title_editor.read(cx).value().to_string();
+        if let Some(tab) = self.tabs.iter().find(|t| t.read(cx).id == id).cloned() {
+            self.rename_tab(&tab, &name, cx);
+        }
+        cx.notify();
+    }
+
+    /// 标题行里的标题：展示态是可点的名字（悬停给一层浅底，提示能改），
+    /// 编辑态换成输入框。Esc 由输入框冒泡上来的 `Escape` action 在这一层接住。
+    fn render_title(&self, tab: &Entity<RequestTab>, cx: &mut Context<Self>) -> AnyElement {
+        let editing = self.editing_title == Some(tab.read(cx).id);
+        if editing {
+            return div()
+                .id("title-edit")
+                .flex_1()
+                .min_w_0()
+                .max_w(px(480.))
+                .on_action(cx.listener(|this, _: &Escape, _, cx| this.cancel_title_edit(cx)))
+                .child(
+                    Input::new(&self.title_editor)
+                        .small()
+                        .aria_label(tr!("url_bar.request_name")),
+                )
+                .into_any_element();
+        }
+        let title = tab.read(cx).title(cx);
+        let hover_bg = cx.theme().secondary_hover;
+        div()
+            .id("title-display")
+            .role(Role::Button)
+            .aria_label(tr!("url_bar.rename_aria", name = title.clone()))
+            .min_w_0()
+            .px_1()
+            .rounded(cx.theme().radius)
+            .hover(move |s| s.bg(hover_bg))
+            .tooltip(|window, cx| Tooltip::new(tr!("url_bar.rename_hint")).build(window, cx))
+            .on_click(cx.listener(|this, _, window, cx| this.start_title_edit(window, cx)))
+            .child(
+                div()
+                    .truncate()
+                    .text_base()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
+            .into_any_element()
+    }
+
+    /// Esc：放弃这次编辑，标题恢复原名。
+    pub fn cancel_title_edit(&mut self, cx: &mut Context<Self>) {
+        if self.editing_title.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// 侧栏「重命名…」：输入框对话框（与重命名分类同款），确定后 [`Self::rename_saved`]；
+    /// 不为此打开 Tab，已打开着的 Tab 由 `rename_saved` 同步。
+    pub(crate) fn prompt_rename_saved(
+        &mut self,
+        id: Ulid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let Some(name) = self
+            .saved
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.name.clone())
+        else {
+            return;
+        };
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr!("url_bar.request_name"))
+                .default_value(SharedString::from(name.clone()))
+        });
+        let weak = cx.entity().downgrade();
+        let input_for_focus = input.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let input_for_content = input.clone();
+            let input_for_ok = input.clone();
+            let weak = weak.clone();
+            dialog
+                .title(tr!("dialog.rename_request.title", name = name.clone()))
+                .content(move |content, _, _| {
+                    content.child(
+                        Input::new(&input_for_content).aria_label(tr!("url_bar.request_name")),
+                    )
+                })
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new().child(
+                                Button::new("cancel-rename-request")
+                                    .outline()
+                                    .label(tr!("common.cancel")),
+                            ),
+                        )
+                        .child(
+                            DialogAction::new().child(
+                                Button::new("ok-rename-request")
+                                    .primary()
+                                    .label(tr!("common.save")),
+                            ),
+                        ),
+                )
+                .on_ok(move |_, _, cx| {
+                    let to = input_for_ok.read(cx).value().to_string();
+                    if let Some(ws) = weak.upgrade() {
+                        ws.update(cx, |ws, cx| ws.rename_saved(id, &to, cx));
+                    }
+                    true
+                })
+        });
+        input_for_focus.update(cx, |s, cx| {
+            s.focus(window, cx);
+            s.select_all(window, cx);
+        });
+    }
+
     pub fn move_saved_to_group(&mut self, id: Ulid, group: Option<String>, cx: &mut Context<Self>) {
         // 所有写 group 的入口统一在这里归一化（M3-a），调用方不必各自 trim/判空。
         let group = group.and_then(|g| saved_filter::normalize_group(&g));
@@ -1195,6 +1413,7 @@ impl Workspace {
         tab.update(cx, |t, cx| {
             t.saved_id = Some(id);
             t.saved_name = Some(name.into());
+            t.pending_name = None;
             t.saved_group = group;
             t.mark_clean(cx);
             t.save_draft_now(cx);
@@ -1228,7 +1447,7 @@ impl Workspace {
         if window.has_active_dialog(cx) {
             return;
         }
-        let default_name = tab.read(cx).title(cx);
+        let default_name = save_dialog_default_name(&tab, cx);
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(tr!("dialog.save_request.name"))
@@ -1398,6 +1617,12 @@ pub(crate) fn order_drafts(
         .active
         .filter(|id| ordered.iter().any(|d| d.id == *id));
     (ordered, active)
+}
+
+/// 保存对话框的默认名：Tab 当前的标题——未保存时在标题行起过名就用那个名字，
+/// 否则是 URL 末段。
+pub(crate) fn save_dialog_default_name(tab: &Entity<RequestTab>, cx: &App) -> SharedString {
+    tab.read(cx).title(cx)
 }
 
 /// 侧栏列表顺序：最近更新在前；同一毫秒内按 id 降序（id 含创建时间）。
@@ -1690,9 +1915,10 @@ impl Render for Workspace {
         // 标题行（「分类 › 请求名」+ 右端的环境切换器）在这一层画：切换器要握 Workspace，
         // 而标题取自当前 Tab。先建切换器再读 Tab，免得 `cx` 的可变与只读借用打架。
         let env_switcher = self.render_env_switcher(cx).into_any_element();
+        let title = self.render_title(&active, cx);
         let title_row = active
             .read(cx)
-            .render_title_row(env_switcher, cx)
+            .render_title_row(title, env_switcher, cx)
             .into_any_element();
         let sidebar_width = px(self.sidebar_width.unwrap_or(SIDEBAR_DEFAULT_WIDTH));
         // Dialog / Sheet / Notification 层由窗口根 Root 自动托管（GPUI Kit 0.7 起），这里不必再手动渲染。
