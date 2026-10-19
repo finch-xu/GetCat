@@ -11,7 +11,13 @@
 //! gpui-component 的默认灰。
 
 use getcat_core::model::Method;
-use gpui_kit::component::{ActiveTheme, Theme, ThemeRegistry, scroll::ScrollbarMode};
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui_kit::component::{
+    ActiveTheme, Theme, ThemeConfig, ThemeRegistry, highlighter::HighlightTheme,
+    scroll::ScrollbarMode,
+};
 use gpui_kit::{App, Hsla, rgb};
 
 const THEME_JSON: &str = include_str!("theme.json");
@@ -92,6 +98,31 @@ impl Palette {
     }
 }
 
+/// 代码编辑器（请求 Body、响应正文、生成代码）的底色：与卡片面同色，编辑器嵌在卡片里
+/// 不再多出一块色差。
+const LIGHT_EDITOR_BG: u32 = 0xffffff;
+const DARK_EDITOR_BG: u32 = 0x1b1e23;
+
+/// 给主题配置补上与明暗一致的语法高亮。
+///
+/// gpui-component 只在配置**带了** `highlight` 时才替换高亮主题，没带就沿用上一套——
+/// theme.json 不写高亮，于是启动时装上的默认浅色高亮会一直留着，深色模式下编辑器
+/// 是一块白底。这里按明暗套上上游的默认高亮，只把编辑器底色换成卡片面。
+fn with_highlight(
+    config: &Rc<ThemeConfig>,
+    defaults: Arc<HighlightTheme>,
+    editor_bg: u32,
+) -> Rc<ThemeConfig> {
+    let mut config = (**config).clone();
+    let mut style = config
+        .highlight
+        .take()
+        .unwrap_or_else(|| defaults.style.clone());
+    style.editor_background = Some(rgb(editor_bg).into());
+    config.highlight = Some(style);
+    Rc::new(config)
+}
+
 /// 当前主题模式对应的产品调色板。
 pub fn palette(cx: &App) -> &'static Palette {
     if cx.theme().is_dark() {
@@ -121,8 +152,8 @@ pub fn install(cx: &mut App) {
     };
 
     let theme = Theme::global_mut(cx);
-    theme.light_theme = light;
-    theme.dark_theme = dark;
+    theme.light_theme = with_highlight(&light, HighlightTheme::default_light(), LIGHT_EDITOR_BG);
+    theme.dark_theme = with_highlight(&dark, HighlightTheme::default_dark(), DARK_EDITOR_BG);
     let mode = theme.mode;
     // 重新套用当前模式，让刚换上的配置立刻生效（并同步 Base 层）。
     Theme::change(mode, None, cx);
@@ -164,6 +195,30 @@ mod tests {
                     ScrollbarMode::Always,
                     "切到 {mode:?} 后滚动条退回了默认模式"
                 );
+            }
+        });
+    }
+
+    /// 深色模式下编辑器必须换上深色高亮：theme.json 不带高亮时上游会沿用默认浅色那套，
+    /// 结果是深色界面里一块白底的编辑器。
+    #[gpui_kit::test]
+    fn editor_highlight_follows_the_theme_mode(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install(cx);
+            for (mode, bg) in [
+                (ThemeMode::Dark, DARK_EDITOR_BG),
+                (ThemeMode::Light, LIGHT_EDITOR_BG),
+                (ThemeMode::Dark, DARK_EDITOR_BG),
+            ] {
+                Theme::change(mode, None, cx);
+                let highlight = &cx.theme().highlight_theme;
+                assert_eq!(
+                    highlight.style.editor_background.map(hex),
+                    Some(bg),
+                    "{mode:?}"
+                );
+                assert_eq!(hex(cx.theme().background), bg, "编辑器底色应与卡片面一致");
             }
         });
     }
