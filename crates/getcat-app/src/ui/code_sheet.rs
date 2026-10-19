@@ -5,16 +5,17 @@
 //!
 //! # 为什么正文是独立实体而不是 `Workspace` 上的一个 render 方法
 //!
-//! `Root::render_sheet_layer` 是在 `Workspace::render` **内部**调用的，而 `Sheet` 的 builder
-//! 是 `Fn`、每帧都会被执行一次。若 builder 里写 `workspace.update(...)`，就等于在 `Workspace`
-//! 的 render 借用还没释放时再借一次，gpui 会直接 panic：
+//! `Sheet` 的 builder 是 `Fn`、每帧都会被执行一次。GPUI Kit 0.6 时 Sheet 层要由
+//! `Workspace::render` **内部**手动渲染（`Root::render_sheet_layer`），builder 里写
+//! `workspace.update(...)` 就等于在 `Workspace` 的 render 借用还没释放时再借一次，gpui 会直接 panic：
 //!
 //! ```text
 //! cannot update Workspace while it is already being updated
 //! ```
 //!
-//! 表现是「点一下按钮就闪退」——因为点击后的第一次重绘必然踩中。
-//! 所以正文做成独立实体，builder 里只 `.child(entity.clone())`：gpui 渲染它时单独借
+//! 表现是「点一下按钮就闪退」——因为点击后的第一次重绘必然踩中。0.7 起 Sheet 层改由窗口根
+//! `Root` 自动托管，不再嵌在 `Workspace::render` 里，但 builder 仍是每帧都跑的渲染期代码，
+//! 照样不该在里面改宿主状态。所以正文做成独立实体，builder 里只 `.child(entity.clone())`：gpui 渲染它时单独借
 //! `CodeSheet`，从不碰 `Workspace`。主工作区把 `Entity<RequestTab>` 当 child 传是同一个套路。
 //!
 //! 同理，代码只在「装载草稿」与「切换目标」这两个离散事件里生成，绝不在渲染期算。

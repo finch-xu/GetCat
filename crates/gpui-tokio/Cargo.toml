@@ -14,4 +14,4 @@ doctest = false
 anyhow.workspace = true
 # 只用到 gpui 本体；feature 在 workspace 内本来就会统一，这里不另关默认 feature
 gpui-kit.workspace = true
-tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

@@ -19,7 +19,7 @@ mod ui;
 rust_i18n::i18n!("locales", fallback = "en");
 
 use getcat_core::store::{Layout, Loaded, Store, StoreError, load_all};
-use gpui_kit::component::{Root, TitleBar};
+use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 use crate::assets::AppAssets;
@@ -150,7 +150,8 @@ fn main() {
                     update::install(cx);
                     #[cfg(target_os = "linux")]
                     state::desktop_entry::init(cx);
-                    cx.open_window(options, |window, cx| {
+                    // gpui_kit::open_window 替我们把内容包进窗口根 Root（Dialog / Sheet / 通知层由它托管）
+                    gpui_kit::open_window(options, cx, |window, cx| {
                         // TitlebarOptions.title 为 None（标题由 TitleBar 自绘）；OS 层的窗口标题给 Dock / 任务栏 / 屏幕阅读器
                         window.set_window_title(crate::brand::APP_NAME);
                         let workspace = cx.new(|cx| Workspace::restore(loaded, window, cx));
@@ -173,7 +174,7 @@ fn main() {
                             }
                         })
                         .detach();
-                        cx.new(|cx| Root::new(workspace, window, cx))
+                        workspace
                     })
                 });
                 // AsyncApp::update 在本版本直接返回闭包结果（不再包一层 Result）

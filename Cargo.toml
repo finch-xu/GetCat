@@ -17,7 +17,7 @@ getcat-core = { path = "crates/getcat-core" }
 # 它替我们锁定配套的 gpui（以 `gpui-pre` 系列发布的 zed 快照）、gpui-base、gpui-component 与默认图标。
 # 代码里 `use gpui_kit::*` 就是 gpui，组件在 `gpui_kit::component`，平台层在 `gpui_kit::platform`，
 # 图标在 `gpui_kit::assets`。tree-sitter 语言与 inspector 等 feature 名与 gpui-component 一致。
-gpui-kit = { version = "0.6.1", features = ["tree-sitter", "tree-sitter-html", "tree-sitter-bash", "tree-sitter-python"] }
+gpui-kit = { version = "0.7.3", features = ["tree-sitter", "tree-sitter-html", "tree-sitter-bash", "tree-sitter-python"] }
 # tokio ⇄ gpui 桥接：Kit 没有对应的包（全线 smol），移植自 zed 的 gpui_tokio，见 crates/gpui-tokio
 gpui-tokio = { path = "crates/gpui-tokio" }
 # 应用内更新（GitHub Releases + SHA-256 + minisign）。上游的 gpui 走 zed git 源，与 gpui-pre 不是

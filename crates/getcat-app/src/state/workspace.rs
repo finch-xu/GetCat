@@ -12,8 +12,7 @@ use getcat_core::model::{
 };
 use getcat_core::store::Loaded;
 use gpui_kit::component::{
-    ActiveTheme, IconName, IndexPath, Root, Selectable, Sizable, Theme, ThemeMode, TitleBar,
-    WindowExt,
+    ActiveTheme, IconName, IndexPath, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
     alert::Alert,
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
@@ -1693,13 +1692,7 @@ impl Render for Workspace {
         }
         let active = self.active_tab();
         let sidebar_width = px(self.sidebar_width.unwrap_or(SIDEBAR_DEFAULT_WIDTH));
-        // gpui-component 的 Root::render() 不会自动画出 Dialog/Sheet/Notification 层，
-        // 需要消费方自己在某处渲染（story crate 的 StoryRoot::render 就是这么接的）；
-        // 否则 window.open_dialog 只会更新状态，画面上什么都不会出现。
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-        // 同理，Sheet 层也得自己画出来：不挂这一句，window.open_sheet 只会更新状态，
-        // 画面上什么都不会出现。
-        let sheet_layer = Root::render_sheet_layer(window, cx);
+        // Dialog / Sheet / Notification 层由窗口根 Root 自动托管（GPUI Kit 0.7 起），这里不必再手动渲染。
         // 根元素持有焦点（track_focus）：给它 id + role，否则 gpui 会在日志里提示聚焦元素缺少 role
         div()
             .id("workspace")
@@ -1787,8 +1780,6 @@ impl Render for Workspace {
                     .child(self.render_tool_rail(cx)),
             )
             .child(self.render_status_bar(cx))
-            .children(sheet_layer)
-            .children(dialog_layer)
     }
 }
 
