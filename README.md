@@ -1,5 +1,5 @@
 <div align="right">
-<b>简体中文</b> · <a href="README.en.md">English</a> · <a href="README.ja.md">日本語</a>
+<b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
 </div>
 
 <div align="center">
@@ -8,11 +8,11 @@
 
 # GetCat
 
-**用 Rust + [GPUI](https://gpui.rs) 打造的原生跨平台 HTTP 接口调试工具**
+**A native, cross-platform HTTP API client built with Rust + [GPUI](https://gpui.rs)**
 
 No Postman, Just GetCat!
 
-GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electron, No Tauri, No WebView
+GPU-rendered · Light on resources · No account · Your data stays local · No Electron, No Tauri, No WebView
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -21,54 +21,54 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 
-[DeepWiki 文档](https://deepwiki.com/finch-xu/GetCat) · [官方网站](https://getcat.io/)
+[DeepWiki Docs](https://deepwiki.com/finch-xu/GetCat) · [Official Site](https://getcat.io/)
 
-<img src="assets/screenshot.png" width="900" alt="GetCat 主界面：左侧请求构造，右侧响应查看">
+<img src="assets/screenshot.png" width="900" alt="GetCat main window: request builder on the left, response viewer on the right">
 
 </div>
 
-## 亮点
+## Highlights
 
-- **原生且轻快**：GPU 渲染的原生窗口，不是 Electron / Tauri / WebView；macOS、Linux、Windows 三平台同一套界面。
-- **大响应不卡**：流式接收、实时进度、随时取消；≤ 5 MB 用高亮编辑器，≤ 64 MB 按行虚拟化（照样能拖选、⌘C 复制），更大的落盘预览 + 一键保存，百 MB 响应也不会拖住界面。响应体与响应头都有一键复制。
-- **完整的请求构造**：GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS；Path 参数（URL 中 `{name}`）、Query、Headers；Body 支持 form-data（文本 / 文件字段，文件定长流式上传）、x-www-form-urlencoded、raw JSON / Text / XML、binary 整文件上传。
-- **大模型流式调试**：SSE（text/event-stream）响应边收边显示，不必等流结束；自动识别 OpenAI Chat Completions / Responses 与 Anthropic Messages 的流格式，提供事件流 / 拼装文本 / 原始三种视图，附 TTFT、事件数、token 用量与生成速率统计。侧栏自带三家接口的请求模板（纯文本 / 含图片 / 流式），以及 MCP 两个协议时代的模板。
-- **命令进出自如**：右侧栏可把当前请求转成 cURL / Python 示例，也能反过来粘一条 curl 命令导进来——浏览器「以 cURL 格式复制」的输出直接可用，没搬过来的选项会如实列出。
-- **变量与前后置操作**：全局 / 分类 / 环境三层变量，`{{var}}` 与 `{{$timestamp}}` 替换；发送前设变量、响应后提取字段到变量与断言，不用写脚本；Postman environment 导入导出；敏感变量在界面上掩码显示。
-- **数据属于你**：不存历史、不存响应、不上传任何东西。已保存请求、草稿、设置都是美化过的 JSON 文件，可手工编辑、可用 Git 管理。
-- **主题与语言跟随系统**，也可固定浅色 / 深色、English / 中文 / 日本語；自绘标题栏，三平台外观一致。
-- **无障碍**：所有控件都有可访问名称，屏幕阅读器可用。
+- **Native and fast**: a GPU-rendered native window — not Electron, Tauri, or a WebView. One interface across macOS, Linux, and Windows.
+- **Large responses stay smooth**: streamed reception, live progress, cancel at any time. Up to 5 MB opens in the highlighted editor, up to 64 MB is line-virtualized (still selectable and copyable with ⌘C), and anything larger spills to disk with a preview and one-click save — a few hundred MB won't lock up the UI. Body and headers each have a one-click copy.
+- **Complete request building**: GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS; path parameters (`{name}` in the URL), query, and headers; bodies as form-data (text and file fields, files streamed with a known length), x-www-form-urlencoded, raw JSON / Text / XML, or a whole binary file.
+- **LLM streaming debugging**: SSE (text/event-stream) responses render as they arrive — no waiting for the stream to finish. The stream formats of OpenAI Chat Completions / Responses and Anthropic Messages are recognized automatically, with three views (event list / assembled text / raw) plus TTFT, event count, token usage, and generation-rate stats. The sidebar ships request templates for all three APIs (plain text / with image / streaming), and for both MCP protocol eras.
+- **Commands in and out**: the right-hand rail turns the current request into a cURL / Python snippet, and takes one back — paste a curl command (a browser's "Copy as cURL" works as-is) and it becomes a new tab, with anything that couldn't be carried over listed explicitly.
+- **Variables & pre/post operations**: global / category / environment scopes with `{{var}}` and `{{$timestamp}}`; set variables before sending, extract response fields and assert afterwards — no scripting; Postman environment import/export; secret variables are masked in the UI.
+- **Your data is yours**: no history, no stored responses, nothing uploaded anywhere. Saved requests, drafts, and settings are pretty-printed JSON files you can hand-edit and track in Git.
+- **Theme and language follow the system**, or pin them to light / dark and English / Chinese / Japanese. The title bar is custom-drawn, so all three platforms look the same.
+- **Accessible**: every control has an accessible name and works with screen readers.
 
-## 安装
+## Install
 
-下载对应平台的包 [GitHub Releases](https://github.com/finch-xu/GetCat/releases)
+Download the package for your platform [GitHub Releases](https://github.com/finch-xu/GetCat/releases)
 
 <table>
   <thead>
-    <tr><th>平台</th><th>文件</th><th>下载</th><th>说明</th></tr>
+    <tr><th>Platform</th><th>File</th><th>Download</th><th>Notes</th></tr>
   </thead>
   <tbody>
-    <tr><td>macOS（Apple Silicon）</td><td><code>GetCat-macos-arm64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg">中国下载</a></td><td rowspan="2">已签名公证，拖进「应用程序」即可</td></tr>
-    <tr><td>macOS（Intel）</td><td><code>GetCat-macos-x64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg">中国下载</a></td></tr>
-    <tr><td>Linux（x64）</td><td><code>GetCat-linux-x64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz">中国下载</a></td><td rowspan="2">解压得到 <code>getcat</code>，系统要求见下</td></tr>
-    <tr><td>Linux（arm64）</td><td><code>GetCat-linux-arm64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz">中国下载</a></td></tr>
-    <tr><td>Windows（免安装，x64） <strong>推荐</strong></td><td><code>GetCat-windows-x64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe">中国下载</a></td><td rowspan="2">单文件，放哪都能跑，系统要求见下</td></tr>
-    <tr><td>Windows（免安装，arm64） <strong>推荐</strong></td><td><code>GetCat-windows-arm64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe">中国下载</a></td></tr>
-    <tr><td>Windows（安装版，x64）</td><td><code>GetCat-windows-x64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi">中国下载</a></td><td rowspan="2">装到当前用户目录，不需要管理员；开始菜单可启动</td></tr>
-    <tr><td>Windows（安装版，arm64）</td><td><code>GetCat-windows-arm64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi">全球下载</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi">中国下载</a></td></tr>
+    <tr><td>macOS (Apple Silicon)</td><td><code>GetCat-macos-arm64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-arm64.dmg">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-arm64.dmg">China mirror</a></td><td rowspan="2">Signed and notarized — drag it into Applications</td></tr>
+    <tr><td>macOS (Intel)</td><td><code>GetCat-macos-x64.dmg</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-macos-x64.dmg">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-macos-x64.dmg">China mirror</a></td></tr>
+    <tr><td>Linux (x64)</td><td><code>GetCat-linux-x64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-x64.tar.gz">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-x64.tar.gz">China mirror</a></td><td rowspan="2">Unpacks to <code>getcat</code> — see the system requirements below</td></tr>
+    <tr><td>Linux (arm64)</td><td><code>GetCat-linux-arm64.tar.gz</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-linux-arm64.tar.gz">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-linux-arm64.tar.gz">China mirror</a></td></tr>
+    <tr><td>Windows (portable, x64) <strong>Recommended</strong></td><td><code>GetCat-windows-x64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.exe">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.exe">China mirror</a></td><td rowspan="2">Single file, runs from anywhere — see the system requirements below</td></tr>
+    <tr><td>Windows (portable, arm64) <strong>Recommended</strong></td><td><code>GetCat-windows-arm64.exe</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.exe">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.exe">China mirror</a></td></tr>
+    <tr><td>Windows (installer, x64)</td><td><code>GetCat-windows-x64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-x64.msi">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-x64.msi">China mirror</a></td><td rowspan="2">Installs per-user, no administrator needed; launches from the Start menu</td></tr>
+    <tr><td>Windows (installer, arm64)</td><td><code>GetCat-windows-arm64.msi</code></td><td><a href="https://github.com/finch-xu/GetCat/releases/latest/download/GetCat-windows-arm64.msi">Global</a> · <a href="https://d.mirror.catonthe.top/GetCat/GetCat-windows-arm64.msi">China mirror</a></td></tr>
   </tbody>
 </table>
 
 <details>
-<summary>兼容的 Linux 系统版本</summary>
+<summary>Supported Linux distributions</summary>
 
-支持 2022 年以后的主流桌面发行版：**Ubuntu 22.04+**、**Debian 12+**、**Fedora 36+**、**Linux Mint 21+**、**openSUSE Leap 15.6+**，以及 Arch、openSUSE Tumbleweed 等滚动发行版。这些系统的图形驱动开箱可用，不需要额外装什么。
+Runs on mainstream desktop distributions from 2022 onward: **Ubuntu 22.04+**, **Debian 12+**, **Fedora 36+**, **Linux Mint 21+**, **openSUSE Leap 15.6+**, and rolling releases such as Arch and openSUSE Tumbleweed. Graphics drivers on these work out of the box — there is nothing extra to install.
 
-更老的发行版跑不了：Ubuntu 20.04、Debian 11，以及 RHEL / Rocky / AlmaLinux 9 —— 下限是 glibc 2.35，它们都在这之下。
+Older releases won't run it: Ubuntu 20.04, Debian 11, and RHEL / Rocky / AlmaLinux 9 all sit below the glibc 2.35 floor.
 
-解压后直接运行 `./getcat` 即可。想让它出现在应用列表（Ubuntu 的「显示应用程序」）与 Dock 里，打开 **设置 → 通用 → 加入应用菜单**：GetCat 会把启动项与图标写到 `~/.local/share` 下，之后按 Super 键搜索 GetCat 就能启动，右键还能「添加到收藏夹」钉在 Dock 上；关掉开关即删除。Wayland 下窗口与 Dock 的图标也来自这份启动项，所以没打开开关时任务栏里显示的是通用图标。
+Unpack it and run `./getcat`. To have it show up in the app grid (Ubuntu's "Show Applications") and the dock, turn on **Settings → General → Add to application menu**: GetCat writes a launcher and icon under `~/.local/share`, after which the Super key finds it and a right-click can "Add to Favorites" to pin it. Turn the switch off to remove them. On Wayland the window and dock icon also come from this launcher, so without it the taskbar shows a generic icon.
 
-启动项指向当前可执行文件，建议先把 `getcat` 放到固定位置再打开开关，例如：
+The launcher points at the current executable, so put `getcat` somewhere permanent before enabling it, for example:
 
 ```bash
 tar -xzf GetCat-linux-x64.tar.gz
@@ -76,119 +76,119 @@ install -Dm755 getcat ~/.local/bin/getcat
 ~/.local/bin/getcat
 ```
 
-挪动过文件的话，把开关关掉再打开一次，路径就会更新。
+If you move the file later, toggle the switch off and on again to refresh the path.
 
 </details>
 
 <details>
-<summary>Linux 版本启动后黑屏，或报 Vulkan / 找不到 GPU</summary>
+<summary>Blank window on Linux, or a Vulkan / no GPU found error</summary>
 
-界面由 GPU 通过 Vulkan 渲染。桌面发行版通常自带驱动，先自检：
+The interface is GPU-rendered through Vulkan. Desktop distributions normally ship the driver already, so check first:
 
 ```bash
 vulkaninfo --summary
 ```
 
-没有输出、或提示找不到设备时，按显卡装驱动：
+If that prints nothing or reports no devices, install the driver for your GPU:
 
-| 环境 | 命令 |
+| Environment | Command |
 |---|---|
-| Ubuntu / Debian + Intel、AMD 显卡 | `sudo apt install mesa-vulkan-drivers` |
-| Fedora + Intel、AMD 显卡 | `sudo dnf install mesa-vulkan-drivers` |
-| Arch + Intel、AMD 显卡 | `sudo pacman -S vulkan-intel` 或 `vulkan-radeon` |
-| NVIDIA 显卡 | 装厂商专有驱动（如 `nvidia-driver-550`）；开源的 nouveau 不提供 Vulkan |
-| 虚拟机 / 无独显 | 装 `mesa-vulkan-drivers`，会退到 lavapipe 软件渲染，能用但慢 |
+| Ubuntu / Debian with Intel or AMD graphics | `sudo apt install mesa-vulkan-drivers` |
+| Fedora with Intel or AMD graphics | `sudo dnf install mesa-vulkan-drivers` |
+| Arch with Intel or AMD graphics | `sudo pacman -S vulkan-intel` or `vulkan-radeon` |
+| NVIDIA graphics | Install the proprietary driver (e.g. `nvidia-driver-550`); the open-source nouveau driver has no Vulkan |
+| Virtual machine / no discrete GPU | Install `mesa-vulkan-drivers` to fall back to lavapipe software rendering — usable but slow |
 
 </details>
 
 <details>
-<summary>兼容的 Windows 系统版本</summary>
+<summary>Supported Windows versions</summary>
 
-需要 **Windows 10 1803（2018 年 4 月更新）及以上**，或 Windows 11。界面走 Direct3D 11 渲染，2010 年前后的显卡就够（feature level 10.1 起），不要求 DirectX 12。
+Requires **Windows 10 1803 (April 2018 Update) or later**, or Windows 11. The interface renders through Direct3D 11, so graphics hardware from around 2010 is enough (feature level 10.1 and up) — DirectX 12 is not required.
 
-两个版本都能用，推荐免安装版（ARM 设备，如骁龙笔记本，选 `-arm64` 后缀的包）：
+Either build works; the portable build is recommended (on ARM devices such as Snapdragon laptops, grab the `-arm64` package):
 
-- **`GetCat-windows-<arch>.exe`（免安装，推荐）**：单文件，放 U 盘或任意目录直接双击，不写注册表。
-- **`GetCat-windows-<arch>.msi`（安装版）**：装到 `%LOCALAPPDATA%\Programs\GetCat`，不需要管理员权限，开始菜单里会出现 GetCat，也能从「应用和功能」里卸载。
+- **`GetCat-windows-<arch>.exe` (portable, recommended)**: a single file — keep it on a USB stick or anywhere else and double-click it; nothing is written to the registry.
+- **`GetCat-windows-<arch>.msi` (installer)**: installs into `%LOCALAPPDATA%\Programs\GetCat`, needs no administrator rights, adds a Start menu entry, and uninstalls from Apps & features.
 
-应用内的自动更新两者都支持：装了 MSI 的会拉新的 MSI 静默升级，免安装版直接替换 exe。
+In-app updates work for both: an MSI install pulls the new MSI and upgrades silently, while the portable build replaces its own exe.
 
-两个都还没做代码签名，首次运行 SmartScreen 会拦一下：免安装 exe 点「更多信息」→「仍要运行」；MSI 是安装包，拦得更明显一些，同样从「更多信息」进去放行。
+Neither is code-signed yet, so SmartScreen will stop it the first time. For the portable exe, click **More info** → **Run anyway**; the MSI is an installer so the warning is more prominent, but it clears the same way.
 
 </details>
 
-## 使用
+## Usage
 
-1. 选方法、输入 URL，按 **⌘ Enter**（Windows / Linux 为 Ctrl Enter）发送。
-2. 在 Params / Headers / Body 标签页填参数；URL 里的 `{name}` 会自动出现在 Path 参数表里。
-3. 响应区看状态 / 耗时 / 大小，Pretty / Raw 切换，**⌘ F** 在响应内搜索，或保存到文件。
-4. **⌘ S** 保存请求到侧栏，之后点开即用。已保存请求支持单层分类：保存时选择或新建分类，侧栏按分类浏览。
+1. Pick a method, type a URL, and press **⌘ Enter** (Ctrl Enter on Windows / Linux) to send.
+2. Fill in parameters under the Params / Headers / Body tabs; any `{name}` in the URL shows up automatically in the path parameter table.
+3. The response pane shows status / time / size, toggles between Pretty and Raw, searches with **⌘ F**, and saves to a file.
+4. **⌘ S** saves the request to the sidebar — click it later to load it back. Saved requests support one-level categories: pick or create a category when saving, browse by category in the sidebar.
 
-| 操作 | macOS | Windows / Linux |
+| Action | macOS | Windows / Linux |
 |---|---|---|
-| 发送 | ⌘ Enter | Ctrl Enter |
-| 新 Tab / 关闭 Tab | ⌘ T / ⌘ W | Ctrl T / Ctrl W |
-| 折叠侧栏 | ⌘ B | Ctrl B |
-| 保存请求 | ⌘ S | Ctrl S |
-| 响应内搜索 | ⌘ F | Ctrl F |
-| 设置 | ⌘ , | Ctrl , |
+| Send | ⌘ Enter | Ctrl Enter |
+| New tab / close tab | ⌘ T / ⌘ W | Ctrl T / Ctrl W |
+| Collapse sidebar | ⌘ B | Ctrl B |
+| Save request | ⌘ S | Ctrl S |
+| Search in response | ⌘ F | Ctrl F |
+| Settings | ⌘ , | Ctrl , |
 
-设置里可以调界面语言（跟随系统 / English / 中文 / 日本語）、请求超时、跳转、TLS 校验、编辑器字号，以及是否在启动时检查更新。
+Settings cover the interface language (system / English / Chinese / Japanese), request timeout, redirects, TLS verification, editor font size, and whether to check for updates at startup.
 
-### 数据目录
+### Data directory
 
-| 平台 | 目录 |
+| Platform | Directory |
 |---|---|
 | macOS | `~/Library/Application Support/GetCat/` |
-| Linux | `$XDG_DATA_HOME/getcat/`（默认 `~/.local/share/getcat/`） |
+| Linux | `$XDG_DATA_HOME/getcat/` (defaults to `~/.local/share/getcat/`) |
 | Windows | `%APPDATA%\GetCat\data\` |
 
 ```
-workspace.json          # Tab 顺序、侧栏、分栏方向、主题偏好
-requests/<ulid>.json    # 一个已保存请求一个文件
-drafts/<tab-id>.json    # 一个 Tab 一个草稿
-settings.json           # 应用设置
+workspace.json          # tab order, sidebar, split direction, theme preference
+requests/<ulid>.json    # one file per saved request
+drafts/<tab-id>.json    # one draft per tab
+settings.json           # application settings
 ```
 
-写入是原子的（临时文件 → 替换），崩溃不会留下半个文件；解析失败的文件会被改名为 `.corrupt-<时间>` 并跳过。Header 里的 `Authorization` 等以明文保存（与 Postman / Insomnia 本地库一致），Unix 上文件权限 0600。
+Writes are atomic (temp file → rename), so a crash never leaves a half-written file; a file that fails to parse is renamed to `.corrupt-<timestamp>` and skipped. Headers such as `Authorization` are stored in plain text (same as Postman's and Insomnia's local stores), with 0600 file permissions on Unix.
 
-## 二次开发
+## Development
 
-### 架构
+### Architecture
 
 ```
 crates/
-├─ getcat-core   # 无 UI 的核心：请求模型、发送（reqwest + tokio）、大响应分档与落盘、JSON 文件存储
-└─ getcat-app    # GPUI 界面：Workspace / RequestTab 状态、设置对话框、应用内更新
+├─ getcat-core   # UI-free core: request model, sending (reqwest + tokio), large-response tiering and spill-to-disk, JSON file storage
+└─ getcat-app    # GPUI interface: Workspace / RequestTab state, settings dialog, in-app updates
 ```
 
-- UI 框架是 Zed 的 [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) + [GPUI Kit](https://github.com/longbridge/gpui-kit)（gpui-component 组件库），按 Kit 0.6 官方形态只依赖 crates.io 的 `gpui-kit` 一个包，由它锁定配套的 gpui 版本。
-- 网络在 tokio 运行时里跑，结果通过 channel 回到 GPUI 主线程；后台处理（美化 / 建索引）被 `catch_unwind` 包裹，panic 只会显示为"后台处理异常"。
-- 持久化没有数据库：`getcat-core/src/store` 负责读写，写入走独立线程并做 500 ms 合并。
+- The UI is built on Zed's [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) plus [GPUI Kit](https://github.com/longbridge/gpui-kit) (the gpui-component library). Following the Kit 0.6 convention, the app depends on the single crates.io `gpui-kit` crate, which pins the matching gpui release.
+- Networking runs on the tokio runtime and results come back to the GPUI main thread over a channel; background work (pretty-printing, indexing) is wrapped in `catch_unwind`, so a panic only surfaces as a "background processing error".
+- There is no database: `getcat-core/src/store` handles reads and writes, with writes on a dedicated thread coalesced over 500 ms.
 
-### 构建与调试
+### Building and debugging
 
-- Rust ≥ 1.97（edition 2024）。macOS 不需要额外工具链；Linux 需要 Vulkan 与 Wayland / X11 / fontconfig 头文件（清单见 `.github/workflows/ci.yml`）；Windows 需要 MSVC 工具链，Direct3D 11 已含在 Windows SDK 里。
-- 应用 logo：`crates/getcat-app/assets/logo/getcat-art.svg`（完整版）与 `getcat-art-mini.svg`（≤ 32 px 用的简化版）是原画，`scripts/gen-logo.py` 把它们合成成浅 / 深两套配色的产物 —— app 内嵌的 `getcat.png` 与 `getcat-mini.png`（浅色，另有 `-dark` 深色版，app 按主题切换）、macOS 图标源 `resources/macos/getcat-1024.png`、Windows exe 图标 `resources/windows/getcat.ico`；改 logo 后手动重跑脚本并提交产物（CI 不生成，需要 `pip install pillow numpy`，SVG 栅格化由 `tools/svg-raster` 完成）。
-- Windows 的 exe 图标与版本信息由 `crates/getcat-app/build.rs` 嵌入，只在 Windows 上原生编译时生效（从 macOS 交叉编译出的 exe 没有图标）。安装包定义在 `crates/getcat-app/resources/windows/GetCat.wxs`，需要 WiX v6：`dotnet tool install --global wix --version 6.*`。
+- Rust ≥ 1.97 (edition 2024). macOS needs no extra toolchain; Linux needs Vulkan plus the Wayland / X11 / fontconfig headers (the full list is in `.github/workflows/ci.yml`); Windows needs the MSVC toolchain, and Direct3D 11 ships with the Windows SDK.
+- App logo: `crates/getcat-app/assets/logo/getcat-art.svg` (full) and `getcat-art-mini.svg` (simplified, for ≤ 32 px) are the originals, and `scripts/gen-logo.py` composes them into outputs in a light and a dark color scheme — the embedded `getcat.png` and `getcat-mini.png` (light, each with a `-dark` counterpart; the app switches with its theme), the macOS icon source `resources/macos/getcat-1024.png`, and the Windows exe icon `resources/windows/getcat.ico`. After changing the logo, rerun the script by hand and commit the output (CI does not generate it; requires `pip install pillow numpy`, and `tools/svg-raster` rasterizes the SVGs).
+- The Windows exe icon and version info are embedded by `crates/getcat-app/build.rs`, and only when compiling natively on Windows (an exe cross-compiled from macOS has no icon). The installer is defined in `crates/getcat-app/resources/windows/GetCat.wxs` and needs WiX v6: `dotnet tool install --global wix --version 6.*`.
 
 ```bash
-cargo run -p getcat-app                         # 运行
-cargo test --workspace                          # 单元 + wiremock + gpui TestAppContext 测试
-RUST_LOG=debug cargo run -p getcat-app          # 调整日志级别
-cargo run -p getcat-app --features inspector    # 元素检查器：⌘⌥I / Ctrl+Shift+I 查看 id / role
-GETCAT_UPDATE_CHECK=1 cargo run -p getcat-app   # 开发构建也在启动时检查更新（只检查不安装）
+cargo run -p getcat-app                         # run
+cargo test --workspace                          # unit + wiremock + gpui TestAppContext tests
+RUST_LOG=debug cargo run -p getcat-app          # change the log level
+cargo run -p getcat-app --features inspector    # element inspector: ⌘⌥I / Ctrl+Shift+I to see ids and roles
+GETCAT_UPDATE_CHECK=1 cargo run -p getcat-app   # make dev builds check for updates at startup too (check only, no install)
 ```
 
-本地测试接口：`tools/testserver/server.py` 是一个零依赖（只用 Python 标准库）的小 server，专门提供难伺候的接口 —— 慢响应、超大响应体（1 / 5 / 10 / 20 / 50 MB）、chunked 滴流、大模型 SSE 流（OpenAI / Anthropic 两种事件格式，含 usage）、最小 MCP 端点、任意状态码、中途断连、超多超长响应头，用来手工验证大响应分档、流式进度与取消。启动后打开首页就是带参数说明的接口清单，每个示例都能一键复制完整 URL 粘到 GetCat。
+Local test endpoints: `tools/testserver/server.py` is a dependency-free (Python standard library only) server that deliberately misbehaves — slow responses, huge bodies (1 / 5 / 10 / 20 / 50 MB), chunked dripping, LLM SSE streams (both OpenAI and Anthropic event formats, usage included), a minimal MCP endpoint, arbitrary status codes, mid-transfer disconnects, and floods of oversized response headers. Use it to exercise large-response tiering, streaming progress, and cancellation by hand. Its home page lists every endpoint with its parameters, and each example copies a full URL straight into GetCat.
 
 ```bash
-python3 tools/testserver/server.py                             # 127.0.0.1:8765，首页即接口清单
-python3 tools/testserver/server.py --port 9000 --host 0.0.0.0  # 换端口 / 让同网段设备也能访问
+python3 tools/testserver/server.py                             # 127.0.0.1:8765, home page = endpoint list
+python3 tools/testserver/server.py --port 9000 --host 0.0.0.0  # different port / reachable from other devices
 ```
 
-提交前：`cargo fmt --all`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。CI 会在三平台跑构建与测试，并用 cargo-deny 拦截 copyleft 依赖。
+Before committing: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`. CI builds and tests on all three platforms and uses cargo-deny to block copyleft dependencies.
 
-## 许可证
+## License
 
-[Apache-2.0](LICENSE)。第三方依赖清单见 [THIRD-PARTY.md](THIRD-PARTY.md)。
+[Apache-2.0](LICENSE). The third-party dependency list is in [THIRD-PARTY.md](THIRD-PARTY.md).
