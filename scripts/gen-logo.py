@@ -1,57 +1,91 @@
 #!/usr/bin/env python3
-"""把 assets/logo/cat.png（去背的猫）合成成应用 logo，输出两份 PNG 与一份 ICO。
+"""把 assets/logo/ 下的两份 SVG 原画合成成应用 logo，输出三份 PNG 与一份 ICO。
 
   scripts/gen-logo.py
 
+原画（只画猫与抓娃娃机的爪子，透明底，512×512 坐标系）：
+  crates/getcat-app/assets/logo/getcat-art.svg       完整版 —— ≥ 48 px 的所有产物
+  crates/getcat-app/assets/logo/getcat-art-mini.svg  简化版 —— ≤ 32 px：去掉脸部细节与条纹，
+                                                     吊绳、爪子、四肢加粗，缩小后仍认得出
+
 产物：
-  crates/getcat-app/assets/logo/getcat.png       512×512，圆角块铺满画布 —— app 侧栏与 README 用
+  crates/getcat-app/assets/logo/getcat.png       512×512，超椭圆底板铺满画布 —— Linux 窗口图标与 README 用
+  crates/getcat-app/assets/logo/getcat-mini.png  128×128，简化版 —— app 图标栏（26 px 显示）用
   crates/getcat-app/resources/macos/getcat-1024.png
-                                                 1024×1024，圆角块缩到 824 居中 —— macOS .icns 用
-  crates/getcat-app/resources/windows/getcat.ico 多尺寸（16…256），圆角块铺满画布
+                                                 1024×1024，底板缩到 824 居中 —— macOS .icns 用
+  crates/getcat-app/resources/windows/getcat.ico 多尺寸（16…256），底板铺满画布；16/24/32 用简化版
                                                  —— build.rs 嵌进 exe 资源（资源管理器 / 任务栏 / 窗口图标）
 
-只在 logo 改动时由开发者手动跑一次并提交产物；CI 不调用本脚本（runner 上不装
-Pillow，且位图合成结果固定下来才可复现）。依赖：pip install pillow numpy
+只在 logo 改动时由开发者手动跑一次并提交产物；CI 不调用本脚本。依赖：
+  pip install pillow numpy
+SVG 栅格化交给 tools/svg-raster（resvg，版本与根 Cargo.lock 对齐），首次运行时自动 cargo build。
 
 为什么是「超椭圆」而不是普通圆角矩形：macOS Big Sur 之后的应用图标是连续曲率的
 squircle，圆弧角在角落有肉眼可见的曲率突变，一眼就不像系统自带图标。这里用超椭圆
-|x/a|^n + |y/a|^n = 1（n=5）近似，配 4× 超采样做抗锯齿。
+|x/a|^n + |y/a|^n = 1（n=5）近似，配 4× 超采样做抗锯齿。底板因此不画在 SVG 里，
+由本脚本合成，原画越出底板的部分（伸出顶边的吊绳）随遮罩一起裁掉。
 
 为什么 macOS 那份要缩到 824/1024（≈80.5%）：Apple 的图标网格要求圆角方块只占画布
 的这个比例、四周留透明边距，否则在 Dock 里会比其他应用的图标大一圈。
 
 为什么 Windows 的 .ico 用铺满版而不是 macOS 那份：Windows 图标没有 Apple 那套留边
 规范，带边距的图在任务栏里会明显偏小。ICO 每档尺寸都是独立位图（不是让系统缩一张
-大图），所以逐档 LANCZOS 重采样，16 px 那档才不会糊。
+大图），所以逐档单独栅格化，小档还换成简化版，16 px 那档才不会糊成一团。
 """
 
+import subprocess
+import tempfile
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CAT_SRC = REPO_ROOT / "crates/getcat-app/assets/logo/cat.png"
-APP_LOGO = REPO_ROOT / "crates/getcat-app/assets/logo/getcat.png"
+LOGO_DIR = REPO_ROOT / "crates/getcat-app/assets/logo"
+ART_FULL = LOGO_DIR / "getcat-art.svg"
+ART_MINI = LOGO_DIR / "getcat-art-mini.svg"
+APP_LOGO = LOGO_DIR / "getcat.png"
+APP_LOGO_MINI = LOGO_DIR / "getcat-mini.png"
 MACOS_ICON = REPO_ROOT / "crates/getcat-app/resources/macos/getcat-1024.png"
 WINDOWS_ICON = REPO_ROOT / "crates/getcat-app/resources/windows/getcat.ico"
+RASTER_TOOL_DIR = REPO_ROOT / "tools/svg-raster"
+RASTER_TOOL = RASTER_TOOL_DIR / "target/release/svg-raster"
 
-SUPERSAMPLE = 4          # 圆角边缘的抗锯齿倍率
+SUPERSAMPLE = 4          # 底板边缘的抗锯齿倍率
 SQUIRCLE_EXPONENT = 5.0  # 超椭圆指数，越大越方；5 最接近 macOS 图标
-GRADIENT_TOP = (255, 252, 245)
-GRADIENT_BOTTOM = (255, 233, 201)
-CAT_HEIGHT_RATIO = 0.82  # 猫的高度占圆角块边长的比例
-CAT_OPTICAL_LIFT = 0.006 # 视觉重心在头部，整体上提一点点才「居中」
-SHADOW_BLUR_RATIO = 0.013
-SHADOW_OFFSET_RATIO = 0.012
-SHADOW_COLOR = (120, 72, 20)
-SHADOW_OPACITY = 0.16
+TILE_COLOR = (0x1A, 0x25, 0x40)  # 夜蓝底板，与画布 Logo 画板一致
+GLINT_OPACITY = 0.05     # 左上角那道玻璃反光（抓娃娃机的玻璃罩）的不透明度
+GLINT_EXTENT = 300 / 512  # 反光三角形两条直角边占边长的比例
+MINI_MAX_SIDE = 32       # 不超过这个边长的产物用简化版
 
 MACOS_CANVAS = 1024
 MACOS_TILE = 824
 APP_LOGO_SIZE = 512
+APP_LOGO_MINI_SIZE = 128
 # Windows 图标习惯提供的档位；256 那档 Pillow 会自动用 PNG 压缩存放
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
+def ensure_raster_tool() -> Path:
+    """tools/svg-raster 还没编过就编一次（离线也行：依赖都在根 Cargo.lock 的缓存里）。"""
+    if not RASTER_TOOL.exists():
+        subprocess.run(
+            ["cargo", "build", "--release", "--quiet"],
+            cwd=RASTER_TOOL_DIR,
+            check=True,
+        )
+    return RASTER_TOOL
+
+
+def render_art(svg: Path, side: int) -> Image.Image:
+    """把原画栅格化成 side×side 的 RGBA。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "art.png"
+        subprocess.run(
+            [str(ensure_raster_tool()), str(svg), str(out), str(side)],
+            check=True,
+        )
+        return Image.open(out).convert("RGBA")
 
 
 def squircle_mask(side: int) -> Image.Image:
@@ -65,68 +99,52 @@ def squircle_mask(side: int) -> Image.Image:
     return mask.resize((side, side), Image.Resampling.BOX)
 
 
-def gradient(side: int) -> Image.Image:
-    """自上而下的线性渐变底板。"""
-    t = np.linspace(0.0, 1.0, side, dtype=np.float64)[:, None]
-    top = np.array(GRADIENT_TOP, dtype=np.float64)
-    bottom = np.array(GRADIENT_BOTTOM, dtype=np.float64)
-    column = top + (bottom - top) * t                   # (side, 3)
-    rows = np.repeat(column[:, None, :], side, axis=1)  # (side, side, 3)
-    return Image.fromarray(np.round(rows).astype(np.uint8), mode="RGB")
+def glint(side: int) -> Image.Image:
+    """左上角一道很淡的白色三角反光：x + y < GLINT_EXTENT · side 的区域。"""
+    ys, xs = np.mgrid[0:side, 0:side].astype(np.float64) + 0.5
+    inside = xs + ys < GLINT_EXTENT * side
+    alpha = (inside * round(255 * GLINT_OPACITY)).astype(np.uint8)
+    layer = Image.new("RGBA", (side, side), (255, 255, 255, 0))
+    layer.putalpha(Image.fromarray(alpha, mode="L"))
+    return layer
 
 
-def fit_cat(side: int) -> tuple[Image.Image, int, int]:
-    """按 side 缩放猫，返回（缩放后的图，左上角 x，左上角 y）。"""
-    cat = Image.open(CAT_SRC).convert("RGBA")
-    box = cat.getbbox()  # 忽略源图四周可能残留的透明留白
-    if box:
-        cat = cat.crop(box)
-
-    scale = side * CAT_HEIGHT_RATIO / cat.height
-    size = (max(1, round(cat.width * scale)), max(1, round(cat.height * scale)))
-    # 在预乘 alpha 空间里缩放，否则透明像素的 RGB 会被插值带进边缘，形成暗边
-    cat = cat.convert("RGBa").resize(size, Image.Resampling.LANCZOS).convert("RGBA")
-
-    x = (side - cat.width) // 2
-    y = (side - cat.height) // 2 - round(side * CAT_OPTICAL_LIFT)
-    return cat, x, y
-
-
-def render_tile(side: int) -> Image.Image:
-    """铺满 side×side 的圆角 logo（方块外透明）。"""
-    tile = gradient(side).convert("RGBA")
-    cat, x, y = fit_cat(side)
-
-    # 猫脚下一层很淡的暖色投影，让它从奶油底上「浮」起来
-    shadow = Image.new("RGBA", tile.size, SHADOW_COLOR + (0,))
-    alpha = Image.new("L", tile.size, 0)
-    alpha.paste(cat.getchannel("A"), (x, y + round(side * SHADOW_OFFSET_RATIO)))
-    alpha = alpha.filter(ImageFilter.GaussianBlur(side * SHADOW_BLUR_RATIO))
-    shadow.putalpha(alpha.point(lambda v: round(v * SHADOW_OPACITY)))
-    tile = Image.alpha_composite(tile, shadow)
-
-    tile.alpha_composite(cat, (x, y))
+def render_tile(side: int, mini: bool | None = None) -> Image.Image:
+    """铺满 side×side 的 logo（超椭圆外透明）。mini 为 None 时按边长自动选原画。"""
+    if mini is None:
+        mini = side <= MINI_MAX_SIDE
+    tile = Image.new("RGBA", (side, side), TILE_COLOR + (255,))
+    if not mini:
+        tile = Image.alpha_composite(tile, glint(side))
+    tile = Image.alpha_composite(tile, render_art(ART_MINI if mini else ART_FULL, side))
     tile.putalpha(squircle_mask(side))
     return tile
 
 
+def save(image: Image.Image, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, optimize=True)
+    print(f"已写入 {path.relative_to(REPO_ROOT)}（{image.width}×{image.height}）")
+
+
 def main() -> None:
-    app_logo = render_tile(APP_LOGO_SIZE)
-    APP_LOGO.parent.mkdir(parents=True, exist_ok=True)
-    app_logo.save(APP_LOGO, optimize=True)
-    print(f"已写入 {APP_LOGO.relative_to(REPO_ROOT)}（{app_logo.width}×{app_logo.height}）")
+    save(render_tile(APP_LOGO_SIZE), APP_LOGO)
+    save(render_tile(APP_LOGO_MINI_SIZE, mini=True), APP_LOGO_MINI)
 
     icon = Image.new("RGBA", (MACOS_CANVAS, MACOS_CANVAS), (0, 0, 0, 0))
     offset = (MACOS_CANVAS - MACOS_TILE) // 2
     icon.alpha_composite(render_tile(MACOS_TILE), (offset, offset))
-    MACOS_ICON.parent.mkdir(parents=True, exist_ok=True)
-    icon.save(MACOS_ICON, optimize=True)
-    print(f"已写入 {MACOS_ICON.relative_to(REPO_ROOT)}（{icon.width}×{icon.height}）")
+    save(icon, MACOS_ICON)
 
-    # ICO 从最大那档往下逐级重采样：Pillow 的 sizes= 会为每个尺寸单独存一张位图
+    # 每档单独栅格化：Pillow 存 ICO 时，append_images 里尺寸对得上的位图原样写入，不再缩放
     WINDOWS_ICON.parent.mkdir(parents=True, exist_ok=True)
-    ico_source = render_tile(max(ICO_SIZES))
-    ico_source.save(WINDOWS_ICON, format="ICO", sizes=[(s, s) for s in ICO_SIZES])
+    largest, *rest = sorted(ICO_SIZES, reverse=True)
+    render_tile(largest).save(
+        WINDOWS_ICON,
+        format="ICO",
+        sizes=[(s, s) for s in ICO_SIZES],
+        append_images=[render_tile(s) for s in rest],
+    )
     print(f"已写入 {WINDOWS_ICON.relative_to(REPO_ROOT)}（{', '.join(map(str, ICO_SIZES))}）")
 
 

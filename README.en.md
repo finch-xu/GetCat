@@ -169,7 +169,7 @@ crates/
 ### Building and debugging
 
 - Rust ≥ 1.97 (edition 2024). macOS needs no extra toolchain; Linux needs Vulkan plus the Wayland / X11 / fontconfig headers (the full list is in `.github/workflows/ci.yml`); Windows needs the MSVC toolchain, and Direct3D 11 ships with the Windows SDK.
-- App logo: `crates/getcat-app/assets/logo/cat.png` is the background-free original, and `scripts/gen-logo.py` composes it into three outputs — the embedded `getcat.png`, the macOS icon source `resources/macos/getcat-1024.png`, and the Windows exe icon `resources/windows/getcat.ico`. After changing the logo, rerun the script by hand and commit the output (CI does not generate it; requires `pip install pillow numpy`).
+- App logo: `crates/getcat-app/assets/logo/getcat-art.svg` (full) and `getcat-art-mini.svg` (simplified, for ≤ 32 px) are the originals, and `scripts/gen-logo.py` composes them into four outputs — the embedded `getcat.png` and `getcat-mini.png`, the macOS icon source `resources/macos/getcat-1024.png`, and the Windows exe icon `resources/windows/getcat.ico`. After changing the logo, rerun the script by hand and commit the output (CI does not generate it; requires `pip install pillow numpy`, and `tools/svg-raster` rasterizes the SVGs).
 - The Windows exe icon and version info are embedded by `crates/getcat-app/build.rs`, and only when compiling natively on Windows (an exe cross-compiled from macOS has no icon). The installer is defined in `crates/getcat-app/resources/windows/GetCat.wxs` and needs WiX v6: `dotnet tool install --global wix --version 6.*`.
 
 ```bash

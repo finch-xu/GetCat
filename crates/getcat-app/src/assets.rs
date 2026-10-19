@@ -12,8 +12,12 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// Logo 的资源路径（`img(LOGO_PATH)`）。位图走 `img()`：整张栅格化、保留原色；
 /// `svg()` 是单色蒙版，只会被 `text_color` 染成一种颜色，多色 logo 用不了。
 ///
-/// 这份 PNG 由 `scripts/gen-logo.py` 从 `assets/logo/cat.png` 合成，改 logo 要重跑脚本。
+/// 这份 PNG 由 `scripts/gen-logo.py` 从 `assets/logo/getcat-art.svg` 合成，改 logo 要重跑脚本。
 pub const LOGO_PATH: &str = "logo/getcat.png";
+
+/// 小尺寸 logo（128 px 见方，简化版原画 `getcat-art-mini.svg`）：图标栏里只显示 26 px，
+/// 完整版的脸和条纹在这个尺寸下糊成一团，换成加粗过的简化版。
+pub const LOGO_MINI_PATH: &str = "logo/getcat-mini.png";
 
 /// Logo 的原始 PNG 字节（512 px 见方）。除了作为 [`LOGO_PATH`] 资源，Linux 上还直接用它：
 /// 解码后作 X11 的窗口图标，原样写进 hicolor 主题目录给 .desktop 用。
@@ -29,7 +33,7 @@ pub const ICON_ROWS_3: &str = "icons/rows-3.svg";
 pub const ICON_LOCK_OPEN: &str = "icons/lock-open.svg";
 /// 变量表「标记为敏感值」按钮：已锁（已掩码）状态。
 pub const ICON_LOCK: &str = "icons/lock.svg";
-/// 右侧图标栏「变量」的图标（`{}` 呼应 `{{var}}` 占位符）。
+/// 标题栏工具按钮「变量」的图标（`{}` 呼应 `{{var}}` 占位符）。
 pub const ICON_BRACES: &str = "icons/braces.svg";
 
 /// 应用自带的资源表。上游 `gpui-component-assets` 没有的图标补在这里——
@@ -39,6 +43,10 @@ pub const ICON_BRACES: &str = "icons/braces.svg";
 /// 各自都是一眼能认出语义的标准图形，用意思相近的替代只会让按钮更难懂。
 const ASSETS: &[(&str, &[u8])] = &[
     (LOGO_PATH, LOGO_PNG),
+    (
+        LOGO_MINI_PATH,
+        include_bytes!("../assets/logo/getcat-mini.png"),
+    ),
     (
         ICON_WRAP_TEXT,
         include_bytes!("../assets/icons/wrap-text.svg"),
@@ -131,7 +139,10 @@ mod tests {
         assert!(all.iter().any(|p| p.as_ref() == "icons/moon.svg"));
         assert_eq!(
             AppAssets.list("logo").unwrap(),
-            vec![SharedString::from(LOGO_PATH)]
+            vec![
+                SharedString::from(LOGO_PATH),
+                SharedString::from(LOGO_MINI_PATH)
+            ]
         );
         // 前缀过滤要把应用图标和上游图标一起列出来
         let icons = AppAssets.list("icons").unwrap();

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GetCat logo：被抓娃娃机从腰上拎起来的胖橘猫。
+     只画猫与爪子（透明底），超椭圆底板（#1A2540）由 scripts/gen-logo.py 合成。
+     坐标系是 512×512 的底板；吊绳从 y<0 伸出，合成时被底板裁掉。
+     ≤ 32 px 用的简化版：去掉脸部细节与条纹，吊绳、爪子、四肢加粗。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <path d="M256 -10V150" stroke="#AEB9CC" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <rect x="118" y="330" width="44" height="96" rx="22" fill="#B9622A"/>
+  <rect x="352" y="330" width="44" height="92" rx="22" fill="#B9622A"/>
+  <path d="M398 326C426 364 428 412 412 452" stroke="#D9762F" stroke-width="30" stroke-linecap="round" fill="none"/>
+  <path d="M112 334C98 248 168 190 256 190C344 190 414 248 404 338C400 378 352 386 334 356C318 322 292 298 256 298C220 298 194 322 178 356C160 386 116 378 112 334Z" fill="#E8873F"/>
+  <rect x="148" y="336" width="48" height="100" rx="24" fill="#E8873F"/>
+  <rect x="318" y="336" width="48" height="98" rx="24" fill="#E8873F"/>
+  <path d="M58 278L52 202L116 242Z" fill="#E8873F" stroke="#E8873F" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M120 242L184 202L178 278Z" fill="#E8873F" stroke="#E8873F" stroke-width="16" stroke-linejoin="round"/>
+  <ellipse cx="118" cy="302" rx="80" ry="68" fill="#E8873F"/>
+  <circle cx="88" cy="302" r="17" fill="#2A1E16"/>
+  <circle cx="148" cy="302" r="17" fill="#2A1E16"/>
+  <circle cx="94" cy="295" r="6" fill="#FFFFFF"/>
+  <circle cx="154" cy="295" r="6" fill="#FFFFFF"/>
+  <rect x="200" y="124" width="112" height="50" rx="18" fill="#D9E0EB"/>
+  <path d="M226 172C190 200 186 254 222 290M286 172C322 200 326 254 290 290" stroke="#D9E0EB" stroke-width="26" stroke-linecap="round" fill="none"/>
+</svg>

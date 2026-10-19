@@ -169,7 +169,7 @@ crates/
 ### ビルドとデバッグ
 
 - Rust ≥ 1.97（edition 2024）。macOS では追加のツールチェーンは不要です。Linux では Vulkan と Wayland / X11 / fontconfig のヘッダーが必要です（一覧は `.github/workflows/ci.yml`）。Windows では MSVC ツールチェーンが必要で、Direct3D 11 は Windows SDK に含まれています。
-- アプリのロゴ：`crates/getcat-app/assets/logo/cat.png` が背景を抜いた元画像で、`scripts/gen-logo.py` がそこから 3 つの成果物 —— アプリに埋め込む `getcat.png`、macOS のアイコン元画像 `resources/macos/getcat-1024.png`、Windows の exe アイコン `resources/windows/getcat.ico` —— を生成します。ロゴを変更したら手動でスクリプトを再実行し、成果物をコミットしてください（CI では生成しません。`pip install pillow numpy` が必要です）。
+- アプリのロゴ：`crates/getcat-app/assets/logo/getcat-art.svg`（完全版）と `getcat-art-mini.svg`（32 px 以下用の簡略版）が元画像で、`scripts/gen-logo.py` がそこから 4 つの成果物 —— アプリに埋め込む `getcat.png` と `getcat-mini.png`、macOS のアイコン元画像 `resources/macos/getcat-1024.png`、Windows の exe アイコン `resources/windows/getcat.ico` —— を生成します。ロゴを変更したら手動でスクリプトを再実行し、成果物をコミットしてください（CI では生成しません。`pip install pillow numpy` が必要で、SVG のラスタライズは `tools/svg-raster` が行います）。
 - Windows の exe アイコンとバージョン情報は `crates/getcat-app/build.rs` が埋め込みますが、有効なのは Windows 上でネイティブにコンパイルしたときだけです（macOS からクロスコンパイルした exe にアイコンは付きません）。インストーラーは `crates/getcat-app/resources/windows/GetCat.wxs` で定義されており、WiX v6 が必要です：`dotnet tool install --global wix --version 6.*`。
 
 ```bash

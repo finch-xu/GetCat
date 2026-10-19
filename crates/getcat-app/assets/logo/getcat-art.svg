@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GetCat logo：被抓娃娃机从腰上拎起来的胖橘猫。
+     只画猫与爪子（透明底），超椭圆底板（#1A2540）由 scripts/gen-logo.py 合成。
+     坐标系是 512×512 的底板；吊绳从 y<0 伸出，合成时被底板裁掉。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <path d="M256 -8V140" stroke="#AEB9CC" stroke-width="8" stroke-linecap="round" fill="none"/>
+  <rect x="124" y="334" width="32" height="84" rx="16" fill="#C0652B"/>
+  <ellipse cx="140" cy="414" rx="18" ry="11" fill="#E2B08A"/>
+  <rect x="356" y="334" width="32" height="82" rx="16" fill="#C0652B"/>
+  <ellipse cx="372" cy="412" rx="18" ry="11" fill="#E2B08A"/>
+  <path d="M396 318C424 352 428 402 414 444C410 460 424 468 434 456" stroke="#DB7A35" stroke-width="24" stroke-linecap="round" fill="none"/>
+  <path d="M118 330C104 250 170 194 256 194C342 194 410 250 400 334C396 372 352 380 336 354C320 322 292 296 256 296C220 296 192 322 176 354C160 380 122 372 118 330Z" fill="#E8873F"/>
+  <path d="M196 222Q186 248 196 274M316 222Q326 248 316 274" stroke="#C0652B" stroke-width="6" stroke-linecap="round" fill="none" opacity=".8"/>
+  <path d="M340 210Q354 232 346 258M370 234Q384 254 374 278" stroke="#C0652B" stroke-width="11" stroke-linecap="round" fill="none"/>
+  <rect x="150" y="340" width="36" height="88" rx="18" fill="#E8873F"/>
+  <ellipse cx="168" cy="424" rx="20" ry="12" fill="#F6D2B0"/>
+  <rect x="326" y="340" width="36" height="86" rx="18" fill="#E8873F"/>
+  <ellipse cx="344" cy="422" rx="20" ry="12" fill="#F6D2B0"/>
+  <path d="M66 274L60 214L112 244Z" fill="#E8873F" stroke="#E8873F" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M124 242L176 212L172 274Z" fill="#E8873F" stroke="#E8873F" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M74 262L70 230L98 246Z" fill="#F2A877"/>
+  <path d="M138 246L166 230L164 262Z" fill="#F2A877"/>
+  <circle cx="58" cy="318" r="20" fill="#E8873F"/>
+  <circle cx="178" cy="318" r="20" fill="#E8873F"/>
+  <ellipse cx="118" cy="300" rx="70" ry="60" fill="#E8873F"/>
+  <path d="M104 254L106 268M118 250V266M132 254L130 268" stroke="#C0652B" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <ellipse cx="118" cy="328" rx="32" ry="19" fill="#F6D2B0"/>
+  <ellipse cx="72" cy="322" rx="10" ry="6" fill="#F28C8C" opacity=".45"/>
+  <ellipse cx="164" cy="322" rx="10" ry="6" fill="#F28C8C" opacity=".45"/>
+  <circle cx="90" cy="298" r="13" fill="#2A1E16"/>
+  <circle cx="146" cy="298" r="13" fill="#2A1E16"/>
+  <circle cx="94.5" cy="292.5" r="4.5" fill="#FFFFFF"/>
+  <circle cx="150.5" cy="292.5" r="4.5" fill="#FFFFFF"/>
+  <circle cx="86" cy="303" r="2" fill="#FFFFFF" opacity=".8"/>
+  <circle cx="142" cy="303" r="2" fill="#FFFFFF" opacity=".8"/>
+  <path d="M111 318H125L118 326Z" fill="#D9666B" stroke="#D9666B" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M118 326V331M110 334Q114 337 118 331Q122 337 126 334" stroke="#7A4A2E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M88 326L50 320M88 333L52 340M148 326L186 320M148 333L184 340" stroke="#FBE6D2" stroke-width="2.5" stroke-linecap="round" fill="none" opacity=".85"/>
+  <rect x="244" y="122" width="24" height="14" rx="5" fill="#AEB9CC"/>
+  <rect x="222" y="130" width="68" height="36" rx="12" fill="#D9E0EB"/>
+  <rect x="222" y="150" width="68" height="16" rx="8" fill="#AEB9CC"/>
+  <path d="M238 162C212 176 198 206 202 240C204 262 216 276 234 280M274 162C300 176 314 206 310 240C308 262 296 276 278 280" stroke="#D9E0EB" stroke-width="13" stroke-linecap="round" fill="none"/>
+  <circle cx="238" cy="163" r="7" fill="#AEB9CC"/>
+  <circle cx="274" cy="163" r="7" fill="#AEB9CC"/>
+</svg>

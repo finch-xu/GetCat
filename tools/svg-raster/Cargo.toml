@@ -1,0 +1,14 @@
+# 开发者工具：把 logo 的 SVG 栅格化成 PNG，供 scripts/gen-logo.py 调用。
+# 不属于产品，也不进 CI：空的 [workspace] 让它脱离根 workspace，fmt / clippy / test / deny 都不扫它。
+# resvg 的版本跟根 Cargo.lock 里 gpui 已经在用的那份对齐，离线也能编。
+[package]
+name = "svg-raster"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[dependencies]
+resvg = { version = "=0.45.1", default-features = false }
+
+[workspace]

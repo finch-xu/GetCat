@@ -25,7 +25,7 @@ use gpui_kit::*;
 
 use getcat_core::model::ThemePref;
 
-use crate::assets::LOGO_PATH;
+use crate::assets::LOGO_MINI_PATH;
 use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::SendPulse;
@@ -56,8 +56,8 @@ fn theme_icon(pref: ThemePref) -> IconName {
 /// 下一次发送换一个 id 即从头重放；位图不能旋转，所以用水平位移代替摆动。
 /// 还没发过请求、或系统打开了「减弱动态效果」时不包动画。
 fn render_logo(cx: &App) -> AnyElement {
-    // 26 px 是位图本身的尺寸：设计指南允许的像素例外
-    let logo = img(LOGO_PATH).size(px(26.)).flex_none().relative();
+    // 26 px 是 logo 的显示尺寸：设计指南允许的像素例外
+    let logo = img(LOGO_MINI_PATH).size(px(26.)).flex_none().relative();
     let pulse = cx.try_global::<SendPulse>().map_or(0, |p| p.0);
     if pulse == 0 || cx.reduce_motion() {
         return logo.into_any_element();
