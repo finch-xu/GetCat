@@ -4437,6 +4437,36 @@ fn switching_language_updates_placeholders_immediately(cx: &mut TestAppContext) 
         );
     });
 
+    // 日文 → 法文：同一条链路，占位符等驻留文案也要立即刷新
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::French));
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(app.global::<Locale>().0, "fr");
+        assert_eq!(&*rust_i18n::locale(), "fr");
+        assert_eq!(settings::settings(app).language, LanguagePref::French);
+        assert_eq!(
+            tab.read(app)
+                .url
+                .read(app)
+                .presentation()
+                .placeholder()
+                .as_ref(),
+            "Saisissez l’URL de la requête, p. ex. https://api.example.com/users/{id}"
+        );
+        assert_eq!(
+            tab.read(app)
+                .params
+                .read(app)
+                .key_placeholder(0, app)
+                .as_ref(),
+            "Nom"
+        );
+        assert_eq!(
+            crate::ui::text::language_label(LanguagePref::French).as_ref(),
+            "Français"
+        );
+    });
+
     cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::English));
     cx.run_until_parked();
     cx.read(|app| {

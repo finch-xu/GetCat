@@ -128,6 +128,7 @@ pub fn language_label(pref: LanguagePref) -> SharedString {
         LanguagePref::Chinese => tr!("language.chinese"),
         LanguagePref::TraditionalChinese => tr!("language.traditional_chinese"),
         LanguagePref::Japanese => tr!("language.japanese"),
+        LanguagePref::French => tr!("language.french"),
     }
 }
 
@@ -287,6 +288,26 @@ mod tests {
             assert_eq!(
                 rust_i18n::t!("language.japanese", locale = locale).as_ref(),
                 "日本語",
+                "{locale}"
+            );
+        }
+    }
+
+    #[test]
+    fn french_locale_is_wired_up() {
+        assert_eq!(
+            rust_i18n::t!("theme.system", locale = "fr").as_ref(),
+            "Système"
+        );
+        // 法语排版：冒号前是不换行空格，书名号式引号 « » 内侧也是
+        assert_eq!(
+            rust_i18n::t!("dialog.delete_saved.title", locale = "fr", name = "x").as_ref(),
+            "Supprimer «\u{a0}x\u{a0}»\u{a0}?"
+        );
+        for locale in ["en", "zh-CN", "zh-TW", "ja", "fr"] {
+            assert_eq!(
+                rust_i18n::t!("language.french", locale = locale).as_ref(),
+                "Français",
                 "{locale}"
             );
         }

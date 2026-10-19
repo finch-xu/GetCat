@@ -611,9 +611,10 @@ impl ThemePref {
     }
 }
 
-/// 界面语言偏好：跟随系统，或固定英文 / 简体中文 / 繁体中文 / 日文。
+/// 界面语言偏好：跟随系统，或固定英文 / 简体中文 / 繁体中文 / 日文 / 法文。
 ///
-/// 序列化值就是 BCP 47 语言标签（`"en"` / `"zh-CN"` / `"zh-TW"` / `"ja"`），`"system"` 表示跟随系统。
+/// 序列化值就是 BCP 47 语言标签（`"en"` / `"zh-CN"` / `"zh-TW"` / `"ja"` / `"fr"`），
+/// `"system"` 表示跟随系统。
 /// `Chinese` 是简体（沿用旧名，`settings.json` 里一直是 `"zh-CN"`）；繁体文案按台湾用语写。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LanguagePref {
@@ -628,15 +629,18 @@ pub enum LanguagePref {
     TraditionalChinese,
     #[serde(rename = "ja")]
     Japanese,
+    #[serde(rename = "fr")]
+    French,
 }
 
 impl LanguagePref {
-    pub const ALL: [LanguagePref; 5] = [
+    pub const ALL: [LanguagePref; 6] = [
         LanguagePref::System,
         LanguagePref::English,
         LanguagePref::Chinese,
         LanguagePref::TraditionalChinese,
         LanguagePref::Japanese,
+        LanguagePref::French,
     ];
 }
 
@@ -1221,11 +1225,20 @@ mod tests {
             LanguagePref::TraditionalChinese
         );
         assert_eq!(
+            serde_json::to_string(&LanguagePref::French).unwrap(),
+            "\"fr\""
+        );
+        assert_eq!(
+            serde_json::from_str::<LanguagePref>("\"fr\"").unwrap(),
+            LanguagePref::French
+        );
+        assert_eq!(
             serde_json::from_str::<LanguagePref>("\"system\"").unwrap(),
             LanguagePref::System
         );
         // 设置面板按 ALL 出下拉项：每个变体都要在里面，且没有重复
-        assert_eq!(LanguagePref::ALL.len(), 5);
+        assert_eq!(LanguagePref::ALL.len(), 6);
+        assert!(LanguagePref::ALL.contains(&LanguagePref::French));
         assert!(LanguagePref::ALL.contains(&LanguagePref::Japanese));
         assert!(LanguagePref::ALL.contains(&LanguagePref::TraditionalChinese));
         let legacy: AppSettings =

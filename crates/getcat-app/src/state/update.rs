@@ -570,13 +570,17 @@ mod tests {
             resolve_source(Auto, crate::i18n::EN),
             ResolvedSource::Global
         );
-        // 只有简体中文界面走大陆镜像：繁体中文、日文与其它语言一律 GitHub
+        // 只有简体中文界面走大陆镜像：繁体中文、日文、法文与其它语言一律 GitHub
         assert_eq!(
             resolve_source(Auto, crate::i18n::JA),
             ResolvedSource::Global
         );
         assert_eq!(
             resolve_source(Auto, crate::i18n::ZH_TW),
+            ResolvedSource::Global
+        );
+        assert_eq!(
+            resolve_source(Auto, crate::i18n::FR),
             ResolvedSource::Global
         );
         assert_eq!(
