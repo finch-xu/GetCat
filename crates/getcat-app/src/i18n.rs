@@ -1,11 +1,12 @@
 //! 界面语言：把设置里的偏好解析成 rust-i18n 的 locale，并在运行时切换。
 //!
 //! - 文案放在 `crates/getcat-app/locales/app.yml`（rust-i18n v2 格式，一个 key 下并列
-//!   `en` / `zh-CN` / `ja`）；`rust_i18n::i18n!` 在 `main.rs` 注册，`fallback = "en"`。
+//!   `en` / `zh-CN` / `zh-TW` / `ja`）；`rust_i18n::i18n!` 在 `main.rs` 注册，`fallback = "en"`。
 //! - `rust_i18n::set_locale` 是跨 crate 的全局：gpui-component 自带的「确定 / 取消 / 搜索设置…」
 //!   用的是同一个 rust-i18n，切换后一起生效，不需要我们补它的翻译。但它自带的 `ui.yml` 只有
 //!   `en` / `zh-CN` / `zh-HK` / `zh-TW` / `it`——界面切到日文时那几条组件内置文案会按
-//!   fallback 回落成英文，这是上游的覆盖范围，`app.yml` 无法替它补。
+//!   fallback 回落成英文，这是上游的覆盖范围，`app.yml` 无法替它补。繁体选 `zh-TW` 而不是
+//!   `zh-Hant`，就是为了命中组件库的 `zh-TW` 文案（它缺的只有 GetCat 没用到的 Diff / DatePicker）。
 //! - 渲染期取文案（`tr!`）的地方切换后随 `refresh_windows` 自动更新；驻留在实体里的字符串
 //!   （输入框占位符等）通过 `cx.observe_global_in::<Locale>` 自己刷新。
 
@@ -14,8 +15,10 @@ use gpui_kit::{App, Global};
 
 /// 英文（也是兜底语言）。
 pub const EN: &str = "en";
-/// 中文；简体与繁体系统语言都落到这里。
+/// 简体中文。
 pub const ZH_CN: &str = "zh-CN";
+/// 繁体中文（台湾用语）；香港、澳门的系统语言也落到这里。
+pub const ZH_TW: &str = "zh-TW";
 /// 日文。
 pub const JA: &str = "ja";
 
@@ -27,8 +30,8 @@ impl Global for Locale {}
 
 /// 把偏好解析成 locale。`system` 是系统首选语言列表（按优先级排列）。
 ///
-/// 跟随系统时按顺序找第一个能支持的：`zh*` → 中文，`ja*` → 日文，`en*` → 英文；
-/// 一个都不匹配用英文。
+/// 跟随系统时按顺序找第一个能支持的：`zh*` → 简体或繁体中文（见 [`chinese_variant`]），
+/// `ja*` → 日文，`en*` → 英文；一个都不匹配用英文。
 pub fn resolve<I, S>(pref: LanguagePref, system: I) -> &'static str
 where
     I: IntoIterator<Item = S>,
@@ -37,6 +40,7 @@ where
     match pref {
         LanguagePref::English => EN,
         LanguagePref::Chinese => ZH_CN,
+        LanguagePref::TraditionalChinese => ZH_TW,
         LanguagePref::Japanese => JA,
         LanguagePref::System => system
             .into_iter()
@@ -53,10 +57,43 @@ fn supported(tag: &str) -> Option<&'static str> {
         .unwrap_or("")
         .to_ascii_lowercase();
     match lang.as_str() {
-        "zh" => Some(ZH_CN),
+        "zh" => Some(chinese_variant(tag)),
         "ja" => Some(JA),
         "en" => Some(EN),
         _ => None,
+    }
+}
+
+/// 一个 `zh*` 系统语言标签该用简体还是繁体。
+///
+/// 标签的形态五花八门：macOS 给 `zh-Hant-TW` / `zh-Hans-CN`，Linux 的 LANG 是 `zh_TW.UTF-8`，
+/// Windows 可能只给 `zh-HK`，也可能只有一个光秃秃的 `zh`。script 子标签（`Hans` / `Hant`）
+/// 比地区更可靠——`zh-Hant-CN`（在大陆用繁体）与 `zh-Hans-HK` 都是真实存在的组合。
+fn chinese_variant(tag: &str) -> &'static str {
+    // `.` 之后是 Linux 的编码（`UTF-8` / `Big5-HKSCS`），`@` 之后是修饰符，都不参与判断
+    let subtags: Vec<String> = tag
+        .split(['.', '@'])
+        .next()
+        .unwrap_or("")
+        .split(['-', '_'])
+        .skip(1)
+        .map(str::to_ascii_lowercase)
+        .collect();
+    // script 优先：显式写了 Hans / Hant 就以它为准，不看地区
+    if subtags.iter().any(|s| s == "hant") {
+        return ZH_TW;
+    }
+    if subtags.iter().any(|s| s == "hans") {
+        return ZH_CN;
+    }
+    // 没有 script 时按地区推断：台港澳惯用繁体，其余（含光秃秃的 `zh`）按简体
+    if subtags
+        .iter()
+        .any(|s| matches!(s.as_str(), "tw" | "hk" | "mo"))
+    {
+        ZH_TW
+    } else {
+        ZH_CN
     }
 }
 
@@ -114,14 +151,19 @@ mod tests {
     fn explicit_preferences_ignore_the_system() {
         assert_eq!(resolve(LanguagePref::English, ["zh-Hans-CN"]), EN);
         assert_eq!(resolve(LanguagePref::Chinese, ["en-US"]), ZH_CN);
+        assert_eq!(resolve(LanguagePref::TraditionalChinese, ["zh-CN"]), ZH_TW);
         assert_eq!(resolve(LanguagePref::Japanese, ["zh-CN"]), JA);
     }
 
     #[test]
     fn system_picks_the_first_supported_language_in_order() {
         assert_eq!(
-            resolve(LanguagePref::System, ["fr-FR", "zh-Hant-TW", "en-US"]),
+            resolve(LanguagePref::System, ["fr-FR", "zh-Hans-CN", "en-US"]),
             ZH_CN
+        );
+        assert_eq!(
+            resolve(LanguagePref::System, ["fr-FR", "zh-Hant-TW", "en-US"]),
+            ZH_TW
         );
         assert_eq!(resolve(LanguagePref::System, ["en-GB", "zh-CN"]), EN);
         assert_eq!(resolve(LanguagePref::System, ["ja-JP", "zh-CN"]), JA);
@@ -135,17 +177,36 @@ mod tests {
     }
 
     #[test]
-    fn simplified_and_traditional_chinese_both_map_to_zh_cn() {
+    fn simplified_chinese_system_tags_map_to_zh_cn() {
         for tag in [
             "zh",
             "zh-CN",
+            "zh-Hans",
             "zh-Hans-CN",
-            "zh-TW",
-            "zh-Hant-TW",
-            "zh-HK",
+            "zh-SG",
+            "zh-Hans-HK",
             "zh_CN.UTF-8",
+            "zh_SG.GB2312",
         ] {
             assert_eq!(resolve(LanguagePref::System, [tag]), ZH_CN, "{tag}");
+        }
+    }
+
+    #[test]
+    fn traditional_chinese_system_tags_map_to_zh_tw() {
+        for tag in [
+            "zh-TW",
+            "zh-HK",
+            "zh-MO",
+            "zh-Hant",
+            "zh-Hant-TW",
+            "zh-Hant-HK",
+            "zh-Hant-CN",
+            "zh_TW.UTF-8",
+            "zh_HK.Big5-HKSCS",
+            "ZH-hant-tw",
+        ] {
+            assert_eq!(resolve(LanguagePref::System, [tag]), ZH_TW, "{tag}");
         }
     }
 

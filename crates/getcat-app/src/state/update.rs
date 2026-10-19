@@ -82,7 +82,8 @@ pub enum ResolvedSource {
     ChinaMirror,
 }
 
-/// 把更新源偏好解析成真实源：自动模式看界面语言（中文 → 大陆镜像），显式选择直接生效。
+/// 把更新源偏好解析成真实源：自动模式看界面语言（简体中文 → 大陆镜像），显式选择直接生效。
+/// 繁体中文的用户主要在港澳台，大陆镜像对他们并不更快，所以和其它语言一样走 GitHub。
 pub fn resolve_source(pref: UpdateSourcePref, ui_locale: &str) -> ResolvedSource {
     match pref {
         UpdateSourcePref::Global => ResolvedSource::Global,
@@ -556,7 +557,7 @@ mod tests {
         }
     }
 
-    /// 自动模式跟着界面语言走：中文界面用大陆镜像，其余用 GitHub；显式选择无视语言。
+    /// 自动模式跟着界面语言走：简体中文界面用大陆镜像，其余用 GitHub；显式选择无视语言。
     #[test]
     fn auto_source_follows_ui_language_and_explicit_choice_wins() {
         use getcat_core::model::UpdateSourcePref::{Auto, ChinaMirror, Global};
@@ -569,9 +570,13 @@ mod tests {
             resolve_source(Auto, crate::i18n::EN),
             ResolvedSource::Global
         );
-        // 只有中文界面走大陆镜像：日文与其它语言一律 GitHub
+        // 只有简体中文界面走大陆镜像：繁体中文、日文与其它语言一律 GitHub
         assert_eq!(
             resolve_source(Auto, crate::i18n::JA),
+            ResolvedSource::Global
+        );
+        assert_eq!(
+            resolve_source(Auto, crate::i18n::ZH_TW),
             ResolvedSource::Global
         );
         assert_eq!(

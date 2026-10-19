@@ -4288,6 +4288,11 @@ fn update_source_follows_settings_and_language(cx: &mut TestAppContext) {
         )
     });
 
+    // 繁体中文界面：自动模式回到全球源（大陆镜像只给简体中文）
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::TraditionalChinese));
+    cx.read(|app| assert_eq!(update::resolved_source(app), Some(ResolvedSource::Global)));
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::Chinese));
+
     // 显式选全球源：语言仍是中文，但显式选择压过自动
     cx.update(|_, cx| settings::update(cx, |s| s.update_source = UpdateSourcePref::Global));
     cx.read(|app| assert_eq!(update::resolved_source(app), Some(ResolvedSource::Global)));
@@ -4369,7 +4374,40 @@ fn switching_language_updates_placeholders_immediately(cx: &mut TestAppContext) 
         );
     });
 
-    // 第三门语言走同一条链路：中文 → 日文也要立即生效，不能只在英文 ↔ 中文之间切得动
+    // 简体 → 繁体：两个 zh-* locale 之间切换也要立即生效，组件库自带的 zh-TW 文案跟着一起切
+    cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::TraditionalChinese));
+    cx.run_until_parked();
+    cx.read(|app| {
+        assert_eq!(app.global::<Locale>().0, "zh-TW");
+        assert_eq!(&*rust_i18n::locale(), "zh-TW");
+        assert_eq!(
+            settings::settings(app).language,
+            LanguagePref::TraditionalChinese
+        );
+        assert_eq!(
+            tab.read(app)
+                .url
+                .read(app)
+                .presentation()
+                .placeholder()
+                .as_ref(),
+            "輸入請求 URL，例如 https://api.example.com/users/{id}"
+        );
+        assert_eq!(
+            tab.read(app)
+                .params
+                .read(app)
+                .key_placeholder(0, app)
+                .as_ref(),
+            "參數名稱"
+        );
+        assert_eq!(
+            crate::ui::text::language_label(LanguagePref::TraditionalChinese).as_ref(),
+            "繁體中文"
+        );
+    });
+
+    // 再换一门语言走同一条链路：繁体 → 日文也要立即生效，不能只在几种中文之间切得动
     cx.update(|_, cx| settings::update(cx, |s| s.language = LanguagePref::Japanese));
     cx.run_until_parked();
     cx.read(|app| {

@@ -611,10 +611,10 @@ impl ThemePref {
     }
 }
 
-/// 界面语言偏好：跟随系统，或固定英文 / 中文 / 日文。
+/// 界面语言偏好：跟随系统，或固定英文 / 简体中文 / 繁体中文 / 日文。
 ///
-/// 序列化值就是 BCP 47 语言标签（`"en"` / `"zh-CN"` / `"ja"`），`"system"` 表示跟随系统。
-/// 简体与繁体系统语言都落到 `zh-CN`（目前只有一套中文文案）。
+/// 序列化值就是 BCP 47 语言标签（`"en"` / `"zh-CN"` / `"zh-TW"` / `"ja"`），`"system"` 表示跟随系统。
+/// `Chinese` 是简体（沿用旧名，`settings.json` 里一直是 `"zh-CN"`）；繁体文案按台湾用语写。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LanguagePref {
     #[default]
@@ -624,22 +624,25 @@ pub enum LanguagePref {
     English,
     #[serde(rename = "zh-CN")]
     Chinese,
+    #[serde(rename = "zh-TW")]
+    TraditionalChinese,
     #[serde(rename = "ja")]
     Japanese,
 }
 
 impl LanguagePref {
-    pub const ALL: [LanguagePref; 4] = [
+    pub const ALL: [LanguagePref; 5] = [
         LanguagePref::System,
         LanguagePref::English,
         LanguagePref::Chinese,
+        LanguagePref::TraditionalChinese,
         LanguagePref::Japanese,
     ];
 }
 
 /// 更新源偏好：自动（按界面语言挑）、GitHub Releases（全球）、或阿里云 OSS 镜像（中国大陆）。
 ///
-/// 自动的解析规则在 app 层（`state/update.rs::resolve_source`）：界面语言是中文走大陆镜像，
+/// 自动的解析规则在 app 层（`state/update.rs::resolve_source`）：界面语言是简体中文走大陆镜像，
 /// 其余一律走 GitHub。两个源的产物、校验和与 minisign 签名完全同源（CI 的 mirror 任务
 /// 从 GitHub Release 原样搬运），安全性没有差别，差别只在链路快慢。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1210,12 +1213,21 @@ mod tests {
             LanguagePref::Japanese
         );
         assert_eq!(
+            serde_json::to_string(&LanguagePref::TraditionalChinese).unwrap(),
+            "\"zh-TW\""
+        );
+        assert_eq!(
+            serde_json::from_str::<LanguagePref>("\"zh-TW\"").unwrap(),
+            LanguagePref::TraditionalChinese
+        );
+        assert_eq!(
             serde_json::from_str::<LanguagePref>("\"system\"").unwrap(),
             LanguagePref::System
         );
         // 设置面板按 ALL 出下拉项：每个变体都要在里面，且没有重复
-        assert_eq!(LanguagePref::ALL.len(), 4);
+        assert_eq!(LanguagePref::ALL.len(), 5);
         assert!(LanguagePref::ALL.contains(&LanguagePref::Japanese));
+        assert!(LanguagePref::ALL.contains(&LanguagePref::TraditionalChinese));
         let legacy: AppSettings =
             serde_json::from_str(r#"{"editor_font_size":14,"check_updates_on_launch":false}"#)
                 .unwrap();

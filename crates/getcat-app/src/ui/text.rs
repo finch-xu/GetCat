@@ -126,6 +126,7 @@ pub fn language_label(pref: LanguagePref) -> SharedString {
         LanguagePref::System => tr!("language.system"),
         LanguagePref::English => tr!("language.english"),
         LanguagePref::Chinese => tr!("language.chinese"),
+        LanguagePref::TraditionalChinese => tr!("language.traditional_chinese"),
         LanguagePref::Japanese => tr!("language.japanese"),
     }
 }
@@ -286,6 +287,27 @@ mod tests {
             assert_eq!(
                 rust_i18n::t!("language.japanese", locale = locale).as_ref(),
                 "日本語",
+                "{locale}"
+            );
+        }
+    }
+
+    #[test]
+    fn traditional_chinese_locale_is_wired_up() {
+        assert_eq!(
+            rust_i18n::t!("theme.system", locale = "zh-TW").as_ref(),
+            "跟隨系統"
+        );
+        // 两种中文的语言名在任何界面语言下都写全称，免得「中文」二字分不清是哪一种
+        for locale in ["en", "zh-CN", "zh-TW", "ja"] {
+            assert_eq!(
+                rust_i18n::t!("language.chinese", locale = locale).as_ref(),
+                "简体中文",
+                "{locale}"
+            );
+            assert_eq!(
+                rust_i18n::t!("language.traditional_chinese", locale = locale).as_ref(),
+                "繁體中文",
                 "{locale}"
             );
         }
