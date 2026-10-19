@@ -13,6 +13,7 @@ use gpui_kit::component::{
     h_flex,
     input::{Editor, SelectAll},
     kbd::Kbd,
+    skeleton::Skeleton,
     tab::{Tab, TabBar},
     tag::Tag,
     v_flex,
@@ -20,9 +21,11 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 // 显式导入而非 `use gpui_kit::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 重导出的
 // `#[test]` 属性宏并与标准库同名冲突。编译器报"找不到 X"时把 X 加进这里，不要改回通配符。
+use gpui_kit::base::{Presence, Transition, animation};
 use gpui_kit::{
-    AnyElement, App, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    Role, SharedString, StatefulInteractiveElement, Styled, Window, div, rems,
+    AnyElement, App, Context, Div, ElementId, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    relative, rems,
 };
 
 use crate::assets::ICON_WRAP_TEXT;
@@ -39,11 +42,48 @@ use crate::ui::text::{
 };
 use crate::ui::{format_bytes, format_duration, status_color};
 use crate::{FindInResponse, SendRequest};
+
+/// 响应到达时状态行的入场时长（画布「动效规范」：160 ms，ease_out_cubic）。
+const STATUS_ARRIVAL_DURATION: std::time::Duration = std::time::Duration::from_millis(160);
 use getcat_core::model::{PreOpKind, VarScope, VariableSets};
 use getcat_core::ops::OpOutcome;
 
 fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
     empty_state_frame(cx).child(text.into()).into_any_element()
+}
+
+/// 等待首字节时的正文占位：一行「等待响应…」加四行长短不一的骨架。
+/// 骨架自带 2 s 的明暗呼吸；系统要求减弱动态效果时换成同色的静态条。
+fn render_waiting_skeleton(cx: &App) -> AnyElement {
+    let reduce_motion = cx.reduce_motion();
+    let bar = |width: f32| -> AnyElement {
+        if reduce_motion {
+            div()
+                .h_2p5()
+                .w(relative(width))
+                .rounded(cx.theme().radius)
+                .bg(cx.theme().skeleton)
+                .into_any_element()
+        } else {
+            Skeleton::new()
+                .h_2p5()
+                .w(relative(width))
+                .rounded(cx.theme().radius)
+                .into_any_element()
+        }
+    };
+    v_flex()
+        .size_full()
+        .p_4()
+        .gap_3()
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr!("response.waiting_first_byte")),
+        )
+        .children([0.82, 0.64, 0.74, 0.46].map(bar))
+        .into_any_element()
 }
 
 fn empty_state_frame(cx: &App) -> Div {
@@ -302,7 +342,7 @@ impl RequestTab {
                             .flex_1()
                             .min_w_0()
                             .overflow_hidden()
-                            .child(self.render_status_line(cx)),
+                            .child(self.render_status_line(window, cx)),
                     )
                     .child(
                         h_flex()
@@ -537,6 +577,10 @@ impl RequestTab {
                 // SSE：收到就展示。拼出的文本（或原始流）随 Chunk 事件实时增长。
                 if let Some(live) = live {
                     return self.render_sse_live(live, cx);
+                }
+                // 首字节之前：几行骨架占住正文的位置，一有字节就撤掉换成进度文字
+                if *received == 0 {
+                    return render_waiting_skeleton(cx);
                 }
                 let text = match total {
                     Some(t) => tr!(
@@ -848,7 +892,11 @@ impl RequestTab {
             .into_any_element()
     }
 
-    pub fn render_status_line(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_status_line(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         match &self.response {
             ResponseState::Idle => h_flex()
@@ -882,7 +930,20 @@ impl RequestTab {
             }
             ResponseState::Done { view, .. } => {
                 let color = status_color(view.meta.status, cx);
+                // 响应到达：状态码与指标淡入并上移 4 px（160 ms）。id 带 generation，
+                // 每次新响应都从头播；Presence 自己读 reduce_motion，减弱动态效果时直接到位。
+                let arrival = Presence::new(
+                    ElementId::from(("response-status", self.generation as usize)),
+                    true,
+                )
+                .transition(
+                    Transition::new(STATUS_ARRIVAL_DURATION).ease(animation::ease_out_cubic),
+                )
+                .sample(window, cx);
                 h_flex()
+                    .relative()
+                    .top(px(4. * (1. - arrival.progress)))
+                    .opacity(arrival.progress)
                     .gap_3()
                     .items_center()
                     .text_sm()

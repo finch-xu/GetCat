@@ -31,7 +31,7 @@ use gpui_kit::{
 use gpui_updater::UpdateStatus;
 
 use crate::i18n::tr;
-use crate::state::request_tab::RequestTab;
+use crate::state::request_tab::{RequestTab, SendPulse};
 use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::settings;
 use crate::state::store::{banner, store};
@@ -199,6 +199,9 @@ impl Workspace {
             _subs: Vec::new(),
         };
 
+        // 任意 Tab 发出请求 → 重绘图标栏，让 logo 晃一下（见 `ui::sidebar::render_logo`）
+        ws._subs
+            .push(cx.observe_global::<SendPulse>(|_, cx| cx.notify()));
         // 更新器状态变化 → 刷新状态栏提示；设置对话框层在本实体的 render 里，同一次 notify 也刷新「关于」页
         if let Some(updater) = update::updater(cx) {
             ws._subs.push(cx.observe(&updater, |this, updater, cx| {

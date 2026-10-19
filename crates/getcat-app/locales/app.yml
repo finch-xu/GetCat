@@ -889,6 +889,10 @@ response:
     en: Request cancelled
     zh-CN: 请求已取消
     ja: リクエストをキャンセルしました
+  waiting_first_byte:
+    en: Waiting for response…
+    zh-CN: 等待响应…
+    ja: レスポンスを待っています…
   status_idle:
     en: Not sent yet
     zh-CN: 尚未发送

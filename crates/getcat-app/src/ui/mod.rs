@@ -82,6 +82,16 @@ pub fn card_gap_resizable(id: impl Into<ElementId>, axis: Axis) -> ResizablePane
     }))
 }
 
+/// 发送时 logo 晃一下的总时长。
+pub const LOGO_WIGGLE_DURATION: Duration = Duration::from_millis(600);
+
+/// logo 晃动在进度 `delta`（0..=1）处的水平位移（px）：振幅 3 px、指数衰减的两个来回，
+/// 起止都是 0——停下来时正好回到原位，不会「跳」一下。
+pub fn logo_wiggle_offset(delta: f32) -> f32 {
+    const AMPLITUDE: f32 = 3.;
+    AMPLITUDE * (-4. * delta).exp() * (delta * 4. * std::f32::consts::PI).sin()
+}
+
 /// HTTP 方法的语义色，取自产品 token 层（见 [`crate::theme::Palette`]）。
 pub fn method_color(method: Method, cx: &App) -> Hsla {
     palette(cx).method(method)
@@ -233,6 +243,19 @@ mod tests {
                 );
             }
         });
+    }
+
+    #[test]
+    fn logo_wiggle_starts_and_ends_at_rest_within_amplitude() {
+        assert_eq!(logo_wiggle_offset(0.), 0.);
+        assert!(logo_wiggle_offset(1.).abs() < 1e-3);
+        for i in 0..=100 {
+            let x = logo_wiggle_offset(i as f32 / 100.);
+            assert!(x.abs() <= 3., "第 {i}% 处位移 {x} 超出振幅");
+        }
+        // 先往右、再往左：确实是「晃」而不是单向漂移
+        assert!(logo_wiggle_offset(0.1) > 0.);
+        assert!(logo_wiggle_offset(0.35) < 0.);
     }
 
     #[test]

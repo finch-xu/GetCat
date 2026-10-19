@@ -424,6 +424,29 @@ fn send_to_refused_port_ends_in_failed(cx: &mut TestAppContext) {
     });
 }
 
+/// 侧栏 logo 靠 `SendPulse` 知道「刚发出了一个请求」：真正发出去才加一，
+/// 发送前校验失败（这里是不支持的 scheme）不算，logo 不该为没发出去的请求晃。
+#[gpui_kit::test]
+fn send_pulse_counts_only_requests_that_actually_go_out(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let cx = init(cx);
+    let tab = new_tab(cx);
+    let pulse = |cx: &mut VisualTestContext| {
+        cx.read(|app| {
+            app.try_global::<crate::state::request_tab::SendPulse>()
+                .map_or(0, |p| p.0)
+        })
+    };
+    set_url_and_send(&tab, "ftp://example.com/", cx);
+    cx.read(|app| assert!(tab.read(app).prepare_error.is_some()));
+    assert_eq!(pulse(cx), 0);
+    set_url_and_send(&tab, &refused_url(), cx);
+    assert_eq!(pulse(cx), 1);
+    wait_until(cx, |cx| {
+        cx.read(|app| !tab.read(app).response.is_in_flight())
+    });
+}
+
 #[gpui_kit::test]
 fn send_to_json_server_ends_in_done(cx: &mut TestAppContext) {
     cx.executor().allow_parking();

@@ -8,6 +8,7 @@ use gpui_kit::component::{
     input::Input,
     menu::{DropdownMenu as _, PopupMenuItem},
     select::Select,
+    spinner::Spinner,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -17,8 +18,9 @@ use getcat_core::model::HttpVersionPref;
 
 use crate::i18n::tr;
 use crate::state::request_tab::RequestTab;
-use crate::ui::method_color;
+use crate::state::response::ResponseState;
 use crate::ui::text::{prepare_error_line, unresolved_vars_line};
+use crate::ui::{format_duration, method_color};
 use crate::{DuplicateTab, SaveRequest};
 
 /// 收起来显示在输入框里的短标签。协议名照写，只有 `Auto` 需要本地化。
@@ -87,18 +89,37 @@ impl RequestTab {
     }
 
     pub fn render_url_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let in_flight = self.response.is_in_flight();
         let method = self.current_method(cx);
         let this = cx.entity().downgrade();
         let version_owner = this.clone();
         let http_version = self.http_version;
         // 取消请求不是破坏性提交：按设计指南用 outline，danger 只留给删除类动作
-        let action_button = if in_flight {
+        //
+        // 发送中按钮原位换成「转圈 + 取消 · 实时耗时」：一眼看出还在等、等了多久，点一下就停。
+        // 不用 Button 自带的 loading：那会让按钮变成不可点的惰性状态，取消就没了入口。
+        // 耗时靠 RequestTab 的计时任务每 tick 重绘；系统要求减弱动态效果时转圈换成静态图标。
+        let action_button = if let ResponseState::InFlight { started, .. } = &self.response {
+            let label = format!(
+                "{} · {}",
+                tr!("url_bar.cancel"),
+                format_duration(started.elapsed())
+            );
+            let indicator = if cx.reduce_motion() {
+                Icon::new(IconName::Close).xsmall().into_any_element()
+            } else {
+                Spinner::new().xsmall().into_any_element()
+            };
             Button::new("cancel")
                 .outline()
                 .large()
-                .label(tr!("url_bar.cancel"))
-                .icon(IconName::Close)
+                .accessibility_label(tr!("url_bar.cancel"))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(indicator)
+                        .child(div().text_sm().child(label)),
+                )
                 .on_click(cx.listener(|this, _, _, cx| this.cancel(cx)))
         } else {
             Button::new("send")

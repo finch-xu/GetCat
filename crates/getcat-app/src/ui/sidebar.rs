@@ -28,13 +28,14 @@ use getcat_core::model::ThemePref;
 use crate::assets::LOGO_PATH;
 use crate::brand::APP_NAME;
 use crate::i18n::tr;
+use crate::state::request_tab::SendPulse;
 use crate::state::request_tab::tab_title;
 use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::workspace::{SidebarSection, Workspace};
 use crate::templates::{self, TemplateGroup};
 use crate::ui::text::theme_label;
 use crate::ui::variables_sheet::SheetScope;
-use crate::ui::{card, method_color};
+use crate::ui::{LOGO_WIGGLE_DURATION, card, logo_wiggle_offset, method_color};
 use crate::{OpenSettings, SaveRequest, ToggleSidebar};
 
 /// 列表行高：布局用 `h_11()`（2.75 rem），默认 rem 下等于 44 px；
@@ -48,6 +49,25 @@ fn theme_icon(pref: ThemePref) -> IconName {
         ThemePref::Light => IconName::Sun,
         ThemePref::Dark => IconName::Moon,
     }
+}
+
+/// 图标栏顶部的 logo。每次发出请求（[`SendPulse`] 加一）就在原位左右晃两下再停住，
+/// 像被抓娃娃机拎起来那一下——画布「动效规范」里唯一的彩蛋。动画 id 带上计数，
+/// 下一次发送换一个 id 即从头重放；位图不能旋转，所以用水平位移代替摆动。
+/// 还没发过请求、或系统打开了「减弱动态效果」时不包动画。
+fn render_logo(cx: &App) -> AnyElement {
+    // 26 px 是位图本身的尺寸：设计指南允许的像素例外
+    let logo = img(LOGO_PATH).size(px(26.)).flex_none().relative();
+    let pulse = cx.try_global::<SendPulse>().map_or(0, |p| p.0);
+    if pulse == 0 || cx.reduce_motion() {
+        return logo.into_any_element();
+    }
+    logo.with_animation(
+        ("logo-wiggle", pulse as usize),
+        Animation::new(LOGO_WIGGLE_DURATION),
+        |logo, delta| logo.left(px(logo_wiggle_offset(delta))),
+    )
+    .into_any_element()
 }
 
 impl SidebarSection {
@@ -96,8 +116,7 @@ impl Workspace {
                     .tooltip(|window, cx| {
                         gpui_kit::component::tooltip::Tooltip::new(APP_NAME).build(window, cx)
                     })
-                    // 26 px 是位图本身的尺寸：设计指南允许的像素例外
-                    .child(img(LOGO_PATH).size(px(26.)).flex_none()),
+                    .child(render_logo(cx)),
             )
             .child(
                 // 1 px 细线是物理边界，宽度走 rem 刻度

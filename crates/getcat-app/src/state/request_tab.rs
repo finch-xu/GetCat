@@ -256,6 +256,14 @@ fn wrap_prefs(cx: &App) -> (bool, bool) {
     (s.wrap_request_body, s.wrap_response_body)
 }
 
+/// 每次真正发出请求（`prepare` 通过、generation 自增）就加一的全局计数。
+/// 只给「点发送时侧栏 logo 晃一下」用：logo 在 Workspace 里，而发送可能来自任意一个 Tab
+/// 的按钮或快捷键，订阅每个 Tab 不如让 Workspace 观察这一个全局。
+#[derive(Default)]
+pub struct SendPulse(pub u64);
+
+impl Global for SendPulse {}
+
 pub struct RequestTab {
     /// Tab 的稳定标识：也是草稿文件名 `drafts/<id>.json`。
     pub id: TabId,
@@ -888,6 +896,7 @@ impl RequestTab {
         self.notice = None;
         self.generation += 1;
         let generation = self.generation;
+        cx.default_global::<SendPulse>().0 += 1;
 
         let (tx, mut rx) = mpsc::channel::<http::StreamEvent>(64);
         let request_task = bridge::send(cx, req, self.http_version, tx);
