@@ -8,11 +8,13 @@
   crates/getcat-app/assets/logo/getcat-art-mini.svg  简化版 —— ≤ 32 px：去掉脸部细节与条纹，
                                                      吊绳、爪子、四肢加粗，缩小后仍认得出
 
-两套配色：
-  浅色（默认）  浅雾蓝底板，爪子压暗一档 —— README、三平台系统图标、app 浅色主题
-  深色          夜蓝底板，原画原色      —— 只给 app 深色主题用
-原画按深色底板配色；浅色版不另存一份 SVG，而是在栅格化前把爪子的两种金属灰
-替换掉（LIGHT.recolor）：原来的浅灰压在浅底板上会糊成一片。
+两套配色，取值与画布 Logo 画板一致（浅色 = 「浅色底」那张的 .t-light，深色 = .t-dark）：
+  浅色（默认）  奶油底板，石墨色爪子 —— README、三平台系统图标、app 浅色主题
+  深色          夜蓝底板，浅金属爪子 —— 只给 app 深色主题用
+猫身上的颜色两套一样，只有底板、吊绳和爪子随配色变。原画里吊绳、爪子主体、爪齿、
+爪子暗部按角色标了 class（cable / metal / metal-line / metal-shade）；栅格化前按 Variant
+的色表往 SVG 里注入一段 <style> 给这几个角色上色。不按色值替换：深色稿里吊绳和爪子暗部
+是同一个灰（#AEB9CC），浅色稿却要把它们拆成两种，色值区分不开，只能按角色。
 
 产物：
   crates/getcat-app/assets/logo/getcat.png            512×512，浅色，超椭圆底板铺满画布
@@ -44,7 +46,7 @@ squircle，圆弧角在角落有肉眼可见的曲率突变，一眼就不像系
 
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -79,19 +81,34 @@ ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 @dataclass(frozen=True)
 class Variant:
-    tile: tuple[int, int, int]
-    # 原画里的色值 → 这套配色下的色值，栅格化前做纯文本替换
-    recolor: dict[str, str] = field(default_factory=dict)
+    tile: str         # 底板
+    cable: str        # 吊绳
+    metal: str        # 爪子主体与爪齿
+    metal_shade: str  # 爪子暗部：吊绳卡箍、底部阴影条、两个关节圆点
+
+    def style(self) -> str:
+        """注入原画的 <style>：CSS 优先级高于元素上的 fill / stroke 属性，按 class 覆盖。"""
+        return (
+            "<style>"
+            f".cable{{stroke:{self.cable}}}"
+            f".metal{{fill:{self.metal}}}"
+            f".metal-line{{stroke:{self.metal}}}"
+            f".metal-shade{{fill:{self.metal_shade}}}"
+            "</style>"
+        )
+
+    def tile_rgb(self) -> tuple[int, int, int]:
+        h = self.tile.lstrip("#")
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
-# 夜蓝底板，与画布 Logo 画板一致；原画就是按它配的色
-DARK = Variant(tile=(0x1A, 0x25, 0x40))
-# 浅雾蓝底板：与夜蓝同一色相，橘猫在上面依旧跳；在浅色主题的窗口底 #F2F3F5
-# 与 GitHub 的白底上都还看得出方块轮廓。爪子的两档金属灰各压暗一档
-LIGHT = Variant(
-    tile=(0xD6, 0xE2, 0xF3),
-    recolor={"#AEB9CC": "#7C89A1", "#D9E0EB": "#A4B0C4"},
-)
+# 夜蓝底板，浅金属爪子（原画元素上写的就是这一套）
+DARK = Variant(tile="#1A2540", cable="#AEB9CC", metal="#D9E0EB", metal_shade="#AEB9CC")
+# 奶油底板，石墨色爪子：橘猫在暖底上依旧醒目，爪子压深才不会和浅底糊成一片
+LIGHT = Variant(tile="#FFF1DF", cable="#8B96A8", metal="#5D6879", metal_shade="#46505F")
+
+# 每份原画至少要有的角色：缺了说明原画改过而脚本没跟上，宁可报错也别悄悄产出没换色的图
+REQUIRED_ROLES = ("cable", "metal", "metal-line")
 
 
 def ensure_raster_tool() -> Path:
@@ -106,12 +123,13 @@ def ensure_raster_tool() -> Path:
 
 
 def render_art(svg: Path, side: int, variant: Variant) -> Image.Image:
-    """把原画按 variant 换色后栅格化成 side×side 的 RGBA。"""
+    """把原画按 variant 的角色色表上色后栅格化成 side×side 的 RGBA。"""
     text = svg.read_text(encoding="utf-8")
-    for old, new in variant.recolor.items():
-        # 色值写错（原画改过色）时宁可报错，也别悄悄产出一份没换色的浅色版
-        assert old in text, f"{svg.name} 里没有 {old}，同步改 Variant.recolor"
-        text = text.replace(old, new)
+    for role in REQUIRED_ROLES:
+        assert f'class="{role}"' in text, f"{svg.name} 缺 {role} 角色，同步改原画或 REQUIRED_ROLES"
+    # <style> 紧跟在 <svg …> 开标签之后
+    tag_end = text.index(">", text.index("<svg")) + 1
+    text = text[:tag_end] + variant.style() + text[tag_end:]
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "art.svg"
         src.write_text(text, encoding="utf-8")
@@ -148,7 +166,7 @@ def render_tile(side: int, variant: Variant = LIGHT, mini: bool | None = None) -
     """铺满 side×side 的 logo（超椭圆外透明）。mini 为 None 时按边长自动选原画。"""
     if mini is None:
         mini = side <= MINI_MAX_SIDE
-    tile = Image.new("RGBA", (side, side), variant.tile + (255,))
+    tile = Image.new("RGBA", (side, side), variant.tile_rgb() + (255,))
     if not mini:
         tile = Image.alpha_composite(tile, glint(side))
     art = render_art(ART_MINI if mini else ART_FULL, side, variant)

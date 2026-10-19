@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- GetCat logo：被抓娃娃机从腰上拎起来的胖橘猫。
      只画猫与爪子（透明底），超椭圆底板由 scripts/gen-logo.py 合成。
-     色值按深色夜蓝底板（#1A2540）配；浅色版的爪子换色见 gen-logo.py 的 LIGHT。
+     色值按深色夜蓝底板（#1A2540）配。
      坐标系是 512×512 的底板；吊绳从 y<0 伸出，合成时被底板裁掉。
-     ≤ 32 px 用的简化版：去掉脸部细节与条纹，吊绳、爪子、四肢加粗。 -->
+     ≤ 32 px 用的简化版：去掉脸部细节与条纹，吊绳、爪子、四肢加粗。
+     爪子与吊绳按角色标了 class，配色由 scripts/gen-logo.py 按浅 / 深两张色表注入：
+       cable 吊绳（描边）· metal 爪子主体（填充）· metal-line 爪齿（描边）· metal-shade 爪子暗部（填充）
+     元素上写的色值是深色稿的取值，单独打开 SVG 时看到的就是深色版。 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <path d="M256 -10V150" stroke="#AEB9CC" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <path class="cable" d="M256 -10V150" stroke="#AEB9CC" stroke-width="22" stroke-linecap="round" fill="none"/>
   <rect x="118" y="330" width="44" height="96" rx="22" fill="#B9622A"/>
   <rect x="352" y="330" width="44" height="92" rx="22" fill="#B9622A"/>
   <path d="M398 326C426 364 428 412 412 452" stroke="#D9762F" stroke-width="30" stroke-linecap="round" fill="none"/>
@@ -19,6 +22,6 @@
   <circle cx="148" cy="302" r="17" fill="#2A1E16"/>
   <circle cx="94" cy="295" r="6" fill="#FFFFFF"/>
   <circle cx="154" cy="295" r="6" fill="#FFFFFF"/>
-  <rect x="200" y="124" width="112" height="50" rx="18" fill="#D9E0EB"/>
-  <path d="M226 172C190 200 186 254 222 290M286 172C322 200 326 254 290 290" stroke="#D9E0EB" stroke-width="26" stroke-linecap="round" fill="none"/>
+  <rect class="metal" x="200" y="124" width="112" height="50" rx="18" fill="#D9E0EB"/>
+  <path class="metal-line" d="M226 172C190 200 186 254 222 290M286 172C322 200 326 254 290 290" stroke="#D9E0EB" stroke-width="26" stroke-linecap="round" fill="none"/>
 </svg>

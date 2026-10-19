@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- GetCat logo：被抓娃娃机从腰上拎起来的胖橘猫。
      只画猫与爪子（透明底），超椭圆底板由 scripts/gen-logo.py 合成。
-     色值按深色夜蓝底板（#1A2540）配；浅色版的爪子换色见 gen-logo.py 的 LIGHT。
-     坐标系是 512×512 的底板；吊绳从 y<0 伸出，合成时被底板裁掉。 -->
+     色值按深色夜蓝底板（#1A2540）配。
+     坐标系是 512×512 的底板；吊绳从 y<0 伸出，合成时被底板裁掉。
+     爪子与吊绳按角色标了 class，配色由 scripts/gen-logo.py 按浅 / 深两张色表注入：
+       cable 吊绳（描边）· metal 爪子主体（填充）· metal-line 爪齿（描边）· metal-shade 爪子暗部（填充）
+     元素上写的色值是深色稿的取值，单独打开 SVG 时看到的就是深色版。 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <path d="M256 -8V140" stroke="#AEB9CC" stroke-width="8" stroke-linecap="round" fill="none"/>
+  <path class="cable" d="M256 -8V140" stroke="#AEB9CC" stroke-width="8" stroke-linecap="round" fill="none"/>
   <rect x="124" y="334" width="32" height="84" rx="16" fill="#C0652B"/>
   <ellipse cx="140" cy="414" rx="18" ry="11" fill="#E2B08A"/>
   <rect x="356" y="334" width="32" height="82" rx="16" fill="#C0652B"/>
@@ -37,10 +40,10 @@
   <path d="M111 318H125L118 326Z" fill="#D9666B" stroke="#D9666B" stroke-width="3" stroke-linejoin="round"/>
   <path d="M118 326V331M110 334Q114 337 118 331Q122 337 126 334" stroke="#7A4A2E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
   <path d="M88 326L50 320M88 333L52 340M148 326L186 320M148 333L184 340" stroke="#FBE6D2" stroke-width="2.5" stroke-linecap="round" fill="none" opacity=".85"/>
-  <rect x="244" y="122" width="24" height="14" rx="5" fill="#AEB9CC"/>
-  <rect x="222" y="130" width="68" height="36" rx="12" fill="#D9E0EB"/>
-  <rect x="222" y="150" width="68" height="16" rx="8" fill="#AEB9CC"/>
-  <path d="M238 162C212 176 198 206 202 240C204 262 216 276 234 280M274 162C300 176 314 206 310 240C308 262 296 276 278 280" stroke="#D9E0EB" stroke-width="13" stroke-linecap="round" fill="none"/>
-  <circle cx="238" cy="163" r="7" fill="#AEB9CC"/>
-  <circle cx="274" cy="163" r="7" fill="#AEB9CC"/>
+  <rect class="metal-shade" x="244" y="122" width="24" height="14" rx="5" fill="#AEB9CC"/>
+  <rect class="metal" x="222" y="130" width="68" height="36" rx="12" fill="#D9E0EB"/>
+  <rect class="metal-shade" x="222" y="150" width="68" height="16" rx="8" fill="#AEB9CC"/>
+  <path class="metal-line" d="M238 162C212 176 198 206 202 240C204 262 216 276 234 280M274 162C300 176 314 206 310 240C308 262 296 276 278 280" stroke="#D9E0EB" stroke-width="13" stroke-linecap="round" fill="none"/>
+  <circle class="metal-shade" cx="238" cy="163" r="7" fill="#AEB9CC"/>
+  <circle class="metal-shade" cx="274" cy="163" r="7" fill="#AEB9CC"/>
 </svg>
