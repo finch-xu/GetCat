@@ -12,7 +12,7 @@ use getcat_core::model::{
 };
 use getcat_core::store::Loaded;
 use gpui_kit::component::{
-    ActiveTheme, IconName, IndexPath, Selectable, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
+    ActiveTheme, IndexPath, Sizable, Theme, ThemeMode, TitleBar, WindowExt,
     alert::Alert,
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter},
@@ -20,7 +20,6 @@ use gpui_kit::component::{
     input::{Escape, Input, InputEvent, InputState},
     resizable::{ResizableState, resizable_panel},
     select::{Select, SelectState},
-    status_bar::StatusBar,
     tooltip::Tooltip,
     v_flex,
 };
@@ -358,7 +357,6 @@ impl Workspace {
             .collect()
     }
 
-    #[cfg(test)]
     pub fn update_status(&self) -> &UpdateStatus {
         &self.update_status
     }
@@ -725,7 +723,6 @@ impl Workspace {
         cx.notify();
     }
 
-    #[cfg(test)]
     pub fn split(&self) -> SplitDirection {
         self.split
     }
@@ -1835,67 +1832,6 @@ impl Workspace {
     }
 }
 
-/// 底部状态栏：右侧是更新提示与请求 / 响应的分栏方向（两段式），左侧留给以后的功能按钮。
-/// 底色同窗口底，顶上一条细线把它和卡片区分开。
-impl Workspace {
-    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // 只在"有新版本"与"已装好待重启"时提示；下载 / 安装进度只在「检查更新」页显示，
-        // 离线启动得到的错误也不在这里冒出来
-        let update_hint = update::hint_version(&self.update_status)
-            .map(|(version, staged)| (version.clone(), staged));
-        StatusBar::new().py_0p5().right(
-            h_flex()
-                .items_center()
-                .gap_0p5()
-                .when_some(update_hint, |bar, (version, staged)| {
-                    bar.child(if staged {
-                        Button::new("update-restart")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::ArrowUp)
-                            .label(tr!("status.update_restart", version = version))
-                            .tooltip(tr!("status.update_restart_tooltip"))
-                            .on_click(|_, _, cx| update::restart(cx))
-                    } else {
-                        Button::new("update-available")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::ArrowUp)
-                            .label(tr!("status.update_available", version = version))
-                            .tooltip(tr!("status.update_available_tooltip"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_settings_page(SettingsPage::Updates, window, cx)
-                            }))
-                    })
-                })
-                // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
-                // 不用先读懂图标才知道按下去会变成什么。
-                .child(
-                    Button::new("split-right")
-                        .ghost()
-                        .xsmall()
-                        .selected(self.split == SplitDirection::Horizontal)
-                        .icon(IconName::PanelRight)
-                        .tooltip(tr!("status.split_right"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_split(SplitDirection::Horizontal, cx)
-                        })),
-                )
-                .child(
-                    Button::new("split-bottom")
-                        .ghost()
-                        .xsmall()
-                        .selected(self.split == SplitDirection::Vertical)
-                        .icon(IconName::PanelBottom)
-                        .tooltip(tr!("status.split_bottom"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_split(SplitDirection::Vertical, cx)
-                        })),
-                ),
-        )
-    }
-}
-
 /// 持久化不可用 / 写入失败的顶部横幅（spec §9.4 / §11）：一行文字，不阻塞任何操作。
 /// 用官方 `Alert` 的 banner 形态：图标、底色、边框都来自主题，不再手调透明度。
 fn render_banner(text: String) -> impl IntoElement {
@@ -2010,7 +1946,6 @@ impl Render for Workspace {
                     // 与最左的图标栏对称，固定在最右、从不移动
                     .child(self.render_tool_rail(cx)),
             )
-            .child(self.render_status_bar(cx))
     }
 }
 

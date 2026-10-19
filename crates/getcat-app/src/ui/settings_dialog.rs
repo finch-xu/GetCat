@@ -655,9 +655,9 @@ mod tests {
         }
     }
 
-    /// 状态栏的更新提示跳的是「检查更新」页；这一条同时确认该页确实还在 PAGE_ORDER 里。
+    /// 右侧图标栏的更新按钮跳的是「检查更新」页；这一条同时确认该页确实还在 PAGE_ORDER 里。
     #[test]
-    fn updates_page_is_reachable_from_the_status_bar_hint() {
+    fn updates_page_is_reachable_from_the_update_button() {
         assert!(PAGE_ORDER.contains(&SettingsPage::Updates));
         assert!(PAGE_ORDER.contains(&SettingsPage::About));
     }

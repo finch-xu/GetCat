@@ -87,6 +87,30 @@ update_source:
 
 # 右侧图标栏与它弹出的抽屉
 tools:
+  update_restart:
+    en: "Restart to finish updating to v%{version}"
+    zh-CN: "重新启动以完成更新 v%{version}"
+    ja: "再起動して v%{version} への更新を完了"
+  update_restart_tooltip:
+    en: The update is installed; restart to apply it
+    zh-CN: 新版本已安装，重新启动后生效
+    ja: 更新はインストール済みです。再起動すると適用されます
+  update_available:
+    en: "v%{version} available"
+    zh-CN: "有新版本 v%{version}"
+    ja: "v%{version} が利用可能"
+  update_available_tooltip:
+    en: Open About to review and install
+    zh-CN: 在「关于」页查看并安装
+    ja: 「バージョン情報」で確認してインストール
+  layout_to_vertical:
+    en: Switch to top / bottom layout
+    zh-CN: 切换为上下布局
+    ja: 上下レイアウトに切り替え
+  layout_to_horizontal:
+    en: Switch to side-by-side layout
+    zh-CN: 切换为左右布局
+    ja: 左右レイアウトに切り替え
   rail_aria:
     en: Tools rail
     zh-CN: 工具栏
@@ -1318,32 +1342,6 @@ dialog:
       en: Category name
       zh-CN: 分类名称
       ja: カテゴリ名
-
-status:
-  update_restart:
-    en: "Restart to finish updating to v%{version}"
-    zh-CN: "重新启动以完成更新 v%{version}"
-    ja: "再起動して v%{version} への更新を完了"
-  update_restart_tooltip:
-    en: The update is installed; restart to apply it
-    zh-CN: 新版本已安装，重新启动后生效
-    ja: 更新はインストール済みです。再起動すると適用されます
-  update_available:
-    en: "v%{version} available"
-    zh-CN: "有新版本 v%{version}"
-    ja: "v%{version} が利用可能"
-  update_available_tooltip:
-    en: Open About to review and install
-    zh-CN: 在「关于」页查看并安装
-    ja: 「バージョン情報」で確認してインストール
-  split_right:
-    en: Response on the right
-    zh-CN: 响应区在右侧
-    ja: レスポンスを右側に表示
-  split_bottom:
-    en: Response at the bottom
-    zh-CN: 响应区在下方
-    ja: レスポンスを下側に表示
 
 store:
   unavailable:
