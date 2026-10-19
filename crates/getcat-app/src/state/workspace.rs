@@ -20,6 +20,7 @@ use gpui_kit::component::{
     input::{Input, InputState},
     resizable::{ResizableState, resizable_panel},
     select::{Select, SelectState},
+    status_bar::StatusBar,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -1325,13 +1326,13 @@ impl Workspace {
         input_for_focus.update(cx, |s, cx| s.focus(window, cx));
     }
 
-    /// 自绘标题栏（画布「主界面」）：标签栏直接占据标题栏，右侧是全局动作
-    /// （更新提示、生成代码 / 导入 cURL / 变量、请求与响应的分栏方向）。拖动 / 双击 /
-    /// 平台控制按钮仍由 TitleBar 处理；标签自己拦下 mouse_down（见 `tab_strip::render_tab`），
-    /// 拖标签是排序而不是拖窗口。
+    /// 自绘标题栏：标签栏直接占据标题栏（环境切换器、翻页与行数开关跟着标签栏走）。
+    /// 拖动 / 双击 / 平台控制按钮仍由 TitleBar 处理；标签自己拦下 mouse_down
+    /// （见 `tab_strip::render_tab`），拖标签是排序而不是拖窗口。
     ///
-    /// 高度不写死：多行标签模式下标题栏跟着标签行数长高，`min_h` 保证单行时的 44 px，
-    /// 红绿灯位置（`main.rs`）按 44 px 居中。
+    /// 高度不写死：多行标签模式下标题栏跟着标签行数长高，`min_h` 保证单行时的 44 px。
+    /// 内容顶部对齐而不是居中——红绿灯钉在顶部（`main.rs` 按 44 px 居中），「+」、
+    /// 环境切换器都要跟第一行标签对齐，不能随行数漂到中间。
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         TitleBar::new()
             .h_auto()
@@ -1349,8 +1350,7 @@ impl Workspace {
                     .w_0()
                     .overflow_x_hidden()
                     .min_w_0()
-                    .items_center()
-                    .gap_2()
+                    .items_start()
                     .pr_2()
                     .child(
                         div()
@@ -1358,8 +1358,7 @@ impl Workspace {
                             .min_w_0()
                             .py_1p5()
                             .child(self.render_tab_strip(cx)),
-                    )
-                    .child(self.render_title_actions(cx)),
+                    ),
             )
     }
 }
@@ -1610,68 +1609,64 @@ impl Workspace {
     }
 }
 
-/// 标题栏右侧的全局动作：更新提示、工具按钮、请求 / 响应的分栏方向（两段式）。
-/// 原先分在底部状态栏与右侧工具栏，2026-10 重设计并进标题栏，窗口少掉一行一列。
+/// 底部状态栏：右侧是更新提示与请求 / 响应的分栏方向（两段式），左侧留给以后的功能按钮。
+/// 底色同窗口底，顶上一条细线把它和卡片区分开。
 impl Workspace {
-    fn render_title_actions(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // 只在"有新版本"与"已装好待重启"时提示；下载 / 安装进度只在「检查更新」页显示，
         // 离线启动得到的错误也不在这里冒出来
         let update_hint = update::hint_version(&self.update_status)
             .map(|(version, staged)| (version.clone(), staged));
-        h_flex()
-            .flex_none()
-            .items_center()
-            .gap_0p5()
-            .when_some(update_hint, |bar, (version, staged)| {
-                bar.child(if staged {
-                    Button::new("update-restart")
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::ArrowUp)
-                        .label(tr!("status.update_restart", version = version))
-                        .tooltip(tr!("status.update_restart_tooltip"))
-                        .on_click(|_, _, cx| update::restart(cx))
-                } else {
-                    Button::new("update-available")
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::ArrowUp)
-                        .label(tr!("status.update_available", version = version))
-                        .tooltip(tr!("status.update_available_tooltip"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_settings_page(SettingsPage::Updates, window, cx)
-                        }))
+        StatusBar::new().py_0p5().right(
+            h_flex()
+                .items_center()
+                .gap_0p5()
+                .when_some(update_hint, |bar, (version, staged)| {
+                    bar.child(if staged {
+                        Button::new("update-restart")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ArrowUp)
+                            .label(tr!("status.update_restart", version = version))
+                            .tooltip(tr!("status.update_restart_tooltip"))
+                            .on_click(|_, _, cx| update::restart(cx))
+                    } else {
+                        Button::new("update-available")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ArrowUp)
+                            .label(tr!("status.update_available", version = version))
+                            .tooltip(tr!("status.update_available_tooltip"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_settings_page(SettingsPage::Updates, window, cx)
+                            }))
+                    })
                 })
-            })
-            .child(self.render_tool_buttons(cx))
-            // 1 px 细线是物理分隔，长度走 rem 刻度
-            .child(div().w(px(1.)).h_4().mx_1().bg(cx.theme().border))
-            // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
-            // 不用先读懂图标才知道按下去会变成什么。
-            .child(
-                Button::new("split-right")
-                    .ghost()
-                    .xsmall()
-                    .selected(self.split == SplitDirection::Horizontal)
-                    .icon(IconName::PanelRight)
-                    .tooltip(tr!("status.split_right"))
-                    .on_click(
-                        cx.listener(|this, _, _, cx| {
+                // 两段式而不是单个图标轮换：当前那一段高亮，两段各自带说明，
+                // 不用先读懂图标才知道按下去会变成什么。
+                .child(
+                    Button::new("split-right")
+                        .ghost()
+                        .xsmall()
+                        .selected(self.split == SplitDirection::Horizontal)
+                        .icon(IconName::PanelRight)
+                        .tooltip(tr!("status.split_right"))
+                        .on_click(cx.listener(|this, _, _, cx| {
                             this.set_split(SplitDirection::Horizontal, cx)
-                        }),
-                    ),
-            )
-            .child(
-                Button::new("split-bottom")
-                    .ghost()
-                    .xsmall()
-                    .selected(self.split == SplitDirection::Vertical)
-                    .icon(IconName::PanelBottom)
-                    .tooltip(tr!("status.split_bottom"))
-                    .on_click(
-                        cx.listener(|this, _, _, cx| this.set_split(SplitDirection::Vertical, cx)),
-                    ),
-            )
+                        })),
+                )
+                .child(
+                    Button::new("split-bottom")
+                        .ghost()
+                        .xsmall()
+                        .selected(self.split == SplitDirection::Vertical)
+                        .icon(IconName::PanelBottom)
+                        .tooltip(tr!("status.split_bottom"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_split(SplitDirection::Vertical, cx)
+                        })),
+                ),
+        )
     }
 }
 
@@ -1771,8 +1766,11 @@ impl Render for Workspace {
                                         .child(div().size_full().min_w_0().child(active)),
                                 ),
                         ),
-                    ),
+                    )
+                    // 与最左的图标栏对称，固定在最右、从不移动
+                    .child(self.render_tool_rail(cx)),
             )
+            .child(self.render_status_bar(cx))
     }
 }
 

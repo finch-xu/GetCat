@@ -1374,8 +1374,7 @@ impl Render for RequestTab {
         v_flex()
             .size_full()
             .gap_3()
-            // 左侧紧贴图标栏（它自带留白），右、下留出与卡片间同宽的缝
-            .pr_3()
+            // 左右紧贴两侧的图标栏（它们自带留白），下面留出与卡片间同宽的缝
             .pb_3()
             .child(self.render_title_row(cx))
             .child(self.render_url_bar(cx))
