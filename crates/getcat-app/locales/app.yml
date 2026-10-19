@@ -459,6 +459,14 @@ tab:
     en: Show tabs on a single row
     zh-CN: 单行展示标签
     ja: タブを 1 行で表示
+  page_count:
+    en: "%{count} tabs"
+    zh-CN: "%{count} 个标签"
+    ja: "タブ %{count} 個"
+  page_aria:
+    en: "Page %{page} of %{pages}, %{count} tabs"
+    zh-CN: "第 %{page} 页，共 %{pages} 页，%{count} 个标签"
+    ja: "%{pages} ページ中 %{page} ページ目、タブ %{count} 個"
   menu_duplicate:
     en: Duplicate tab
     zh-CN: 复制当前 Tab

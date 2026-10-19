@@ -52,7 +52,10 @@ fn send_shortcut_label() -> &'static str {
 impl RequestTab {
     /// 标题行：已保存请求显示「分类 › 请求名」（未分类只有名字），未保存的显示 URL 末段；
     /// 有未保存的改动时跟一句提示。只是展示，改名仍走保存对话框。
-    pub fn render_title_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    ///
+    /// 由 Workspace 渲染（右端挂环境切换器 `trailing`，正好落在「保存」按钮上方），
+    /// 所以这里只拿 `&App`。标题会截断，永远不会压到右端的切换器。
+    pub fn render_title_row(&self, trailing: AnyElement, cx: &App) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         h_flex()
             .h_7()
@@ -86,6 +89,8 @@ impl RequestTab {
                         .child(tr!("url_bar.unsaved_changes")),
                 )
             })
+            .child(div().flex_1())
+            .child(div().flex_none().child(trailing))
     }
 
     pub fn render_url_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {

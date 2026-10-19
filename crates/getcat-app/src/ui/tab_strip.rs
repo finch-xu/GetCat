@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, ThemeStyled,
-    button::{Button, ButtonVariants},
+    button::{Button, ButtonCustomVariant, ButtonVariants},
     h_flex,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     v_flex,
@@ -58,8 +58,45 @@ use crate::ui::variables_sheet::SheetScope;
 /// 只剩不到半个词的位置。
 pub const TAB_WIDTH: f32 = 200.;
 
-/// 标签高度，与 gpui-component `TabVariant::Tab` 的默认尺寸对齐。
+/// 单行模式的标签高度，与 gpui-component `TabVariant::Tab` 的默认尺寸对齐。
 const TAB_HEIGHT: f32 = 30.;
+
+/// 多行模式：每行高度、行距与列距。行比单行高一档——多行时标题栏本来就长高了，
+/// 标签点起来更从容，列与列之间也留出缝，读起来是一张等宽网格而不是一串挤在一起的胶囊。
+const ROW_HEIGHT: f32 = 36.;
+const ROW_GAP: f32 = 4.;
+const COL_GAP: f32 = 4.;
+
+/// 多行模式下竖长条分页键的宽度。
+const PAGER_WIDTH: f32 = 28.;
+
+/// `rows` 行标签（含行距）的总高度：多行模式下标签区与两个分页键都取这个高度，
+/// 最后一页不满时标题栏也不跟着缩。
+pub fn paged_rows_height(rows: u8) -> f32 {
+    let rows = rows.max(1) as f32;
+    rows * ROW_HEIGHT + (rows - 1.) * ROW_GAP
+}
+
+/// 多行模式下每个标签的宽度：`per_row` 个等分可用宽度（扣掉列距），各行按列对齐。
+pub fn grid_tab_width(width: f32, per_row: usize) -> f32 {
+    let per_row = per_row.max(1) as f32;
+    ((width - COL_GAP * (per_row - 1.)) / per_row).max(0.)
+}
+
+/// 单行模式的「页」：以可视宽度为一页，按滚动偏移算出当前第几页（0 起）与总页数。
+/// `offset` 是 gpui 的约定（向右滚为负），`max` 是可滚动的最大距离。滚到底时一定
+/// 报最后一页，免得最后一屏不满一页时页码停在倒数第二页。
+pub fn scroll_page(offset: f32, max: f32, viewport: f32) -> (usize, usize) {
+    if max <= 0.5 || viewport <= 0. {
+        return (0, 1);
+    }
+    let pages = ((viewport + max) / viewport).ceil() as usize;
+    if offset <= -max + 0.5 {
+        return (pages - 1, pages);
+    }
+    let page = ((-offset / viewport).round() as usize).min(pages - 1);
+    (page, pages)
+}
 
 const DRAG_EDGE: f32 = 24.;
 const DRAG_SCROLL_STEP: f32 = 12.;
@@ -429,17 +466,23 @@ impl Workspace {
                     .w_full()
                     .items_start()
                     .child(
-                        // 新建按钮固定在最左，不跟着翻页跑
-                        div().flex_none().px_1().py_1().child(
-                            Button::new("new-tab")
-                                .ghost()
-                                .small()
-                                .icon(IconName::Plus)
-                                .tooltip_with_action(tr!("tab.new"), &NewTab, None)
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.new_tab(window, cx)),
-                                ),
-                        ),
+                        // 新建按钮固定在最左，不跟着翻页跑；高度取第一行的行高，与第一行居中对齐
+                        div()
+                            .flex_none()
+                            .px_1()
+                            .h(px(if multi_row { ROW_HEIGHT } else { TAB_HEIGHT }))
+                            .flex()
+                            .items_center()
+                            .child(
+                                Button::new("new-tab")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::Plus)
+                                    .tooltip_with_action(tr!("tab.new"), &NewTab, None)
+                                    .on_click(
+                                        cx.listener(|this, _, window, cx| this.new_tab(window, cx)),
+                                    ),
+                            ),
                     )
                     .child(
                         div()
@@ -465,26 +508,28 @@ impl Workspace {
     fn render_single_row(&self, tabs: &[TabMeta], cx: &mut Context<Self>) -> AnyElement {
         let mut children = Vec::with_capacity(tabs.len());
         for tab in tabs {
-            children.push(self.render_tab(tab, false, cx));
+            children.push(self.render_tab(tab, None, cx));
         }
         h_flex()
             .id("tab-row")
             .w_full()
+            .gap(px(COL_GAP))
             .overflow_x_scroll()
             .track_scroll(self.tab_scroll())
             .children(children)
             .into_any_element()
     }
 
-    /// 多行：把当前页的标签按每行 `per_row` 个铺开。
+    /// 多行：把当前页的标签按每行 `per_row` 个铺成等宽网格，最后一行不满也按列对齐。
     fn render_paged_rows(&self, tabs: &[TabMeta], rows: u8, cx: &mut Context<Self>) -> AnyElement {
         let per_row = tabs_per_row(self.strip_width());
         let per_page = per_row * rows as usize;
         let page = self.tab_page().min(page_count(tabs.len(), per_page) - 1);
+        let width = px(grid_tab_width(self.strip_width(), per_row));
 
         let mut rendered = Vec::new();
         for tab in tabs.iter().skip(page * per_page).take(per_page) {
-            rendered.push(self.render_tab(tab, true, cx));
+            rendered.push(self.render_tab(tab, Some(width), cx));
         }
 
         // AnyElement 不是 Copy 也没有 take，按 per_row 个一批消费掉这个迭代器
@@ -492,13 +537,24 @@ impl Workspace {
         let mut iter = rendered.into_iter().peekable();
         while iter.peek().is_some() {
             let row: Vec<_> = iter.by_ref().take(per_row).collect();
-            rows_out.push(h_flex().children(row));
+            rows_out.push(h_flex().gap(px(COL_GAP)).children(row));
         }
-        v_flex().w_full().children(rows_out).into_any_element()
+        v_flex()
+            .w_full()
+            .min_h(px(paged_rows_height(rows)))
+            .gap(px(ROW_GAP))
+            .children(rows_out)
+            .into_any_element()
     }
 
-    /// 一个标签。`fixed_width` 为真时宽度定死（多行模式靠它分页），否则是上限。
-    fn render_tab(&self, tab: &TabMeta, fixed_width: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// 一个标签。`grid_width` 有值时是多行网格里的一格（定宽、行高 [`ROW_HEIGHT`]），
+    /// 否则是单行模式（宽度以 [`TAB_WIDTH`] 为上限、高 [`TAB_HEIGHT`]）。
+    fn render_tab(
+        &self,
+        tab: &TabMeta,
+        grid_width: Option<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let id = tab.id;
         let selected = tab.selected;
         let aria = if tab.dirty {
@@ -531,7 +587,11 @@ impl Workspace {
             .items_center()
             .gap_1()
             .flex_none()
-            .h(px(TAB_HEIGHT))
+            .h(px(if grid_width.is_some() {
+                ROW_HEIGHT
+            } else {
+                TAB_HEIGHT
+            }))
             .px_2()
             .when(self.tab_drag.source == Some(id), |d| d.opacity(0.5))
             .on_drag(drag, |drag, _, window, cx| {
@@ -552,25 +612,28 @@ impl Workspace {
                     TabDragPreview(drag)
                 })
             })
-            .map(|d| {
-                if fixed_width {
-                    d.w(px(TAB_WIDTH))
-                } else {
-                    d.max_w(px(TAB_WIDTH))
-                }
+            .map(|d| match grid_width {
+                Some(width) => d.w(width),
+                None => d.max_w(px(TAB_WIDTH)),
             })
             // 标题栏里的胶囊标签：选中的那个是卡片面 + 一层轻阴影，从窗口底上「浮」起来；
             // 卡片面与窗口底的亮度差有对比度测试钉住（ui::tests）。
+            // 深色下卡片面与窗口底只差 1.09:1、阴影也看不出，所以选中项再描一圈细边；
+            // 未选中的边框透明占位，切换选中时不跳布局。
             .rounded(cx.theme().radius)
+            .border_1()
             .map(|d| {
                 if selected {
                     d.bg(active_bg)
+                        .border_color(cx.theme().border)
                         .shadow_xs()
                         .text_color(cx.theme().tab_active_foreground)
                 } else {
-                    d.text_color(cx.theme().tab_foreground)
-                        // 未选中的悬停给一层更淡的同色，好过只改文字色
-                        .hover(|s| s.bg(active_bg.opacity(0.5)))
+                    let hover_bg = cx.theme().secondary_hover;
+                    d.border_color(cx.theme().transparent)
+                        .text_color(cx.theme().tab_foreground)
+                        // 未选中的透明；悬停给一层浅底，好过只改文字色
+                        .hover(move |s| s.bg(hover_bg))
                 }
             })
             .child(
@@ -651,7 +714,13 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// 标签栏右侧的一组控件：环境切换器、翻页 / 滚动箭头，以及行数切换。
+    /// 标签栏右侧的一组控件：分页（上一页 · 页码 · 下一页）与行数切换。环境切换器不在这里，
+    /// 它挂在请求标题行的右端（见 `Workspace::render` 与 `RequestTab::render_title_row`）。
+    ///
+    /// 多行模式下分页是主要导航：两个分页键做成与全部行等高的竖长条，一眼看得出
+    /// 「这里能翻页」；页码夹在两者之间，大字「1 / 3」、小字「14 个标签」。环境切换器
+    /// 与行数切换跟第一行对齐，不随行数漂到中间。单行模式下箭头只在装不下时出现，
+    /// 页码收成一行「1/3 · 14」。
     fn render_strip_controls(
         &self,
         total: usize,
@@ -659,78 +728,83 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let multi_row = rows > 1;
-        let per_page = tabs_per_page(self.strip_width(), rows);
-        let pages = page_count(total, per_page);
-        let page = self.tab_page().min(pages - 1);
-
-        // 单行下箭头只在真装不下时出现（max_offset 要等布局算完才有值，所以刚好
-        // 溢出的那一帧还看不到，下一次重绘就正常了）；多行下按钮常驻，翻页是它的
-        // 主要导航方式，藏起来反而让人找不到别的页。
-        let max_x = self.tab_scroll().max_offset().x;
-        let show_arrows = multi_row || max_x > px(0.);
+        let scroll = self.tab_scroll();
         // set_offset 不夹值、div 只在 prepaint 夹，直接读回的瞬时越界值会被误判成「还能滚」
-        let offset_x = self.tab_scroll().offset().x.clamp(-max_x, px(0.));
+        let max_x = scroll.max_offset().x;
+        let offset_x = scroll.offset().x.clamp(-max_x, px(0.));
+        let (page, pages) = if multi_row {
+            let per_page = tabs_per_page(self.strip_width(), rows);
+            let pages = page_count(total, per_page);
+            (self.tab_page().min(pages - 1), pages)
+        } else {
+            scroll_page(
+                offset_x.into(),
+                max_x.into(),
+                scroll.bounds().size.width.into(),
+            )
+        };
+        // 单行下箭头只在真装不下时出现（max_offset 要等布局算完才有值，所以刚好
+        // 溢出的那一帧还看不到，下一次重绘就正常了）；多行下常驻，翻页是它的
+        // 主要导航方式，藏起来反而让人找不到别的页。
+        let show_pager = multi_row || max_x > px(0.);
         let (at_start, at_end) = if multi_row {
             (page == 0, page + 1 >= pages)
         } else {
             (offset_x >= px(-0.5), offset_x <= -max_x + px(0.5))
         };
+        let aria = tr!(
+            "tab.page_aria",
+            page = page + 1,
+            pages = pages,
+            count = total
+        );
 
-        let switcher = self.render_env_switcher(cx);
-        let previous_layout = self.tab_drag.layout.clone();
-        let next_layout = self.tab_drag.layout.clone();
-
-        h_flex()
-            .flex_none()
-            .items_center()
-            .gap_0p5()
-            .px_1()
-            .py_1()
-            .child(switcher)
-            .when(show_arrows, |h| {
-                h.child(
+        let indicator = if multi_row {
+            v_flex()
+                .id("tabs-page")
+                .role(Role::Status)
+                .aria_label(aria)
+                .flex_none()
+                .min_w_12()
+                .h(px(paged_rows_height(rows)))
+                .px_1()
+                .items_center()
+                .justify_center()
+                .child(
                     div()
-                        .relative()
-                        .flex_none()
-                        .child(
-                            Button::new("tabs-prev")
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::ChevronLeft)
-                                .disabled(at_start)
-                                .tooltip(if multi_row {
-                                    tr!("tab.prev_page")
-                                } else {
-                                    tr!("tab.scroll_left")
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| this.step_tabs(-1, cx))),
-                        )
-                        .child(measure_drag_bounds(move |bounds| {
-                            previous_layout.borrow_mut().previous = (!at_start).then_some(bounds);
-                        })),
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .whitespace_nowrap()
+                        .child(format!("{} / {pages}", page + 1)),
                 )
                 .child(
                     div()
-                        .relative()
-                        .flex_none()
-                        .child(
-                            Button::new("tabs-next")
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::ChevronRight)
-                                .disabled(at_end)
-                                .tooltip(if multi_row {
-                                    tr!("tab.next_page")
-                                } else {
-                                    tr!("tab.scroll_right")
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| this.step_tabs(1, cx))),
-                        )
-                        .child(measure_drag_bounds(move |bounds| {
-                            next_layout.borrow_mut().next = (!at_end).then_some(bounds);
-                        })),
+                        .text_xs()
+                        .whitespace_nowrap()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr!("tab.page_count", count = total)),
                 )
-            })
+        } else {
+            v_flex()
+                .id("tabs-page")
+                .role(Role::Status)
+                .aria_label(aria)
+                .flex_none()
+                .h(px(TAB_HEIGHT))
+                .justify_center()
+                .px_1()
+                .text_xs()
+                .whitespace_nowrap()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{}/{pages} · {total}", page + 1))
+        };
+
+        // 行数切换：高度取第一行，内容居中——多行时与第一行对齐
+        let top_controls = h_flex()
+            .flex_none()
+            .h(px(if multi_row { ROW_HEIGHT } else { TAB_HEIGHT }))
+            .items_center()
+            .gap_0p5()
             .child(
                 Button::new("tabs-rows")
                     .ghost()
@@ -743,14 +817,93 @@ impl Workspace {
                         tr!("tab.rows_toggle")
                     })
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_tab_rows(cx))),
-            )
+            );
+
+        h_flex()
+            .flex_none()
+            .items_start()
+            .gap_1()
+            .pl_1()
+            .when(show_pager, |h| {
+                h.child(self.render_pager(-1, at_start, rows, cx))
+                    .child(indicator)
+                    .child(self.render_pager(1, at_end, rows, cx))
+            })
+            .child(top_controls)
+    }
+
+    /// 一个分页键。多行时是与全部行等高的竖长条（浅灰底、悬停加深、到头时半透明且不可点），
+    /// 单行时是普通的小号幽灵按钮。可访问名称沿用「上一页标签 / 下一页标签」，
+    /// 单行模式下是「向左 / 向右查看标签」。
+    ///
+    /// 外面包一层量尺寸：拖着标签悬停在分页键上会自动翻页（`tab_drag_navigation`）。
+    fn render_pager(
+        &self,
+        dir: i32,
+        disabled: bool,
+        rows: u8,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let multi_row = rows > 1;
+        let previous = dir < 0;
+        let label = match (multi_row, previous) {
+            (true, true) => tr!("tab.prev_page"),
+            (true, false) => tr!("tab.next_page"),
+            (false, true) => tr!("tab.scroll_left"),
+            (false, false) => tr!("tab.scroll_right"),
+        };
+        let button = Button::new(if previous { "tabs-prev" } else { "tabs-next" })
+            .icon(if previous {
+                IconName::ChevronLeft
+            } else {
+                IconName::ChevronRight
+            })
+            .disabled(disabled)
+            .accessibility_label(label.clone())
+            .tooltip(label)
+            .on_click(cx.listener(move |this, _, _, cx| this.step_tabs(dir, cx)));
+        let button = if multi_row {
+            button
+                .custom(
+                    // 底色比 line-soft（secondary）深一档：窗口底本身就接近 line-soft，
+                    // 不加深的话竖长条在标题栏里几乎看不出来
+                    ButtonCustomVariant::new(cx)
+                        .color(cx.theme().secondary_hover)
+                        .foreground(cx.theme().muted_foreground)
+                        .hover(cx.theme().secondary_active)
+                        .active(cx.theme().secondary_active),
+                )
+                .w(px(PAGER_WIDTH))
+                .h(px(paged_rows_height(rows)))
+                .rounded(cx.theme().radius)
+                .when(disabled, |b| b.opacity(0.4))
+        } else {
+            button.ghost().xsmall()
+        };
+        let layout = self.tab_drag.layout.clone();
+        div()
+            .relative()
+            .flex_none()
+            .when(!multi_row, |d| d.h(px(TAB_HEIGHT)).flex().items_center())
+            // 同标签一样拦下按下事件：在标题栏里按住分页键稍一移动，不该变成拖窗口
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(button)
+            .child(measure_drag_bounds(move |bounds| {
+                let target = (!disabled).then_some(bounds);
+                let mut layout = layout.borrow_mut();
+                if previous {
+                    layout.previous = target;
+                } else {
+                    layout.next = target;
+                }
+            }))
     }
 
     /// 环境切换器：当前环境名 + 下拉菜单（选环境 / 「无环境」/「管理变量…」）。
     ///
     /// builder 里只握弱引用，不碰 `self`——同款约束：`dropdown_menu` 是 `Fn`，
     /// 每帧都可能在本实体的 `render` 内部被重新求值。
-    fn render_env_switcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn render_env_switcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = cx.entity().downgrade();
         let full_label = self.environment_label(cx);
         let aria = tr!("env_switcher.aria", name = full_label.clone());
@@ -902,6 +1055,35 @@ mod tests {
         // 差一点点装不下第四个，就只算三个
         assert_eq!(tabs_per_row(TAB_WIDTH * 4. - 1.), 3);
         assert_eq!(tabs_per_page(TAB_WIDTH * 4., 3), 12);
+    }
+
+    #[test]
+    fn paged_rows_height_adds_row_gaps_between_rows() {
+        assert_eq!(paged_rows_height(1), 36.);
+        assert_eq!(paged_rows_height(3), 3. * 36. + 2. * 4.);
+        // 0 行按 1 行算，不会得出负高度
+        assert_eq!(paged_rows_height(0), 36.);
+    }
+
+    #[test]
+    fn grid_tabs_split_the_width_evenly_minus_column_gaps() {
+        assert_eq!(grid_tab_width(1000., 4), (1000. - 3. * 4.) / 4.);
+        assert_eq!(grid_tab_width(200., 1), 200.);
+        // 首帧还没量到宽度：不出负数
+        assert_eq!(grid_tab_width(0., 3), 0.);
+    }
+
+    #[test]
+    fn scroll_page_follows_the_scroll_offset() {
+        // 不溢出：只有一页
+        assert_eq!(scroll_page(0., 0., 800.), (0, 1));
+        // 内容 2000、可视 800：三页
+        assert_eq!(scroll_page(0., 1200., 800.), (0, 3));
+        assert_eq!(scroll_page(-800., 1200., 800.), (1, 3));
+        // 滚到底一定是最后一页，哪怕最后一屏不满一页
+        assert_eq!(scroll_page(-1200., 1200., 800.), (2, 3));
+        // 首帧还没量到可视宽度
+        assert_eq!(scroll_page(0., 100., 0.), (0, 1));
     }
 
     #[test]

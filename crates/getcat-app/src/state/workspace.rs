@@ -21,6 +21,7 @@ use gpui_kit::component::{
     resizable::{ResizableState, resizable_panel},
     select::{Select, SelectState},
     status_bar::StatusBar,
+    v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -1686,6 +1687,13 @@ impl Render for Workspace {
             self.reset_workspace_panels(cx);
         }
         let active = self.active_tab();
+        // 标题行（「分类 › 请求名」+ 右端的环境切换器）在这一层画：切换器要握 Workspace，
+        // 而标题取自当前 Tab。先建切换器再读 Tab，免得 `cx` 的可变与只读借用打架。
+        let env_switcher = self.render_env_switcher(cx).into_any_element();
+        let title_row = active
+            .read(cx)
+            .render_title_row(env_switcher, cx)
+            .into_any_element();
         let sidebar_width = px(self.sidebar_width.unwrap_or(SIDEBAR_DEFAULT_WIDTH));
         // Dialog / Sheet / Notification 层由窗口根 Root 自动托管（GPUI Kit 0.7 起），这里不必再手动渲染。
         // 根元素持有焦点（track_focus）：给它 id + role，否则 gpui 会在日志里提示聚焦元素缺少 role
@@ -1762,8 +1770,14 @@ impl Render for Workspace {
                                         .child(self.render_sidebar(window, cx)),
                                 )
                                 .child(
-                                    resizable_panel()
-                                        .child(div().size_full().min_w_0().child(active)),
+                                    resizable_panel().child(
+                                        v_flex()
+                                            .size_full()
+                                            .min_w_0()
+                                            .gap_3()
+                                            .child(title_row)
+                                            .child(div().flex_1().min_h_0().child(active)),
+                                    ),
                                 ),
                         ),
                     )
