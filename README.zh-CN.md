@@ -1,5 +1,5 @@
 <div align="right">
-<a href="README.md">English</a> · <b>简体中文</b> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a>
+<a href="README.md">English</a> · <b>简体中文</b> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.fr.md">Français</a>
 </div>
 
 <div align="center">
@@ -36,7 +36,7 @@ GPU 渲染 · 低资源占用 · 无需账号 · 数据全在本地 · No Electr
 - **命令进出自如**：右侧栏可把当前请求转成 cURL / Python 示例，也能反过来粘一条 curl 命令导进来——浏览器「以 cURL 格式复制」的输出直接可用，没搬过来的选项会如实列出。
 - **变量与前后置操作**：全局 / 分类 / 环境三层变量，`{{var}}` 与 `{{$timestamp}}` 替换；发送前设变量、响应后提取字段到变量与断言，不用写脚本；Postman environment 导入导出；敏感变量在界面上掩码显示。
 - **数据属于你**：不存历史、不存响应、不上传任何东西。已保存请求、草稿、设置都是美化过的 JSON 文件，可手工编辑、可用 Git 管理。
-- **主题与语言跟随系统**，也可固定浅色 / 深色、English / 简体中文 / 繁體中文 / 日本語；自绘标题栏，三平台外观一致。
+- **主题与语言跟随系统**，也可固定浅色 / 深色、English / 简体中文 / 繁體中文 / 日本語 / Français；自绘标题栏，三平台外观一致。
 - **无障碍**：所有控件都有可访问名称，屏幕阅读器可用。
 
 ## 安装
@@ -133,7 +133,7 @@ vulkaninfo --summary
 | 响应内搜索 | ⌘ F | Ctrl F |
 | 设置 | ⌘ , | Ctrl , |
 
-设置里可以调界面语言（跟随系统 / English / 简体中文 / 繁體中文 / 日本語）、请求超时、跳转、TLS 校验、编辑器字号，以及是否在启动时检查更新。
+设置里可以调界面语言（跟随系统 / English / 简体中文 / 繁體中文 / 日本語 / Français）、请求超时、跳转、TLS 校验、编辑器字号，以及是否在启动时检查更新。
 
 ### 数据目录
 

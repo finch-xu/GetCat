@@ -1,5 +1,5 @@
 <div align="right">
-<b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a>
+<b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.fr.md">Français</a>
 </div>
 
 <div align="center">
@@ -36,7 +36,7 @@ GPU-rendered · Light on resources · No account · Your data stays local · No 
 - **Commands in and out**: the right-hand rail turns the current request into a cURL / Python snippet, and takes one back — paste a curl command (a browser's "Copy as cURL" works as-is) and it becomes a new tab, with anything that couldn't be carried over listed explicitly.
 - **Variables & pre/post operations**: global / category / environment scopes with `{{var}}` and `{{$timestamp}}`; set variables before sending, extract response fields and assert afterwards — no scripting; Postman environment import/export; secret variables are masked in the UI.
 - **Your data is yours**: no history, no stored responses, nothing uploaded anywhere. Saved requests, drafts, and settings are pretty-printed JSON files you can hand-edit and track in Git.
-- **Theme and language follow the system**, or pin them to light / dark and English / Simplified Chinese / Traditional Chinese / Japanese. The title bar is custom-drawn, so all three platforms look the same.
+- **Theme and language follow the system**, or pin them to light / dark and English / Simplified Chinese / Traditional Chinese / Japanese / French. The title bar is custom-drawn, so all three platforms look the same.
 - **Accessible**: every control has an accessible name and works with screen readers.
 
 ## Install
@@ -133,7 +133,7 @@ Neither is code-signed yet, so SmartScreen will stop it the first time. For the 
 | Search in response | ⌘ F | Ctrl F |
 | Settings | ⌘ , | Ctrl , |
 
-Settings cover the interface language (system / English / Simplified Chinese / Traditional Chinese / Japanese), request timeout, redirects, TLS verification, editor font size, and whether to check for updates at startup.
+Settings cover the interface language (system / English / Simplified Chinese / Traditional Chinese / Japanese / French), request timeout, redirects, TLS verification, editor font size, and whether to check for updates at startup.
 
 ### Data directory
 
