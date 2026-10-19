@@ -1,8 +1,9 @@
-//! GetCat 配色：把 BucketCat 的主题变量装进 gpui-component 的 Theme。
+//! GetCat 配色：把产品主题变量装进 gpui-component 的 Theme。
 //!
-//! 色值取自 BucketCat 的 `src/index.css`（`:root` 与 `.dark` 两组变量），
-//! 只有 `muted.foreground` 是相对它的调整：原值 #8794a1 在白底上只有
-//! 2.99:1，而它承载了侧栏副标题、参数描述、耗时与大小等大量次要文字。
+//! 2026-10 重设计（画布「GetCat 界面与 Logo 重设计」）：窗口底（标题栏 / 图标栏 /
+//! 标签栏）用一层浅灰，请求与响应是压在它上面的白色卡片——所以 `background` 是卡片面，
+//! `title_bar` / `sidebar` / `tab_bar` 才是窗口底。选中标签取卡片面，与窗口底拉开层次。
+//! 主色是一支偏沉的蓝（浅 #1f62d0 / 深 #2f6bdb），两者上的白字都 ≥ 4.5:1。
 //!
 //! 主题不是每次切换后打补丁，而是替换 [`Theme`] 的 `light_theme` /
 //! `dark_theme` 两个配置：此后 `Theme::change` 与
@@ -167,8 +168,7 @@ mod tests {
         });
     }
 
-    /// 配色取自 BucketCat 的 src/index.css；muted_foreground 是唯一一处
-    /// 相对它的调整（原值 #8794a1 在白底上只有 2.99:1）。
+    /// 新配色的几个锚点：卡片面、窗口底、主色、正文与次要文字。
     #[gpui_kit::test]
     fn install_replaces_the_default_palette(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -177,21 +177,21 @@ mod tests {
 
             Theme::change(ThemeMode::Light, None, cx);
             assert_eq!(hex(cx.theme().background), 0xffffff);
-            assert_eq!(hex(cx.theme().foreground), 0x1c2329);
-            assert_eq!(hex(cx.theme().primary), 0x3f87bd);
-            assert_eq!(hex(cx.theme().sidebar), 0xf4f6f8);
-            assert_eq!(hex(cx.theme().title_bar), 0xf4f6f8);
-            assert_eq!(hex(cx.theme().border), 0xe3e8ed);
-            assert_eq!(hex(cx.theme().muted_foreground), 0x5e6a77);
+            assert_eq!(hex(cx.theme().foreground), 0x15181c);
+            assert_eq!(hex(cx.theme().primary), 0x1f62d0);
+            assert_eq!(hex(cx.theme().sidebar), 0xf2f3f5);
+            assert_eq!(hex(cx.theme().title_bar), 0xf2f3f5);
+            assert_eq!(hex(cx.theme().border), 0xe3e6eb);
+            assert_eq!(hex(cx.theme().muted_foreground), 0x545c66);
 
             Theme::change(ThemeMode::Dark, None, cx);
-            assert_eq!(hex(cx.theme().background), 0x16191c);
-            assert_eq!(hex(cx.theme().foreground), 0xeef1f4);
-            assert_eq!(hex(cx.theme().primary), 0x6fa8d4);
-            assert_eq!(hex(cx.theme().sidebar), 0x14171a);
-            assert_eq!(hex(cx.theme().title_bar), 0x14171a);
-            assert_eq!(hex(cx.theme().border), 0x2a3037);
-            assert_eq!(hex(cx.theme().muted_foreground), 0x8f9aa3);
+            assert_eq!(hex(cx.theme().background), 0x1b1e23);
+            assert_eq!(hex(cx.theme().foreground), 0xe8eaed);
+            assert_eq!(hex(cx.theme().primary), 0x2f6bdb);
+            assert_eq!(hex(cx.theme().sidebar), 0x131518);
+            assert_eq!(hex(cx.theme().title_bar), 0x131518);
+            assert_eq!(hex(cx.theme().border), 0x2b3037);
+            assert_eq!(hex(cx.theme().muted_foreground), 0xaab1ba);
         });
     }
 }

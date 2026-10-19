@@ -1720,9 +1720,9 @@ fn cycling_theme_keeps_the_getcat_palette(cx: &mut TestAppContext) {
             for _ in 0..4 {
                 ws.cycle_theme(window, cx);
                 let expected = if cx.theme().mode.is_dark() {
-                    0x6fa8d4
+                    0x2f6bdb
                 } else {
-                    0x3f87bd
+                    0x1f62d0
                 };
                 assert_eq!(
                     hex(cx.theme().primary),
