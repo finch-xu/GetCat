@@ -207,15 +207,6 @@ fn window_options(cx: &App) -> WindowOptions {
         app_id: Some(crate::brand::APP_ID.to_string()),
         #[cfg(target_os = "linux")]
         icon: linux_window_icon(),
-        // 标签栏并进了标题栏，标题栏从 34 px 长到 44 px：红绿灯跟着下移，与第一行标签
-        // 居中对齐（14 px 是红绿灯按钮本身的高度）
-        titlebar: Some(TitlebarOptions {
-            traffic_light_position: Some(point(
-                px(12.),
-                px((state::workspace::TITLE_BAR_HEIGHT - 14.) / 2.),
-            )),
-            ..TitleBar::title_bar_options()
-        }),
         ..TitleBar::window_options()
     }
 }

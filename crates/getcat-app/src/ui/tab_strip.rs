@@ -704,14 +704,7 @@ impl Workspace {
             .child(measure_drag_bounds(move |bounds| {
                 layout.borrow_mut().tabs.push((id, bounds))
             }));
-        // 标签栏在标题栏里：TitleBar 收到 mouse_down 就会在下一次移动时 start_window_move，
-        // 拖标签会变成拖窗口，双击标签还会缩放窗口。标签自己的按下（含拖动起点）先处理完，
-        // 再在这层包装截断，不让它冒泡到 TitleBar；标签之外的空白处照样能拖窗口。
-        div()
-            .flex_none()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(tab)
-            .into_any_element()
+        tab.into_any_element()
     }
 
     /// 标签栏右侧的一组控件：分页（上一页 · 页码 · 下一页）与行数切换。环境切换器不在这里，

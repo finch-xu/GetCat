@@ -33,6 +33,7 @@ use gpui_kit::{
 
 use gpui_updater::UpdateStatus;
 
+use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::{RequestTab, SendPulse};
 use crate::state::saved_filter::{self, SavedFilter};
@@ -1543,45 +1544,59 @@ impl Workspace {
         input_for_focus.update(cx, |s, cx| s.focus(window, cx));
     }
 
-    /// 自绘标题栏：标签栏直接占据标题栏（环境切换器、翻页与行数开关跟着标签栏走）。
-    /// 拖动 / 双击 / 平台控制按钮仍由 TitleBar 处理；标签自己拦下 mouse_down
-    /// （见 `tab_strip::render_tab`），拖标签是排序而不是拖窗口。
+    /// 标题栏副标题：当前 Tab 的标题（已保存请求名或 URL 末段）。
+    pub(crate) fn title_bar_subtitle(&self, cx: &App) -> SharedString {
+        self.active_tab().read(cx).title(cx)
+    }
+
+    /// 自绘标题栏（spec §7.2）：居中显示 `GetCat · 当前 Tab 标题`；
+    /// 拖动 / 双击 / 平台控制按钮由 TitleBar 处理。
     ///
-    /// 高度不写死：多行标签模式下标题栏跟着标签行数长高，`min_h` 保证单行时的 44 px。
-    /// 内容顶部对齐而不是居中——红绿灯钉在顶部（`main.rs` 按 44 px 居中），「+」、
-    /// 环境切换器都要跟第一行标签对齐，不能随行数漂到中间。
+    /// 标题栏里只放文字、不放可点的控件：Windows 上 TitleBar 把整条内容区标成
+    /// `WindowControlArea::Drag`，`WM_NCHITTEST` 在这里一律回 `HTCAPTION`，点击被系统
+    /// 当成拖窗口，按钮收不到（标签栏曾经并进标题栏，行数开关与「+」在 Windows 上就点不了）。
+    ///
+    /// 品牌名用更重的字重与主前景色，Tab 标题降到 muted——窗口变窄时只有 Tab 标题被截断，
+    /// `GetCat ·` 始终完整（品牌段 `flex_none`，标题段才 `min_w_0` + `truncate`）。
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        TitleBar::new()
-            .h_auto()
-            .min_h(px(TITLE_BAR_HEIGHT))
-            .bg(cx.theme().title_bar)
-            .border_b_0()
-            .child(
-                // TitleBar 内层容器是 `flex_1` + `flex_shrink_0`，最小宽度跟着内容走：十几个标签的
-                // 内容宽度会把整条标题栏撑出窗口，单行模式的横向滚动永远不会触发（有测试钉住：
-                // restore_scrolls_active_tab_into_view_in_single_row）。宽度定成 0 再长满，并让这层
-                // 横向裁剪——taffy 只在它是裁剪容器时才不把内容宽度算进父级的最小宽度。
-                // 菜单 / 下拉都走 deferred 弹层，不受这层裁剪影响。
-                h_flex()
-                    .flex_grow(1.)
-                    .w_0()
-                    .overflow_x_hidden()
-                    .min_w_0()
-                    .items_start()
-                    .pr_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .py_1p5()
-                            .child(self.render_tab_strip(cx)),
-                    ),
-            )
+        TitleBar::new().bg(cx.theme().title_bar).border_b_0().child(
+            h_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_1p5()
+                // TitleBar 左侧留白与右侧控制按钮不对称，补齐差值才是窗口正中：
+                // macOS 左侧给红绿灯留了 80 px；Windows / Linux 左侧 12 px、右侧是三个 34 px 的按钮
+                .when(cfg!(target_os = "macos"), |h| h.pr(px(80.)))
+                .when(!cfg!(target_os = "macos"), |h| h.pl(px(3. * 34. - 12.)))
+                .text_sm()
+                .min_w_0()
+                .child(
+                    div()
+                        .flex_none()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(APP_NAME),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("·"),
+                )
+                .child(
+                    // flex 子项默认 min-width:auto，不会收缩到内容宽度以下，truncate 因此失效：
+                    // 必须显式 min_w_0()
+                    div()
+                        .min_w_0()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(cx.theme().muted_foreground)
+                        .truncate()
+                        .child(self.title_bar_subtitle(cx)),
+                ),
+        )
     }
 }
-
-/// 标题栏高度（单行标签时）。红绿灯纵向位置按它居中，见 `main.rs`。
-pub const TITLE_BAR_HEIGHT: f32 = 44.;
 
 /// 关闭 `closing` 后新的 active 下标；`len` 为关闭前的 Tab 数（≥ 2）。
 pub(crate) fn active_after_close(active: usize, closing: usize, len: usize) -> usize {
@@ -1937,6 +1952,7 @@ impl Render for Workspace {
                                             .size_full()
                                             .min_w_0()
                                             .gap_3()
+                                            .child(self.render_tab_strip(cx))
                                             .child(title_row)
                                             .child(div().flex_1().min_h_0().child(active)),
                                     ),
