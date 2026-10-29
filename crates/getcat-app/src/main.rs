@@ -18,7 +18,7 @@ mod ui;
 // 界面文案：crates/getcat-app/locales/app.yml；找不到当前语言的 key 时退回英文
 rust_i18n::i18n!("locales", fallback = "en");
 
-use getcat_core::store::{Layout, Loaded, Store, StoreError, load_all};
+use getcat_core::store::{Layout, Loaded, load_all};
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
@@ -135,8 +135,11 @@ fn main() {
         });
         cx.spawn(async move |cx| {
             // 启动读取在后台线程完成（spec §9.4）；数据目录不可写时仍以只读方式恢复已有数据，只显示横幅
-            let (opened, mut loaded) = cx.background_spawn(async move { open_store() }).await;
+            let (directory, opened, mut loaded) = cx
+                .background_spawn(async move { state::data_directory::open() })
+                .await;
             let opened_window = cx.update(|cx| {
+                cx.set_global(directory);
                 install(cx, opened);
                 // 设置在开窗前生效：HTTP client、编辑器字号与界面语言都要在第一帧就是用户的值
                 settings::install(cx, loaded.settings.take());
@@ -251,10 +254,12 @@ fn reopen_main_window(cx: &mut App) {
     main.opening = true;
     // 与冷启动一样从磁盘恢复：关窗时草稿与布局已经落盘，重开的效果等同于退出后再启动
     cx.spawn(async move |cx| {
+        // 重开窗口沿用本次启动的目录，待启用目录只在整个进程重启时生效。
+        let root =
+            cx.update(|cx| state::data_directory::state(cx).and_then(|state| state.active.clone()));
         let loaded = cx
             .background_spawn(async move {
-                Store::default_root()
-                    .map(|root| load_all(&Layout::new(root)))
+                root.map(|root| load_all(&Layout::new(root)))
                     .unwrap_or_default()
             })
             .await;
@@ -267,14 +272,4 @@ fn reopen_main_window(cx: &mut App) {
         });
     })
     .detach();
-}
-
-/// 后台线程：定位数据目录 → 读取全部文件 → 打开写入器。
-/// 读取放在 `Store::open` 之前：目录不可写时也能恢复已有数据（只读模式）。
-fn open_store() -> (Result<Store, StoreError>, Loaded) {
-    let Some(root) = Store::default_root() else {
-        return (Err(StoreError::NoDataDir), Loaded::default());
-    };
-    let loaded = load_all(&Layout::new(root.clone()));
-    (Store::open(root), loaded)
 }

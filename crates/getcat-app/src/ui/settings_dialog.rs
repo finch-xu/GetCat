@@ -29,7 +29,6 @@ use crate::assets::logo_path;
 use crate::brand;
 use crate::i18n::tr;
 use crate::state::settings;
-use crate::state::store::store;
 use crate::state::update::{self, InstallKind};
 use crate::state::workspace::Workspace;
 use crate::ui::text::{language_label, theme_label, update_source_label};
@@ -114,7 +113,7 @@ pub fn open_settings_page(
     });
 }
 
-fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, cx: &App) -> Settings {
+fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, _cx: &App) -> Settings {
     // id 按初始页区分：选中页记在按 id 索引的窗口状态里，同一个 id 会复用上一次的选择
     let mut settings = Settings::new(SharedString::from(format!(
         "app-settings-{}",
@@ -132,7 +131,7 @@ fn render_settings(workspace: WeakEntity<Workspace>, page: SettingsPage, cx: &Ap
         settings = settings.page(match entry {
             SettingsPage::General => general_page(workspace.clone()),
             SettingsPage::Request => request_page(),
-            SettingsPage::Data => data_page(cx),
+            SettingsPage::Data => crate::ui::data_directory::page(),
             SettingsPage::Updates => updates_page(),
             SettingsPage::About => about_page(),
         });
@@ -310,65 +309,6 @@ fn request_page() -> SettingPage {
                 )
                 .description(tr!("settings.verify_tls_desc")),
             ),
-        )
-}
-
-fn data_page(cx: &App) -> SettingPage {
-    let root: Option<SharedString> = store(cx).map(|s| s.root().display().to_string().into());
-    let path_for_reveal = root.clone();
-    SettingPage::new(tr!("settings.data"))
-        .icon(IconName::HardDrive)
-        .group(
-            SettingGroup::new()
-                .title(tr!("settings.storage"))
-                .description(tr!("settings.storage_desc"))
-                .item(SettingItem::render(move |_, _, cx| {
-                    let mono = cx.theme().mono_font_family.clone();
-                    let muted = cx.theme().muted_foreground;
-                    h_flex()
-                        .w_full()
-                        .gap_3()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            v_flex()
-                                .min_w_0()
-                                .gap_0p5()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child(tr!("settings.data_dir")),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .font_family(mono)
-                                        .truncate()
-                                        .child(root.clone().unwrap_or_else(|| {
-                                            tr!("settings.data_dir_unavailable")
-                                        })),
-                                ),
-                        )
-                        .child({
-                            let path = path_for_reveal.clone();
-                            Button::new("reveal-data-dir")
-                                .outline()
-                                .small()
-                                .label(if cfg!(target_os = "macos") {
-                                    tr!("settings.reveal_finder")
-                                } else {
-                                    tr!("settings.reveal_folder")
-                                })
-                                .disabled(path.is_none())
-                                .on_click(move |_, _, cx| {
-                                    if let Some(p) = &path {
-                                        cx.reveal_path(std::path::Path::new(p.as_ref()));
-                                    }
-                                })
-                        })
-                })),
         )
 }
 

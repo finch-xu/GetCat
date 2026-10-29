@@ -32,6 +32,7 @@ enum Op {
 enum Msg {
     Op { path: PathBuf, op: Op },
     Flush(SyncSender<()>),
+    ReadSnapshot(Box<dyn FnOnce(bool) + Send>),
 }
 
 struct Pending {
@@ -108,6 +109,31 @@ impl StoreWriter {
         ack_rx.recv_timeout(timeout).is_ok()
     }
 
+    /// 在写入线程上读取一致快照：先落完前面的写入，回调结束前后续写入只排队。
+    /// 只能在后台调用；回调不能等待/调用同一写入器的 flush 或另一个快照。
+    pub fn read_snapshot<R: Send + 'static>(
+        &self,
+        read: impl FnOnce() -> R + Send + 'static,
+    ) -> Result<R, StoreError> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let work = Box::new(move |flushed| {
+            let result = if flushed {
+                catch_unwind(AssertUnwindSafe(read))
+                    .map_err(|_| StoreError::Io(std::io::Error::other("Snapshot task panicked")))
+            } else {
+                Err(StoreError::Io(std::io::Error::other(
+                    "Pending data writes failed",
+                )))
+            };
+            let _ = tx.send(result);
+        });
+        self.tx
+            .send(Msg::ReadSnapshot(work))
+            .map_err(|_| StoreError::Io(std::io::Error::other("Writer thread has exited")))?;
+        rx.recv()
+            .map_err(|_| StoreError::Io(std::io::Error::other("Snapshot task did not finish")))?
+    }
+
     /// 已执行的写入次数（含失败）；合并后的重复写入不计。
     pub fn write_count(&self) -> u64 {
         self.stats.writes.load(Ordering::Relaxed)
@@ -158,6 +184,10 @@ fn run(rx: Receiver<Msg>, delay: Duration, stats: Arc<Stats>) {
                 perform_all(&mut pending, &stats);
                 let _ = ack.send(());
             }
+            Some(Msg::ReadSnapshot(read)) => {
+                let flushed = perform_all(&mut pending, &stats);
+                read(flushed);
+            }
             None => {}
         }
         let now = Instant::now();
@@ -183,14 +213,16 @@ fn enqueue(pending: &mut Vec<Pending>, path: PathBuf, op: Op, delay: Duration) {
     }
 }
 
-fn perform_all(pending: &mut Vec<Pending>, stats: &Stats) {
+fn perform_all(pending: &mut Vec<Pending>, stats: &Stats) -> bool {
+    let mut success = true;
     for job in pending.drain(..) {
-        perform(job, stats);
+        success &= perform(job, stats);
     }
+    success
 }
 
 /// 执行一个任务；任何 panic 都被捕获并转为错误状态（spec §11）。
-fn perform(job: Pending, stats: &Stats) {
+fn perform(job: Pending, stats: &Stats) -> bool {
     let path = job.path.clone();
     let result = catch_unwind(AssertUnwindSafe(|| match job.op {
         Op::Write(encode) => {
@@ -207,14 +239,17 @@ fn perform(job: Pending, stats: &Stats) {
         Ok(Ok(())) => {
             debug!(path = %path.display(), "persisted");
             stats.clear_error();
+            true
         }
         Ok(Err(err)) => {
             warn!(path = %path.display(), "persistence failed: {err}");
             stats.set_error(format!("{}：{err}", path.display()));
+            false
         }
         Err(_) => {
             warn!(path = %path.display(), "persistence job panicked");
             stats.set_error(format!("{}: write task crashed", path.display()));
+            false
         }
     }
 }
@@ -326,5 +361,60 @@ mod tests {
         assert!(w.flush(Duration::from_secs(5)));
         assert!(w.last_error().is_some());
         assert_eq!(w.write_count(), 1);
+    }
+
+    #[test]
+    fn snapshot_flushes_old_writes_and_holds_new_writes_until_copy_finishes() {
+        let (dir, writer) = writer(Duration::from_secs(60));
+        let path = dir.path().join("workspace.json");
+        writer.write(path.clone(), || Ok(b"before".to_vec()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let snapshot_writer = writer.clone();
+        let snapshot_path = path.clone();
+        let task = thread::spawn(move || {
+            snapshot_writer.read_snapshot(move || {
+                let before = std::fs::read(&snapshot_path).unwrap();
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert_eq!(std::fs::read(&snapshot_path).unwrap(), b"before");
+                before
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        writer.write(path.clone(), || Ok(b"after".to_vec()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"before");
+        release_tx.send(()).unwrap();
+        assert_eq!(task.join().unwrap().unwrap(), b"before");
+        assert!(writer.flush(Duration::from_secs(5)));
+        assert_eq!(std::fs::read(path).unwrap(), b"after");
+    }
+
+    #[test]
+    fn snapshot_is_rejected_if_any_queued_write_fails() {
+        let (dir, writer) = writer(Duration::from_secs(60));
+        let bad_path = dir.path().join("directory");
+        std::fs::create_dir(&bad_path).unwrap();
+        writer.write(bad_path, || Ok(b"cannot replace directory".to_vec()));
+        writer.write(dir.path().join("valid.json"), || Ok(b"ok".to_vec()));
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let in_snapshot = called.clone();
+        assert!(
+            writer
+                .read_snapshot(move || in_snapshot.store(true, Ordering::Relaxed))
+                .is_err()
+        );
+        assert!(!called.load(Ordering::Relaxed));
+        assert_eq!(std::fs::read(dir.path().join("valid.json")).unwrap(), b"ok");
+    }
+
+    #[test]
+    fn snapshot_panic_does_not_kill_the_store_writer() {
+        let (dir, writer) = writer(Duration::ZERO);
+        assert!(writer.read_snapshot(|| panic!("failed snapshot")).is_err());
+        let path = dir.path().join("after.json");
+        writer.write(path.clone(), || Ok(b"saved".to_vec()));
+        assert!(writer.flush(Duration::from_secs(5)));
+        assert_eq!(std::fs::read(path).unwrap(), b"saved");
     }
 }

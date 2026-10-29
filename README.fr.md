@@ -137,6 +137,16 @@ Les paramètres couvrent la langue de l’interface (système / English / chinoi
 
 ### Dossier de données
 
+Dans **Paramètres → Données**, choisissez un dossier ou rétablissez le dossier par défaut. Les changements prennent effet **après redémarrage de GetCat**. Un dossier vide ouvre un nouvel espace de travail ; les données GetCat existantes du dossier choisi sont chargées au redémarrage. L’ancien dossier n’est ni déplacé ni supprimé automatiquement.
+
+Le tableau indique les **dossiers système par défaut**, toujours utilisés comme source de « Migrer depuis le dossier système par défaut ». Sélectionnez un autre dossier puis lancez la migration avant de redémarrer. Elle copie uniquement vers une destination sans données GetCat, conserve la source et ne remplace ni ne fusionne les données existantes.
+
+Un nouvel **exe portable Windows** utilise `GetCatData` à côté de l’exécutable. Les données existantes de ce dossier sont prioritaires ; sinon, si le dossier système contient des données anciennes, GetCat continue de les utiliser. Rétablir le dossier par défaut sélectionne `GetCatData` pour Windows portable, ou le dossier système ci-dessous pour Windows installé et les autres plateformes.
+
+Le choix du dossier est enregistré séparément : `getcat-storage.json` à côté de l’exe portable Windows, ou `storage-location.json` dans le dossier système pour les autres versions. L’emplacement portable par défaut est relatif pour permettre le déplacement du dossier complet ; les emplacements personnalisés sont absolus.
+
+La migration copie un instantané pris au début ; les modifications ultérieures restent dans le dossier actuel. Une destination de migration interrompue est refusée au démarrage : conservez ses fichiers et choisissez un autre dossier.
+
 | Plateforme | Dossier |
 |---|---|
 | macOS | `~/Library/Application Support/GetCat/` |

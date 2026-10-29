@@ -2238,6 +2238,114 @@ settings:
     zh-TW: 資料目錄
     ja: データディレクトリ
     fr: Dossier de données
+  choose_data_dir:
+    en: "Choose directory"
+    zh-CN: "选择目录"
+    zh-TW: "選擇目錄"
+    ja: "ディレクトリを選択"
+    fr: "Choisir un dossier"
+  reset_data_dir:
+    en: "Restore default directory"
+    zh-CN: "恢复默认目录"
+    zh-TW: "還原預設目錄"
+    ja: "既定のディレクトリに戻す"
+    fr: "Rétablir le dossier par défaut"
+  migrate_data_dir:
+    en: "Migrate from system default directory"
+    zh-CN: "从系统默认目录迁移数据"
+    zh-TW: "從系統預設目錄遷移資料"
+    ja: "システム既定の場所からデータを移行"
+    fr: "Migrer depuis le dossier système par défaut"
+  next_data_dir:
+    en: "Directory after restart"
+    zh-CN: "重启后使用的目录"
+    zh-TW: "重新啟動後使用的目錄"
+    ja: "再起動後のディレクトリ"
+    fr: "Dossier après redémarrage"
+  data_dir_restart:
+    en: "Changes take effect after restart. Existing data is not moved automatically."
+    zh-CN: "更改后重启生效，现有数据不会自动迁移。"
+    zh-TW: "變更後重新啟動生效，現有資料不會自動遷移。"
+    ja: "変更は再起動後に反映されます。既存データは自動移行されません。"
+    fr: "Les changements prennent effet au redémarrage. Les données existantes ne sont pas déplacées automatiquement."
+  data_dir_migration_desc:
+    en: "Copies a snapshot from the system default directory into a target without GetCat data. The source is kept; later edits stay in the current directory."
+    zh-CN: "从系统默认目录复制迁移开始时的数据，目标不能已有 GetCat 数据。来源保留，之后的修改仍保存在当前目录。"
+    zh-TW: "從系統預設目錄複製遷移開始時的資料，目標不能已有 GetCat 資料。來源保留，之後的修改仍儲存在目前目錄。"
+    ja: "システム既定の場所から移行開始時のデータをコピーします。既存データは上書きしません。その後の変更は現在の保存先に残ります。"
+    fr: "Copie un instantané du dossier système par défaut vers une destination sans données GetCat. La source est conservée ; les modifications ultérieures restent dans le dossier actuel."
+  system_data_dir:
+    en: "System default directory (migration source)"
+    zh-CN: "系统默认目录（迁移来源）"
+    zh-TW: "系統預設目錄（遷移來源）"
+    ja: "システム既定のディレクトリ（移行元）"
+    fr: "Dossier système par défaut (source de migration)"
+  data_dir_changed:
+    en: "Directory saved. Restart GetCat to use it."
+    zh-CN: "目录已保存，重启 GetCat 后生效。"
+    zh-TW: "目錄已儲存，重新啟動 GetCat 後生效。"
+    ja: "保存しました。GetCat を再起動すると反映されます。"
+    fr: "Dossier enregistré. Redémarrez GetCat pour l’utiliser."
+  data_dir_copied:
+    en: "Copied %{count} files. Restart GetCat to load them."
+    zh-CN: "已复制 %{count} 个文件，重启 GetCat 后加载。"
+    zh-TW: "已複製 %{count} 個檔案，重新啟動 GetCat 後載入。"
+    ja: "%{count} 個のファイルをコピーしました。GetCat を再起動してください。"
+    fr: "%{count} fichiers copiés. Redémarrez GetCat pour les charger."
+  data_dir_error:
+    en: "Could not change data storage: %{error}"
+    zh-CN: "数据存储操作失败：%{error}"
+    zh-TW: "資料儲存操作失敗：%{error}"
+    ja: "データ保存先の操作に失敗しました：%{error}"
+    fr: "Échec de l’opération de stockage : %{error}"
+  data_source_empty:
+    en: "The system default directory has no data to migrate."
+    zh-CN: "系统默认目录中没有可迁移的数据。"
+    zh-TW: "系統預設目錄中沒有可遷移的資料。"
+    ja: "システム既定の場所に移行できるデータがありません。"
+    fr: "Le dossier système par défaut ne contient aucune donnée à migrer."
+  data_target_not_empty:
+    en: "The target already contains GetCat data. Migration will not overwrite it."
+    zh-CN: "目标目录已有 GetCat 数据，不能通过迁移覆盖。"
+    zh-TW: "目標目錄已有 GetCat 資料，無法透過遷移覆寫。"
+    ja: "移行先に GetCat データがあるため、上書きできません。"
+    fr: "La destination contient déjà des données GetCat. La migration ne les écrasera pas."
+  data_same_dir:
+    en: "The target is the system default directory."
+    zh-CN: "目标目录就是系统默认目录，无需迁移。"
+    zh-TW: "目標目錄就是系統預設目錄，無需遷移。"
+    ja: "移行先はシステム既定のディレクトリと同じです。"
+    fr: "La destination est déjà le dossier système par défaut."
+  data_incomplete_migration:
+    en: "This directory contains an incomplete migration. Keep its files and choose another data directory."
+    zh-CN: "此目录存在未完成的迁移，请保留其中的文件并选择其他数据目录。"
+    zh-TW: "此目錄存在未完成的遷移，請保留其中的檔案並選擇其他資料目錄。"
+    ja: "このディレクトリには未完了の移行があります。ファイルを保持し、別のデータディレクトリを選択してください。"
+    fr: "Ce dossier contient une migration incomplète. Conservez ses fichiers et choisissez un autre dossier de données."
+  data_overlap:
+    en: "The source and target directories must not contain each other."
+    zh-CN: "来源目录与目标目录不能互相包含。"
+    zh-TW: "來源目錄與目標目錄不能互相包含。"
+    ja: "移行元と移行先を互いの内部に配置することはできません。"
+    fr: "Les dossiers source et destination ne doivent pas être imbriqués."
+  data_unsupported_file:
+    en: "This operation cannot use symbolic links or special files."
+    zh-CN: "此操作不支持符号链接或特殊文件。"
+    zh-TW: "此操作不支援符號連結或特殊檔案。"
+    ja: "この操作ではシンボリックリンクや特殊ファイルを使用できません。"
+    fr: "Cette opération ne prend pas en charge les liens symboliques ou fichiers spéciaux."
+  data_dir_busy:
+    en: "Updating data storage…"
+    zh-CN: "正在处理数据目录…"
+    zh-TW: "正在處理資料目錄…"
+    ja: "データ保存先を処理中…"
+    fr: "Mise à jour du stockage…"
+  data_dir_select_first:
+    en: "Select a different directory before migrating, so the current workspace cannot overwrite copied data."
+    zh-CN: "请先选择其他目录再迁移，避免当前工作区覆盖复制的数据。"
+    zh-TW: "請先選擇其他目錄再遷移，避免目前工作區覆寫複製的資料。"
+    ja: "現在のワークスペースによる上書きを防ぐため、移行前に別のディレクトリを選択してください。"
+    fr: "Choisissez un autre dossier avant la migration pour éviter que l’espace de travail actuel n’écrase les données copiées."
   data_dir_unavailable:
     en: (storage unavailable)
     zh-CN: （持久化不可用）

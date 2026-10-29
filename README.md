@@ -137,6 +137,16 @@ Settings cover the interface language (system / English / Simplified Chinese / T
 
 ### Data directory
 
+Use **Settings → Data** to choose a data directory or restore the default. Changes take effect **after restarting GetCat**. An empty directory starts a fresh workspace; existing GetCat data in a selected directory is loaded on restart. The previous directory is neither moved nor deleted automatically.
+
+The table lists the **system default directories**, which are always the source of “Migrate from system default directory”. Migration copies into a target without GetCat data, keeps the source, and never overwrites or merges existing data. Use it after selecting a different directory, before restarting.
+
+A new **Windows portable exe** uses `GetCatData` beside the executable. Existing sibling data takes priority; if there is none but the system directory contains older data, GetCat continues using that directory. Restoring the default selects the sibling `GetCatData` for portable Windows, or the system directory below for installed Windows and other platforms.
+
+The directory choice is stored separately: `getcat-storage.json` beside a portable Windows exe, or `storage-location.json` in the system default directory for other versions. The portable default uses a relative location so the whole folder can be moved; custom locations use absolute paths.
+
+Migration copies a snapshot taken at its start; later edits stay in the current directory. An interrupted migration target is rejected on startup: keep its files and choose another directory.
+
 | Platform | Directory |
 |---|---|
 | macOS | `~/Library/Application Support/GetCat/` |

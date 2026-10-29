@@ -20,8 +20,6 @@ pub const SETTINGS_FILE: &str = "settings.json";
 pub const VARIABLES_FILE: &str = "variables.json";
 pub const REQUESTS_DIR: &str = "requests";
 pub const DRAFTS_DIR: &str = "drafts";
-/// 可写性探测文件：创建后立即删除。
-const PROBE_FILE: &str = ".write-probe";
 
 /// 数据目录布局（spec §9.2）：`workspace.json`、`settings.json`、`variables.json`、`requests/<ulid>.json`、`drafts/<tab-id>.json`。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,9 +69,12 @@ impl Layout {
         for dir in [self.root.clone(), self.requests_dir(), self.drafts_dir()] {
             fs::create_dir_all(&dir).map_err(|e| self.unwritable(e))?;
         }
-        let probe = self.root.join(PROBE_FILE);
-        write_atomic(&probe, b"").map_err(|e| self.unwritable(e))?;
-        remove_if_exists(&probe).map_err(|e| self.unwritable(e))?;
+        // 独占创建随机临时文件；不能覆盖/删除用户目录里的固定同名文件。
+        let mut probe =
+            temp_file_in(&self.root, FilePerms::Private).map_err(|e| self.unwritable(e))?;
+        probe.write_all(b"probe").map_err(|e| self.unwritable(e))?;
+        probe.as_file().sync_all().map_err(|e| self.unwritable(e))?;
+        probe.close().map_err(|e| self.unwritable(e))?;
         Ok(())
     }
 

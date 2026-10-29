@@ -3,6 +3,7 @@
 
 pub mod codec;
 pub mod disk;
+pub mod location;
 pub mod writer;
 
 use std::{
@@ -102,6 +103,14 @@ impl Store {
 
     pub fn flush_within(&self, timeout: Duration) -> bool {
         self.writer.flush(timeout)
+    }
+
+    /// 先落盘，再在当前写入队列内读取快照，避免复制途中与同一工作区写入交错。
+    pub fn read_snapshot<R: Send + 'static>(
+        &self,
+        read: impl FnOnce() -> R + Send + 'static,
+    ) -> Result<R, StoreError> {
+        self.writer.read_snapshot(read)
     }
 
     /// 最近一次写入失败（供顶部横幅；O(1)）。
