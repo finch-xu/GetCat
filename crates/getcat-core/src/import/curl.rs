@@ -249,6 +249,7 @@ impl Collected {
                 path_params,
                 params,
                 headers: self.headers,
+                auth: Default::default(),
                 body,
                 pre_ops: Vec::new(),
                 post_ops: Vec::new(),
@@ -513,7 +514,7 @@ fn takes_value(flag: &str) -> bool {
 ///
 /// 自己写而不是引一个 crate：只用到编码方向的二十来行，为此多一个依赖、
 /// 多一条许可证审查不划算。
-fn base64(input: &[u8]) -> String {
+pub(crate) fn base64(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {

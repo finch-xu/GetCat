@@ -15,7 +15,7 @@ No Postman, Just GetCat!
 GPU-rendered · Light on resources · No account · Your data stays local · No Electron, No Tauri, No WebView
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.100%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![GPUI](https://img.shields.io/badge/UI-GPUI-8B5CF6?style=flat-square)](https://gpui.rs)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
@@ -178,7 +178,7 @@ crates/
 
 ### Building and debugging
 
-- Rust ≥ 1.97 (edition 2024). macOS needs no extra toolchain; Linux needs Vulkan plus the Wayland / X11 / fontconfig headers (the full list is in `.github/workflows/ci.yml`); Windows needs the MSVC toolchain, and Direct3D 11 ships with the Windows SDK.
+- Rust ≥ 1.100 (edition 2024). macOS needs no extra toolchain; Linux needs Vulkan plus the Wayland / X11 / fontconfig headers (the full list is in `.github/workflows/ci.yml`); Windows needs the MSVC toolchain, and Direct3D 11 ships with the Windows SDK.
 - App logo: `crates/getcat-app/assets/logo/getcat-art.svg` (full) and `getcat-art-mini.svg` (simplified, for ≤ 32 px) are the originals, and `scripts/gen-logo.py` composes them into outputs in a light and a dark color scheme — the embedded `getcat.png` and `getcat-mini.png` (light, each with a `-dark` counterpart; the app switches with its theme), the macOS icon source `resources/macos/getcat-1024.png`, and the Windows exe icon `resources/windows/getcat.ico`. After changing the logo, rerun the script by hand and commit the output (CI does not generate it; requires `pip install pillow numpy`, and `tools/svg-raster` rasterizes the SVGs).
 - The Windows exe icon and version info are embedded by `crates/getcat-app/build.rs`, and only when compiling natively on Windows (an exe cross-compiled from macOS has no icon). The installer is defined in `crates/getcat-app/resources/windows/GetCat.wxs` and needs WiX v6: `dotnet tool install --global wix --version 6.*`.
 

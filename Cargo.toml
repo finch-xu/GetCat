@@ -1,43 +1,41 @@
 [workspace]
 resolver = "3"
 members = ["crates/getcat-core", "crates/getcat-app", "crates/gpui-tokio"]
-# vendor 的第三方 crate 只作为依赖编译，不参与 --workspace 的 fmt / clippy / test（它有自己的 lint 与 doctest）
-exclude = ["vendor/gpui-updater"]
 
 [workspace.package]
 version = "1.0.1"
 edition = "2024"
 license = "Apache-2.0"
-rust-version = "1.97"
+rust-version = "1.100"
 
 [workspace.dependencies]
 getcat-core = { path = "crates/getcat-core" }
 
-# GPUI 生态：按 GPUI Kit 0.6 的官方形态，应用只依赖 gpui-kit 这一个包（crates.io）。
-# 它替我们锁定配套的 gpui（以 `gpui-pre` 系列发布的 zed 快照）、gpui-base、gpui-component 与默认图标。
+# GPUI 生态：应用只依赖 crates.io 的 gpui-kit 这一个包。
+# 它替我们锁定配套的 gpui（gpui-pre 系列）、gpui-base、gpui-component 与默认图标。
 # 代码里 `use gpui_kit::*` 就是 gpui，组件在 `gpui_kit::component`，平台层在 `gpui_kit::platform`，
 # 图标在 `gpui_kit::assets`。tree-sitter 语言与 inspector 等 feature 名与 gpui-component 一致。
-gpui-kit = { version = "0.7.3", features = ["tree-sitter", "tree-sitter-html", "tree-sitter-bash", "tree-sitter-python"] }
+gpui-kit = { version = "0.10.0", features = ["tree-sitter", "tree-sitter-html", "tree-sitter-bash", "tree-sitter-python"] }
 # tokio ⇄ gpui 桥接：Kit 没有对应的包（全线 smol），移植自 zed 的 gpui_tokio，见 crates/gpui-tokio
 gpui-tokio = { path = "crates/gpui-tokio" }
-# 应用内更新（GitHub Releases + SHA-256 + minisign）。上游的 gpui 走 zed git 源，与 gpui-pre 不是
-# 同一个 crate，所以 vendor 一份只改 Cargo.toml 那一行；来源与差异见 vendor/gpui-updater/VENDOR.md。
-gpui-updater = { path = "vendor/gpui-updater", features = ["gpui"] }
+# 应用内更新核心引擎（GitHub Releases + 静态 manifest + SHA-256 + minisign，零 UI 依赖）。
+# GPUI Entity<Updater> 适配层直接放在 crates/getcat-app/src/state/update.rs，不再 vendor 上游。
+gpui-updater-core = "0.4.4"
 
-reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "charset", "system-proxy", "stream", "gzip", "brotli", "zstd", "json", "multipart"] }
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "charset", "system-proxy", "stream", "gzip", "brotli", "zstd", "json", "multipart"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-url = "2.5.8"
-percent-encoding = "2.3"
-bytes = "1.12"
+serde_json = "1.0.154"
+url = "2.5.9"
+percent-encoding = "2.3.2"
+bytes = "1.12.2"
 futures = "0.3.34"
-memchr = "2.8"
-thiserror = "2.0"
+memchr = "2.8.3"
+thiserror = "2.0.21"
 # i18n：与 gpui-component 共用同一个 rust-i18n（set_locale 是跨 crate 的全局），sys-locale 读系统首选语言
-rust-i18n = "4.2"
-sys-locale = "0.3"
-anyhow = "1.0"
+rust-i18n = "4.2.4"
+sys-locale = "0.3.2"
+anyhow = "1.0.104"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
@@ -46,19 +44,15 @@ directories = "6.0.0"
 tempfile = "3.27.0"
 ulid = { version = "3.0.0", features = ["serde"] }
 # 动态变量 {{$randomUUID}}；v4 只依赖 getrandom（已在依赖树里）
-uuid = { version = "1.26", features = ["v4"] }
+uuid = { version = "1.29.3", features = ["v4"] }
 
 # TLS 证书体检：解析对端叶子证书（纯 Rust，无 C 依赖）；sha2 只用来算指纹
 x509-parser = "0.18.1"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 
 # dev
 wiremock = "0.6.5"
-flate2 = "1.1"
-
-[patch.crates-io]
-# arrayref 0.3.5–0.3.9 已在 crates.io 被 yank（tiny-skia -> resvg -> gpui-component 传递依赖）
-arrayref = { path = "vendor/arrayref" }
+flate2 = "1.1.11"
 
 [profile.dev]
 debug = "limited"

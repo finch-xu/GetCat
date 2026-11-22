@@ -508,6 +508,60 @@ pub struct PostOp {
     pub kind: PostOpKind,
 }
 
+/// API Key 注入位置：请求头或查询参数。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiKeyLocation {
+    #[default]
+    Header,
+    Query,
+}
+
+impl ApiKeyLocation {
+    pub const ALL: [ApiKeyLocation; 2] = [ApiKeyLocation::Header, ApiKeyLocation::Query];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|l| *l == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(ApiKeyLocation::Header)
+    }
+}
+
+/// 请求级鉴权配置：独立于手写 Headers，发送与代码生成时统一由 `http::prepare` 注入
+/// （且不覆盖用户在 Headers 里显式手写的同名头）。所有字符串字段都支持 `{{var}}` 替换。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuthConfig {
+    #[default]
+    None,
+    Bearer {
+        #[serde(default)]
+        token: String,
+    },
+    Basic {
+        #[serde(default)]
+        username: String,
+        #[serde(default)]
+        password: String,
+    },
+    ApiKey {
+        #[serde(default)]
+        key: String,
+        #[serde(default)]
+        value: String,
+        #[serde(default)]
+        location: ApiKeyLocation,
+    },
+}
+
+impl AuthConfig {
+    pub fn is_none(&self) -> bool {
+        matches!(self, AuthConfig::None)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RequestDraft {
     pub method: Method,
@@ -519,6 +573,9 @@ pub struct RequestDraft {
     pub params: Vec<KeyValue>,
     #[serde(default)]
     pub headers: Vec<KeyValue>,
+    /// 鉴权配置；缺省或为 None 时不写进 JSON，保持老版本文件兼容。
+    #[serde(default, skip_serializing_if = "AuthConfig::is_none")]
+    pub auth: AuthConfig,
     #[serde(default)]
     pub body: BodyKind,
     /// 前置操作（发送前依次执行）。
@@ -527,6 +584,40 @@ pub struct RequestDraft {
     /// 后置操作（响应完成后执行）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub post_ops: Vec<PostOp>,
+}
+
+/// 历史记录保留上限：超出后淘汰最旧的条目。
+pub const MAX_HISTORY_ENTRIES: usize = 200;
+
+/// 单条请求历史快照（`history.json`）。
+///
+/// 刻意保存发送前的原始 `draft`（含 `{{var}}` 占位符），绝不落盘展开后的敏感变量明文。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: Ulid,
+    /// 请求完成（或失败）时的 Unix 毫秒时间戳。
+    pub timestamp: i64,
+    /// 发送前的原始请求草稿（保留 `{{var}}` 模板）。
+    pub draft: RequestDraft,
+    /// HTTP 状态码；网络错误时为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    /// 本次请求总耗时（毫秒）。
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// 响应体大小（字节）；网络错误时为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_len: Option<u64>,
+    /// 失败原因摘要（仅网络或后台错误时有值）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 历史记录文件（`history.json`）的顶层对象：走版本化包装要求顶层是结构体而非裸数组。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct HistoryLog {
+    #[serde(default)]
+    pub entries: Vec<HistoryEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -948,6 +1039,9 @@ mod tests {
                 enabled: false,
                 ..KeyValue::new("X", "1")
             }],
+            auth: AuthConfig::Bearer {
+                token: "tok-123".into(),
+            },
             body: BodyKind::Raw {
                 format: RawFormat::Json,
                 text: "{}".into(),
@@ -958,6 +1052,12 @@ mod tests {
         let json = serde_json::to_string(&d).unwrap();
         let back: RequestDraft = serde_json::from_str(&json).unwrap();
         assert_eq!(back, d);
+
+        // 旧版草稿没有 auth 字段时默认是 AuthConfig::None，且 None 不序列化进 JSON
+        let legacy: RequestDraft =
+            serde_json::from_str(r#"{"method":"GET","url":"https://x"}"#).unwrap();
+        assert_eq!(legacy.auth, AuthConfig::None);
+        assert!(!serde_json::to_string(&legacy).unwrap().contains("\"auth\""));
     }
 
     #[test]

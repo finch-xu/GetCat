@@ -1,13 +1,14 @@
-//! 请求面板：Params / Headers / Body 三段。
+//! 请求面板：Params / Auth / Headers / Body / Ops 五段。
 
 use getcat_core::http::{DEFAULT_HEADERS, default_header_enabled};
-use getcat_core::model::RawFormat;
+use getcat_core::model::{ApiKeyLocation, RawFormat};
 use gpui_kit::component::{
-    ActiveTheme, Icon, Selectable, Sizable,
+    ActiveTheme, Icon, IconName, Selectable, Sizable,
+    alert::Alert,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     h_flex,
-    input::Editor,
+    input::{Editor, Input},
     tab::{Tab, TabBar},
     tag::Tag,
     v_flex,
@@ -17,7 +18,7 @@ use gpui_kit::*;
 
 use crate::assets::ICON_WRAP_TEXT;
 use crate::i18n::tr;
-use crate::state::request_tab::{BodyMode, RequestSection, RequestTab};
+use crate::state::request_tab::{AuthMode, BodyMode, RequestSection, RequestTab};
 use crate::state::settings;
 use crate::ui::format_bytes;
 use crate::ui::kv_table::{DEFAULT_COLUMN_FRACTIONS, TABLE_SIZE};
@@ -70,6 +71,10 @@ impl RequestTab {
                         cx.notify();
                     }))
                     .child(Tab::new().label(label("Params", params_count)))
+                    .child(Tab::new().label(label(
+                        &tr!("request.section_auth"),
+                        usize::from(self.auth_mode != AuthMode::None),
+                    )))
                     .child(Tab::new().label(label("Headers", headers_count)))
                     .child(
                         Tab::new()
@@ -98,6 +103,7 @@ impl RequestTab {
                             .child(section_label(tr!("request.query_params"), cx))
                             .child(self.params.clone())
                             .into_any_element(),
+                        RequestSection::Auth => self.render_auth_section(cx),
                         RequestSection::Headers => v_flex()
                             .gap_3()
                             .child(self.render_default_headers(cx))
@@ -113,6 +119,155 @@ impl RequestTab {
                             .into_any_element(),
                     }),
             )
+    }
+
+    /// 鉴权面板：None / Bearer Token / Basic Auth / API Key（支持 Header 或 Query）。
+    /// 所有字段都支持 `{{var}}`，敏感字段默认掩码并可一键切换明文。
+    fn render_auth_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mode = self.auth_mode;
+        let reveal = self.auth_reveal_secret;
+        let overridden = self.auth_overridden_header(cx);
+        let secret_toggle = |id: &'static str, cx: &mut Context<Self>| {
+            let label = if reveal {
+                tr!("request.auth_hide_secret")
+            } else {
+                tr!("request.auth_show_secret")
+            };
+            Button::new(id)
+                .ghost()
+                .xsmall()
+                .icon(if reveal {
+                    IconName::EyeOff
+                } else {
+                    IconName::Eye
+                })
+                .accessibility_label(label.clone())
+                .tooltip(label)
+                .on_click(cx.listener(|this, _, window, cx| this.toggle_auth_secret(window, cx)))
+        };
+
+        v_flex()
+            .gap_3()
+            .child(
+                h_flex().child(
+                    TabBar::new("auth-mode")
+                        .segmented()
+                        .small()
+                        .selected_index(mode.index())
+                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                            let next = AuthMode::from_index(*ix);
+                            if this.auth_mode != next {
+                                this.auth_mode = next;
+                                this.mark_dirty(cx);
+                            }
+                        }))
+                        .child(tr!("request.auth_none"))
+                        .child(tr!("request.auth_bearer"))
+                        .child(tr!("request.auth_basic"))
+                        .child(tr!("request.auth_api_key")),
+                ),
+            )
+            .when_some(overridden, |v, header| {
+                v.child(
+                    Alert::warning(
+                        "auth-overridden",
+                        tr!("request.auth_overridden_hint", header = header),
+                    )
+                    .xsmall(),
+                )
+            })
+            .child(match mode {
+                AuthMode::None => div()
+                    .py_2()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr!("request.auth_none_desc"))
+                    .into_any_element(),
+                AuthMode::Bearer => v_flex()
+                    .gap_2()
+                    .max_w(px(560.))
+                    .child(section_label(tr!("request.auth_token_label"), cx))
+                    .child(
+                        Input::new(&self.auth_bearer)
+                            .small()
+                            .aria_label(tr!("request.auth_token_label"))
+                            .suffix(secret_toggle("auth-reveal-bearer", cx)),
+                    )
+                    .into_any_element(),
+                AuthMode::Basic => v_flex()
+                    .gap_3()
+                    .max_w(px(560.))
+                    .child(
+                        v_flex()
+                            .gap_1p5()
+                            .child(section_label(tr!("request.auth_username_label"), cx))
+                            .child(
+                                Input::new(&self.auth_username)
+                                    .small()
+                                    .aria_label(tr!("request.auth_username_label")),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1p5()
+                            .child(section_label(tr!("request.auth_password_label"), cx))
+                            .child(
+                                Input::new(&self.auth_password)
+                                    .small()
+                                    .aria_label(tr!("request.auth_password_label"))
+                                    .suffix(secret_toggle("auth-reveal-password", cx)),
+                            ),
+                    )
+                    .into_any_element(),
+                AuthMode::ApiKey => v_flex()
+                    .gap_3()
+                    .max_w(px(560.))
+                    .child(
+                        v_flex()
+                            .gap_1p5()
+                            .child(section_label(tr!("request.auth_key_label"), cx))
+                            .child(
+                                Input::new(&self.auth_apikey_key)
+                                    .small()
+                                    .aria_label(tr!("request.auth_key_label")),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1p5()
+                            .child(section_label(tr!("request.auth_value_label"), cx))
+                            .child(
+                                Input::new(&self.auth_apikey_value)
+                                    .small()
+                                    .aria_label(tr!("request.auth_value_label"))
+                                    .suffix(secret_toggle("auth-reveal-apikey", cx)),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1p5()
+                            .child(section_label(tr!("request.auth_add_to_label"), cx))
+                            .child(
+                                h_flex().child(
+                                    TabBar::new("auth-apikey-location")
+                                        .segmented()
+                                        .small()
+                                        .selected_index(self.auth_apikey_location.index())
+                                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                                            let next = ApiKeyLocation::from_index(*ix);
+                                            if this.auth_apikey_location != next {
+                                                this.auth_apikey_location = next;
+                                                this.mark_dirty(cx);
+                                            }
+                                        }))
+                                        .child(tr!("request.auth_location_header"))
+                                        .child(tr!("request.auth_location_query")),
+                                ),
+                            ),
+                    )
+                    .into_any_element(),
+            })
+            .into_any_element()
     }
 
     /// 「默认参数（Header）」：每次请求都自动带上的那几个头。

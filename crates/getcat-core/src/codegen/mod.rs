@@ -171,6 +171,7 @@ mod tests {
             path_params: vec![KeyValue::new("id", "42")],
             params: vec![KeyValue::new("page", "2")],
             headers: vec![KeyValue::new("Authorization", "Bearer sk-test")],
+            auth: Default::default(),
             body: BodyKind::Raw {
                 format: RawFormat::Json,
                 text: "{\n  \"name\": \"cat\"\n}".into(),
@@ -558,5 +559,30 @@ mod tests {
         assert!(args.contains(&r"X-Dir: C:\logs\".to_string()), "{args:#?}");
         // 反斜杠没吞掉引号：后面的默认头仍是独立参数
         assert!(args.contains(&"Accept: */*".to_string()), "{args:#?}");
+    }
+
+    #[test]
+    fn codegen_includes_auth_header_and_query_key() {
+        let draft = RequestDraft {
+            url: "https://api.example.com/v1/me".into(),
+            auth: crate::model::AuthConfig::Bearer {
+                token: "tok-xyz".into(),
+            },
+            ..Default::default()
+        };
+        let curl = generate(&draft, &[], CodeTarget::Curl).unwrap();
+        assert!(curl.contains("Authorization: Bearer tok-xyz"), "{curl}");
+
+        let query_draft = RequestDraft {
+            url: "https://api.example.com/v1/me".into(),
+            auth: crate::model::AuthConfig::ApiKey {
+                key: "api_key".into(),
+                value: "secret-k".into(),
+                location: crate::model::ApiKeyLocation::Query,
+            },
+            ..Default::default()
+        };
+        let py = generate(&query_draft, &[], CodeTarget::PythonRequests).unwrap();
+        assert!(py.contains("api_key=secret-k"), "{py}");
     }
 }

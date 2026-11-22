@@ -73,4 +73,4 @@ version = 2
 
 [sources]
 unknown-registry = "deny"
-unknown-git = "deny"    # 依赖图里已没有 git 源（gpui-updater 已 vendor）
+unknown-git = "deny"    # 依赖图里已没有 git 源（更新器已切到 crates.io 的 gpui-updater-core）

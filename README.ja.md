@@ -15,7 +15,7 @@ No Postman, Just GetCat!
 GPU レンダリング · 低リソース · アカウント不要 · データは完全ローカル · No Electron, No Tauri, No WebView
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.100%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![GPUI](https://img.shields.io/badge/UI-GPUI-8B5CF6?style=flat-square)](https://gpui.rs)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
@@ -178,7 +178,7 @@ crates/
 
 ### ビルドとデバッグ
 
-- Rust ≥ 1.97（edition 2024）。macOS では追加のツールチェーンは不要です。Linux では Vulkan と Wayland / X11 / fontconfig のヘッダーが必要です（一覧は `.github/workflows/ci.yml`）。Windows では MSVC ツールチェーンが必要で、Direct3D 11 は Windows SDK に含まれています。
+- Rust ≥ 1.100（edition 2024）。macOS では追加のツールチェーンは不要です。Linux では Vulkan と Wayland / X11 / fontconfig のヘッダーが必要です（一覧は `.github/workflows/ci.yml`）。Windows では MSVC ツールチェーンが必要で、Direct3D 11 は Windows SDK に含まれています。
 - アプリのロゴ：`crates/getcat-app/assets/logo/getcat-art.svg`（完全版）と `getcat-art-mini.svg`（32 px 以下用の簡略版）が元画像で、`scripts/gen-logo.py` がそこからライト / ダーク 2 種類の配色で成果物 —— アプリに埋め込む `getcat.png` と `getcat-mini.png`（ライト版。それぞれ `-dark` のダーク版があり、アプリはテーマに合わせて切り替えます）、macOS のアイコン元画像 `resources/macos/getcat-1024.png`、Windows の exe アイコン `resources/windows/getcat.ico` —— を生成します。ロゴを変更したら手動でスクリプトを再実行し、成果物をコミットしてください（CI では生成しません。`pip install pillow numpy` が必要で、SVG のラスタライズは `tools/svg-raster` が行います）。
 - Windows の exe アイコンとバージョン情報は `crates/getcat-app/build.rs` が埋め込みますが、有効なのは Windows 上でネイティブにコンパイルしたときだけです（macOS からクロスコンパイルした exe にアイコンは付きません）。インストーラーは `crates/getcat-app/resources/windows/GetCat.wxs` で定義されており、WiX v6 が必要です：`dotnet tool install --global wix --version 6.*`。
 

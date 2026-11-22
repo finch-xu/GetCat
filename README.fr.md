@@ -15,7 +15,7 @@ No Postman, Just GetCat!
 Rendu GPU · Léger en ressources · Sans compte · Vos données restent en local · No Electron, No Tauri, No WebView
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.100%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![GPUI](https://img.shields.io/badge/UI-GPUI-8B5CF6?style=flat-square)](https://gpui.rs)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
@@ -178,7 +178,7 @@ crates/
 
 ### Compilation et débogage
 
-- Rust ≥ 1.97 (édition 2024). macOS ne demande aucune chaîne d’outils supplémentaire ; Linux a besoin de Vulkan et des en-têtes Wayland / X11 / fontconfig (la liste complète est dans `.github/workflows/ci.yml`) ; Windows a besoin de la chaîne d’outils MSVC, et Direct3D 11 est fourni avec le Windows SDK.
+- Rust ≥ 1.100 (édition 2024). macOS ne demande aucune chaîne d’outils supplémentaire ; Linux a besoin de Vulkan et des en-têtes Wayland / X11 / fontconfig (la liste complète est dans `.github/workflows/ci.yml`) ; Windows a besoin de la chaîne d’outils MSVC, et Direct3D 11 est fourni avec le Windows SDK.
 - Logo de l’application : `crates/getcat-app/assets/logo/getcat-art.svg` (complet) et `getcat-art-mini.svg` (simplifié, pour ≤ 32 px) sont les originaux, et `scripts/gen-logo.py` les compose en sorties dans une palette claire et une palette sombre — les `getcat.png` et `getcat-mini.png` intégrés (clairs, chacun avec une variante `-dark` ; l’application suit son thème), la source de l’icône macOS `resources/macos/getcat-1024.png` et l’icône de l’exe Windows `resources/windows/getcat.ico`. Après avoir modifié le logo, relancez le script à la main et commitez les sorties (la CI ne les génère pas ; nécessite `pip install pillow numpy`, et `tools/svg-raster` rastérise les SVG).
 - L’icône et les informations de version de l’exe Windows sont intégrées par `crates/getcat-app/build.rs`, uniquement lors d’une compilation native sous Windows (un exe compilé de manière croisée depuis macOS n’a pas d’icône). L’installeur est défini dans `crates/getcat-app/resources/windows/GetCat.wxs` et nécessite WiX v6 : `dotnet tool install --global wix --version 6.*`.
 

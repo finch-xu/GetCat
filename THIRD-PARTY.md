@@ -10,13 +10,13 @@ Linux、Windows 三个平台的依赖并集，已排除仅测试期使用的 dev
 > 依赖变化后请重新生成本文件：`python3 scripts/gen-third-party.py`
 
 
-共 **890** 个第三方依赖，分属 **32** 种许可证声明。
+共 **915** 个第三方依赖，分属 **33** 种许可证声明。
 
 ## 依赖清单
 
 ### Apache-2.0 OR MIT
 
-_527 个依赖_
+_537 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
@@ -26,17 +26,18 @@ _527 个依赖_
 | `accesskit_macos` | 0.26.3 | [github.com/AccessKit/accesskit](https://github.com/AccessKit/accesskit) |  |
 | `accesskit_unix` | 0.22.1 | [github.com/AccessKit/accesskit](https://github.com/AccessKit/accesskit) |  |
 | `accesskit_windows` | 0.34.0 | [github.com/AccessKit/accesskit](https://github.com/AccessKit/accesskit) |  |
-| `addr2line` | 0.25.1 | [github.com/gimli-rs/addr2line](https://github.com/gimli-rs/addr2line) |  |
+| `addr2line` | 0.27.1 | [github.com/gimli-rs/addr2line](https://github.com/gimli-rs/addr2line) |  |
 | `aes` | 0.8.4 | [github.com/RustCrypto/block-ciphers](https://github.com/RustCrypto/block-ciphers) |  |
 | `ahash` | 0.8.12 | [github.com/tkaitchuck/ahash](https://github.com/tkaitchuck/ahash) |  |
 | `aligned` | 0.4.3 | [github.com/rust-embedded-community/aligned](https://github.com/rust-embedded-community/aligned) |  |
 | `allocator-api2` | 0.2.21 | [github.com/zakarumych/allocator-api2](https://github.com/zakarumych/allocator-api2) |  |
 | `android_system_properties` | 0.1.6 | [github.com/nical/android_system_properties](https://github.com/nical/android_system_properties) |  |
-| `annotate-snippets` | 0.12.16 | [github.com/rust-lang/annotate-snippets-rs](https://github.com/rust-lang/annotate-snippets-rs) |  |
+| `anes` | 0.1.6 | [github.com/zrzka/anes-rs](https://github.com/zrzka/anes-rs) |  |
+| `annotate-snippets` | 0.12.18 | [github.com/rust-lang/annotate-snippets-rs](https://github.com/rust-lang/annotate-snippets-rs) |  |
 | `anstyle` | 1.0.14 | [github.com/rust-cli/anstyle.git](https://github.com/rust-cli/anstyle.git) |  |
 | `anyhow` | 1.0.104 | [github.com/dtolnay/anyhow](https://github.com/dtolnay/anyhow) |  |
 | `arbitrary` | 1.5.0 | [github.com/rust-fuzz/arbitrary/](https://github.com/rust-fuzz/arbitrary/) |  |
-| `arc-swap` | 1.9.3 | [github.com/vorner/arc-swap](https://github.com/vorner/arc-swap) |  |
+| `arc-swap` | 1.9.5 | [github.com/vorner/arc-swap](https://github.com/vorner/arc-swap) |  |
 | `arraydeque` | 0.5.1 | [github.com/andylokandy/arraydeque](https://github.com/andylokandy/arraydeque) |  |
 | `arrayvec` | 0.7.8 | [github.com/bluss/arrayvec](https://github.com/bluss/arrayvec) |  |
 | `as-raw-xcb-connection` | 1.0.1 | [github.com/psychon/as-raw-xcb-connection](https://github.com/psychon/as-raw-xcb-connection) |  |
@@ -47,11 +48,11 @@ _527 个依赖_
 | `asn1-rs-impl` | 0.2.0 | [github.com/rusticata/asn1-rs.git](https://github.com/rusticata/asn1-rs.git) |  |
 | `async-broadcast` | 0.7.2 | [github.com/smol-rs/async-broadcast](https://github.com/smol-rs/async-broadcast) |  |
 | `async-channel` | 2.5.0 | [github.com/smol-rs/async-channel](https://github.com/smol-rs/async-channel) |  |
-| `async-compression` | 0.4.51 | [github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |  |
-| `async-executor` | 1.14.0 | [github.com/smol-rs/async-executor](https://github.com/smol-rs/async-executor) |  |
+| `async-compression` | 0.4.52 | [github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |  |
+| `async-executor` | 1.14.1 | [github.com/smol-rs/async-executor](https://github.com/smol-rs/async-executor) |  |
 | `async-fs` | 2.2.0 | [github.com/smol-rs/async-fs](https://github.com/smol-rs/async-fs) |  |
 | `async-io` | 2.6.0 | [github.com/smol-rs/async-io](https://github.com/smol-rs/async-io) |  |
-| `async-lock` | 3.4.2 | [github.com/smol-rs/async-lock](https://github.com/smol-rs/async-lock) |  |
+| `async-lock` | 3.5.0 | [github.com/smol-rs/async-lock](https://github.com/smol-rs/async-lock) |  |
 | `async-net` | 2.0.0 | [github.com/smol-rs/async-net](https://github.com/smol-rs/async-net) |  |
 | `async-process` | 2.5.0 | [github.com/smol-rs/async-process](https://github.com/smol-rs/async-process) |  |
 | `async-recursion` | 1.2.0 | [github.com/dcchut/async-recursion](https://github.com/dcchut/async-recursion) |  |
@@ -64,14 +65,14 @@ _527 个依赖_
 | `atspi-common` | 0.13.0 | [github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |  |
 | `atspi-proxies` | 0.13.0 | [github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |  |
 | `autocfg` | 1.5.1 | [github.com/cuviper/autocfg](https://github.com/cuviper/autocfg) |  |
-| `backtrace` | 0.3.76 | [github.com/rust-lang/backtrace-rs](https://github.com/rust-lang/backtrace-rs) |  |
+| `backtrace` | 0.3.77 | [github.com/rust-lang/backtrace-rs](https://github.com/rust-lang/backtrace-rs) |  |
 | `base64` | 0.22.1 | [github.com/marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) |  |
 | `base64` | 0.23.1 | [github.com/marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) |  |
-| `bit-set` | 0.9.1 | [github.com/contain-rs/bit-set](https://github.com/contain-rs/bit-set) |  |
+| `bit-set` | 0.10.0 | [github.com/contain-rs/bit-set](https://github.com/contain-rs/bit-set) |  |
 | `bit-set` | 0.11.1 | [github.com/contain-rs/bit-vec](https://github.com/contain-rs/bit-vec) |  |
 | `bit-vec` | 0.9.1 | [github.com/contain-rs/bit-vec](https://github.com/contain-rs/bit-vec) |  |
-| `bit-vec` | 0.10.1 | [github.com/contain-rs/bit-vec](https://github.com/contain-rs/bit-vec) |  |
-| `bit_field` | 0.10.3 | [github.com/phil-opp/rust-bit-field](https://github.com/phil-opp/rust-bit-field) |  |
+| `bit-vec` | 0.10.2 | [github.com/contain-rs/bit-vec](https://github.com/contain-rs/bit-vec) |  |
+| `bit_field` | 0.10.4 | [github.com/phil-opp/rust-bit-field](https://github.com/phil-opp/rust-bit-field) |  |
 | `bitflags` | 1.3.2 | [github.com/bitflags/bitflags](https://github.com/bitflags/bitflags) |  |
 | `bitflags` | 2.13.2 | [github.com/bitflags/bitflags](https://github.com/bitflags/bitflags) |  |
 | `bitstream-io` | 4.10.0 | [github.com/tuffy/bitstream-io](https://github.com/tuffy/bitstream-io) |  |
@@ -80,24 +81,27 @@ _527 个依赖_
 | `block-padding` | 0.3.3 | [github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |  |
 | `blocking` | 1.7.0 | [github.com/smol-rs/blocking](https://github.com/smol-rs/blocking) |  |
 | `borsh` | 1.8.1 | [github.com/near/borsh-rs](https://github.com/near/borsh-rs) |  |
-| `bstr` | 1.13.1 | [github.com/BurntSushi/bstr](https://github.com/BurntSushi/bstr) |  |
-| `bumpalo` | 3.20.3 | [github.com/fitzgen/bumpalo](https://github.com/fitzgen/bumpalo) |  |
+| `bstr` | 1.14.0 | [github.com/BurntSushi/bstr](https://github.com/BurntSushi/bstr) |  |
+| `bumpalo` | 3.20.4 | [github.com/fitzgen/bumpalo](https://github.com/fitzgen/bumpalo) |  |
+| `c-enum` | 0.2.3 | [github.com/Phantomical/c-enum.git](https://github.com/Phantomical/c-enum.git) |  |
+| `cast` | 0.3.0 | [github.com/japaric/cast.rs](https://github.com/japaric/cast.rs) |  |
 | `cbc` | 0.1.2 | [github.com/RustCrypto/block-modes](https://github.com/RustCrypto/block-modes) |  |
-| `cc` | 1.9.0 | [github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |  |
+| `cc` | 1.11.3 | [github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |  |
 | `cfg-if` | 1.0.5 | [github.com/rust-lang/cfg-if](https://github.com/rust-lang/cfg-if) |  |
 | `chacha20` | 0.10.2 | [github.com/RustCrypto/stream-ciphers](https://github.com/RustCrypto/stream-ciphers) |  |
 | `chrono` | 0.4.45 | [github.com/chronotope/chrono](https://github.com/chronotope/chrono) |  |
 | `cipher` | 0.4.4 | [github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |  |
+| `clap` | 4.6.9 | [github.com/clap-rs/clap](https://github.com/clap-rs/clap) |  |
+| `clap_builder` | 4.6.7 | [github.com/clap-rs/clap](https://github.com/clap-rs/clap) |  |
+| `clap_lex` | 1.1.2 | [github.com/clap-rs/clap](https://github.com/clap-rs/clap) |  |
 | `cmake` | 0.1.58 | [github.com/rust-lang/cmake-rs](https://github.com/rust-lang/cmake-rs) |  |
 | `cocoa` | 0.25.0 | [github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |  |
-| `cocoa` | 0.26.0 | [github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |  |
 | `cocoa-foundation` | 0.1.2 | [github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |  |
-| `cocoa-foundation` | 0.2.1 | [github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |  |
-| `compression-codecs` | 0.4.46 | [github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |  |
+| `compression-codecs` | 0.4.48 | [github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |  |
 | `compression-core` | 0.4.34 | [github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |  |
 | `concurrent-queue` | 2.5.0 | [github.com/smol-rs/concurrent-queue](https://github.com/smol-rs/concurrent-queue) |  |
 | `console_error_panic_hook` | 0.1.7 | [github.com/rustwasm/console_error_panic_hook](https://github.com/rustwasm/console_error_panic_hook) |  |
-| `const-oid` | 0.10.2 | [github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |  |
+| `const-oid` | 0.10.3 | [github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |  |
 | `const-random` | 0.1.18 | [github.com/tkaitchuck/constrandom](https://github.com/tkaitchuck/constrandom) |  |
 | `const-random-macro` | 0.1.16 | [github.com/tkaitchuck/constrandom](https://github.com/tkaitchuck/constrandom) |  |
 | `cookie` | 0.18.2 | [github.com/SergioBenitez/cookie-rs](https://github.com/SergioBenitez/cookie-rs) |  |
@@ -115,14 +119,16 @@ _527 个依赖_
 | `cosmic-text` | 0.19.0 | [github.com/pop-os/cosmic-text](https://github.com/pop-os/cosmic-text) |  |
 | `cpufeatures` | 0.2.17 | [github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |  |
 | `cpufeatures` | 0.3.1 | [github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |  |
-| `crc32fast` | 1.5.2 | [github.com/srijs/rust-crc32fast](https://github.com/srijs/rust-crc32fast) |  |
+| `crc32fast` | 1.5.5 | [github.com/srijs/rust-crc32fast](https://github.com/srijs/rust-crc32fast) |  |
+| `criterion` | 0.8.2 | [github.com/criterion-rs/criterion.rs](https://github.com/criterion-rs/criterion.rs) |  |
+| `criterion-plot` | 0.8.2 | [github.com/criterion-rs/criterion.rs](https://github.com/criterion-rs/criterion.rs) |  |
 | `crossbeam-deque` | 0.8.8 | [github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |  |
 | `crossbeam-epoch` | 0.9.21 | [github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |  |
 | `crossbeam-queue` | 0.3.14 | [github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |  |
 | `crossbeam-utils` | 0.8.23 | [github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |  |
 | `crypto-common` | 0.1.7 | [github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |  |
 | `crypto-common` | 0.2.2 | [github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |  |
-| `ctor` | 1.0.13 | [github.com/mmastrac/linktime](https://github.com/mmastrac/linktime) |  |
+| `ctor` | 1.0.14 | [github.com/mmastrac/linktime](https://github.com/mmastrac/linktime) |  |
 | `data-url` | 0.3.2 | [github.com/servo/rust-url](https://github.com/servo/rust-url) |  |
 | `der-parser` | 10.0.0 | [github.com/rusticata/der-parser.git](https://github.com/rusticata/der-parser.git) |  |
 | `deranged` | 0.5.9 | [github.com/jhpratt/deranged](https://github.com/jhpratt/deranged) |  |
@@ -143,7 +149,7 @@ _527 个依赖_
 | `enumflags2_derive` | 0.7.12 | [github.com/meithecatte/enumflags2](https://github.com/meithecatte/enumflags2) |  |
 | `enumn` | 0.1.14 | [github.com/dtolnay/enumn](https://github.com/dtolnay/enumn) |  |
 | `equivalent` | 1.0.3 | [github.com/indexmap-rs/equivalent](https://github.com/indexmap-rs/equivalent) |  |
-| `errno` | 0.3.14 | [github.com/lambda-fairy/rust-errno](https://github.com/lambda-fairy/rust-errno) |  |
+| `errno` | 0.3.15 | [github.com/lambda-fairy/rust-errno](https://github.com/lambda-fairy/rust-errno) |  |
 | `etagere` | 0.2.15 | [github.com/nical/etagere](https://github.com/nical/etagere) |  |
 | `euclid` | 0.22.14 | [github.com/servo/euclid](https://github.com/servo/euclid) |  |
 | `event-listener` | 5.4.2 | [github.com/smol-rs/event-listener](https://github.com/smol-rs/event-listener) |  |
@@ -151,8 +157,8 @@ _527 个依赖_
 | `fastrand` | 2.5.0 | [github.com/smol-rs/fastrand](https://github.com/smol-rs/fastrand) |  |
 | `fdeflate` | 0.3.7 | [github.com/image-rs/fdeflate](https://github.com/image-rs/fdeflate) |  |
 | `find-msvc-tools` | 0.1.15 | [github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |  |
-| `fixedbitset` | 0.5.7 | [github.com/petgraph/fixedbitset](https://github.com/petgraph/fixedbitset) |  |
-| `flate2` | 1.1.10 | [github.com/rust-lang/flate2-rs](https://github.com/rust-lang/flate2-rs) |  |
+| `fixedbitset` | 0.5.9 | [github.com/petgraph/fixedbitset](https://github.com/petgraph/fixedbitset) |  |
+| `flate2` | 1.1.11 | [github.com/rust-lang/flate2-rs](https://github.com/rust-lang/flate2-rs) |  |
 | `float-ord` | 0.3.2 | [github.com/notriddle/rust-float-ord](https://github.com/notriddle/rust-float-ord) |  |
 | `flume` | 0.12.0 | [github.com/zesterer/flume](https://github.com/zesterer/flume) |  |
 | `fnv` | 1.0.7 | [github.com/servo/rust-fnv](https://github.com/servo/rust-fnv) |  |
@@ -161,7 +167,7 @@ _527 个依赖_
 | `foreign-types` | 0.5.0 | [github.com/sfackler/foreign-types](https://github.com/sfackler/foreign-types) |  |
 | `foreign-types-macros` | 0.2.4 | [github.com/sfackler/foreign-types](https://github.com/sfackler/foreign-types) |  |
 | `foreign-types-shared` | 0.3.1 | [github.com/sfackler/foreign-types](https://github.com/sfackler/foreign-types) |  |
-| `form_urlencoded` | 1.2.2 | [github.com/servo/rust-url](https://github.com/servo/rust-url) |  |
+| `form_urlencoded` | 1.2.3 | [github.com/servo/rust-url](https://github.com/servo/rust-url) |  |
 | `futf` | 0.1.5 | [github.com/servo/futf](https://github.com/servo/futf) |  |
 | `futures` | 0.3.34 | [github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |  |
 | `futures-channel` | 0.3.34 | [github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |  |
@@ -179,21 +185,18 @@ _527 个依赖_
 | `getrandom` | 0.4.3 | [github.com/rust-random/getrandom](https://github.com/rust-random/getrandom) |  |
 | `gif` | 0.13.3 | [github.com/image-rs/image-gif](https://github.com/image-rs/image-gif) |  |
 | `gif` | 0.14.2 | [github.com/image-rs/image-gif](https://github.com/image-rs/image-gif) |  |
-| `gimli` | 0.32.3 | [github.com/gimli-rs/gimli](https://github.com/gimli-rs/gimli) |  |
+| `gimli` | 0.34.0 | [github.com/gimli-rs/gimli](https://github.com/gimli-rs/gimli) |  |
 | `glob` | 0.3.4 | [github.com/rust-lang/glob](https://github.com/rust-lang/glob) |  |
 | `gpu-allocator` | 0.28.0 | [github.com/Traverse-Research/gpu-allocator](https://github.com/Traverse-Research/gpu-allocator) |  |
-| `gpu-descriptor` | 0.3.2 | [github.com/zakarumych/gpu-descriptor](https://github.com/zakarumych/gpu-descriptor) |  |
-| `gpu-descriptor-types` | 0.2.0 | [github.com/zakarumych/gpu-descriptor](https://github.com/zakarumych/gpu-descriptor) |  |
 | `gpui-pre-reqwest` | 0.12.15 | [github.com/seanmonstar/reqwest](https://github.com/seanmonstar/reqwest) |  |
-| `gpui-updater` | 0.0.7 | [github.com/AprilNEA/gpui-updater](https://github.com/AprilNEA/gpui-updater) |  |
+| `gpui-updater-core` | 0.4.4 | [github.com/AprilNEA/gpui-updater](https://github.com/AprilNEA/gpui-updater) |  |
 | `granit-parser` | 1.3.0 | [github.com/bourumir-wyngs/granit-parser](https://github.com/bourumir-wyngs/granit-parser) |  |
 | `half` | 2.7.1 | [github.com/VoidStarKat/half-rs](https://github.com/VoidStarKat/half-rs) |  |
 | `hash32` | 0.3.1 | [github.com/japaric/hash32](https://github.com/japaric/hash32) |  |
 | `hashbrown` | 0.14.5 | [github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |  |
-| `hashbrown` | 0.15.5 | [github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |  |
 | `hashbrown` | 0.16.1 | [github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |  |
-| `hashbrown` | 0.17.1 | [github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |  |
-| `heapless` | 0.9.3 | [github.com/rust-embedded/heapless](https://github.com/rust-embedded/heapless) |  |
+| `hashbrown` | 0.17.2 | [github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |  |
+| `heapless` | 0.9.4 | [github.com/rust-embedded/heapless](https://github.com/rust-embedded/heapless) |  |
 | `heck` | 0.4.1 | [github.com/withoutboats/heck](https://github.com/withoutboats/heck) |  |
 | `heck` | 0.5.0 | [github.com/withoutboats/heck](https://github.com/withoutboats/heck) |  |
 | `hermit-abi` | 0.5.3 | [github.com/hermit-os/hermit-rs](https://github.com/hermit-os/hermit-rs) |  |
@@ -218,47 +221,49 @@ _527 个依赖_
 | `itertools` | 0.11.0 | [github.com/rust-itertools/itertools](https://github.com/rust-itertools/itertools) |  |
 | `itertools` | 0.13.0 | [github.com/rust-itertools/itertools](https://github.com/rust-itertools/itertools) |  |
 | `itertools` | 0.14.0 | [github.com/rust-itertools/itertools](https://github.com/rust-itertools/itertools) |  |
-| `itoa` | 1.0.18 | [github.com/dtolnay/itoa](https://github.com/dtolnay/itoa) |  |
+| `itoa` | 1.0.19 | [github.com/dtolnay/itoa](https://github.com/dtolnay/itoa) |  |
 | `jni` | 0.22.4 | [github.com/jni-rs/jni-rs](https://github.com/jni-rs/jni-rs) |  |
 | `jni-macros` | 0.22.4 | [github.com/jni-rs/jni-rs](https://github.com/jni-rs/jni-rs) |  |
 | `jni-sys` | 0.3.1 | [github.com/jni-rs/jni-sys](https://github.com/jni-rs/jni-sys) |  |
 | `jni-sys` | 0.4.1 | [github.com/jni-rs/jni-sys](https://github.com/jni-rs/jni-sys) |  |
 | `jni-sys-macros` | 0.4.1 | [github.com/jni-rs/jni-sys](https://github.com/jni-rs/jni-sys) |  |
 | `jobserver` | 0.1.35 | [github.com/rust-lang/jobserver-rs](https://github.com/rust-lang/jobserver-rs) |  |
-| `js-sys` | 0.3.106 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys) |  |
+| `js-sys` | 0.3.107 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys) |  |
 | `khronos-egl` | 6.0.0 | [github.com/timothee-haudebourg/khronos-egl](https://github.com/timothee-haudebourg/khronos-egl) |  |
 | `kurbo` | 0.11.3 | [github.com/linebender/kurbo](https://github.com/linebender/kurbo) |  |
 | `kurbo` | 0.13.1 | [github.com/linebender/kurbo](https://github.com/linebender/kurbo) |  |
 | `lazy_static` | 1.5.1 | [github.com/rust-lang-nursery/lazy-static.rs](https://github.com/rust-lang-nursery/lazy-static.rs) |  |
 | `libc` | 0.2.191 | [github.com/rust-lang/libc](https://github.com/rust-lang/libc) |  |
 | `linebender_resource_handle` | 0.1.1 | [github.com/linebender/raw_resource_handle](https://github.com/linebender/raw_resource_handle) |  |
-| `link-section` | 0.19.3 | [github.com/mmastrac/linktime](https://github.com/mmastrac/linktime) |  |
+| `link-section` | 0.19.4 | [github.com/mmastrac/linktime](https://github.com/mmastrac/linktime) |  |
 | `linktime-proc-macro` | 0.2.3 | [github.com/mmastrac/linktime](https://github.com/mmastrac/linktime) |  |
 | `litrs` | 1.0.1 | [github.com/LukasKalbertodt/litrs](https://github.com/LukasKalbertodt/litrs) |  |
 | `lock_api` | 0.4.14 | [github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |  |
-| `log` | 0.4.34 | [github.com/rust-lang/log](https://github.com/rust-lang/log) |  |
+| `log` | 0.4.35 | [github.com/rust-lang/log](https://github.com/rust-lang/log) |  |
 | `lyon` | 1.0.19 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
-| `lyon_algorithms` | 1.0.21 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
-| `lyon_geom` | 1.0.19 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
+| `lyon_algorithms` | 1.0.22 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
+| `lyon_geom` | 1.0.20 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
 | `lyon_path` | 1.0.19 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
-| `lyon_tessellation` | 1.0.22 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
+| `lyon_tessellation` | 1.0.23 | [github.com/nical/lyon](https://github.com/nical/lyon) |  |
 | `mac` | 0.1.1 | [github.com/reem/rust-mac.git](https://github.com/reem/rust-mac.git) |  |
 | `mac-notification-sys` | 0.6.15 | [github.com/h4llow3En/mac-notification-sys](https://github.com/h4llow3En/mac-notification-sys) |  |
 | `markup5ever` | 0.12.1 | [github.com/servo/html5ever](https://github.com/servo/html5ever) |  |
 | `markup5ever_rcdom` | 0.3.0 | [github.com/servo/html5ever](https://github.com/servo/html5ever) |  |
 | `md-5` | 0.10.6 | [github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |  |
-| `memmap2` | 0.9.11 | [github.com/RazrFalcon/memmap2-rs](https://github.com/RazrFalcon/memmap2-rs) |  |
-| `metal` | 0.33.0 | [github.com/gfx-rs/metal-rs](https://github.com/gfx-rs/metal-rs) |  |
-| `mime` | 0.3.17 | [github.com/hyperium/mime](https://github.com/hyperium/mime) |  |
+| `memmap2` | 0.9.12 | [github.com/RazrFalcon/memmap2-rs](https://github.com/RazrFalcon/memmap2-rs) |  |
+| `mime` | 0.3.18 | [github.com/hyperium/mime](https://github.com/hyperium/mime) |  |
 | `minimal-lexical` | 0.2.1 | [github.com/Alexhuszagh/minimal-lexical](https://github.com/Alexhuszagh/minimal-lexical) |  |
+| `multiversion` | 0.8.1 | [github.com/calebzulawski/multiversion](https://github.com/calebzulawski/multiversion) |  |
+| `multiversion-macros` | 0.8.1 | [github.com/calebzulawski/multiversion](https://github.com/calebzulawski/multiversion) |  |
 | `multiversion_no_op` | 1.0.0 | [github.com/hsivonen/multiversion_no_op](https://github.com/hsivonen/multiversion_no_op) |  |
-| `naga` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `naga` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `naga-types` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
 | `ndk-sys` | 0.6.0+11769913 | [github.com/rust-mobile/ndk](https://github.com/rust-mobile/ndk) |  |
 | `no_std_io2` | 0.9.4 | [github.com/wcampbell0x2a/no-std-io2](https://github.com/wcampbell0x2a/no-std-io2) |  |
 | `nohash-hasher` | 0.2.0 | [github.com/paritytech/nohash-hasher](https://github.com/paritytech/nohash-hasher) |  |
 | `normpath` | 1.5.2 | [github.com/dylni/normpath](https://github.com/dylni/normpath) |  |
-| `notify-rust` | 4.18.2 | [github.com/hoodie/notify-rust](https://github.com/hoodie/notify-rust) |  |
-| `notify-types` | 2.1.0 | [github.com/notify-rs/notify.git](https://github.com/notify-rs/notify.git) |  |
+| `notify-rust` | 4.19.0 | [github.com/hoodie/notify-rust](https://github.com/hoodie/notify-rust) |  |
+| `notify-types` | 2.3.1 | [github.com/notify-rs/notify.git](https://github.com/notify-rs/notify.git) |  |
 | `ntapi` | 0.4.3 | [github.com/MSxDOS/ntapi](https://github.com/MSxDOS/ntapi) |  |
 | `num` | 0.4.3 | [github.com/rust-num/num](https://github.com/rust-num/num) |  |
 | `num-bigint` | 0.4.8 | [github.com/rust-num/num-bigint](https://github.com/rust-num/num-bigint) |  |
@@ -271,11 +276,12 @@ _527 个依赖_
 | `num-rational` | 0.4.2 | [github.com/rust-num/num-rational](https://github.com/rust-num/num-rational) |  |
 | `num-traits` | 0.2.19 | [github.com/rust-num/num-traits](https://github.com/rust-num/num-traits) |  |
 | `num_cpus` | 1.17.0 | [github.com/seanmonstar/num_cpus](https://github.com/seanmonstar/num_cpus) |  |
-| `object` | 0.37.3 | [github.com/gimli-rs/object](https://github.com/gimli-rs/object) |  |
+| `object` | 0.40.0 | [github.com/gimli-rs/object](https://github.com/gimli-rs/object) |  |
 | `oid-registry` | 0.8.1 | [github.com/rusticata/oid-registry.git](https://github.com/rusticata/oid-registry.git) |  |
 | `once_cell` | 1.21.4 | [github.com/matklad/once_cell](https://github.com/matklad/once_cell) |  |
-| `openssl-probe` | 0.2.1 | [github.com/rustls/openssl-probe](https://github.com/rustls/openssl-probe) |  |
+| `openssl-probe` | 0.2.2 | [github.com/rustls/openssl-probe](https://github.com/rustls/openssl-probe) |  |
 | `ordered-stream` | 0.2.0 | [github.com/danieldg/ordered-stream](https://github.com/danieldg/ordered-stream) |  |
+| `page_size` | 0.6.0 | [github.com/Elzair/page_size_rs](https://github.com/Elzair/page_size_rs) |  |
 | `parking` | 2.2.1 | [github.com/smol-rs/parking](https://github.com/smol-rs/parking) |  |
 | `parking_lot` | 0.12.5 | [github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |  |
 | `parking_lot_core` | 0.9.12 | [github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |  |
@@ -285,9 +291,12 @@ _527 个依赖_
 | `pathfinder_simd` | 0.5.6 | [github.com/servo/pathfinder](https://github.com/servo/pathfinder) |  |
 | `pbkdf2` | 0.12.2 | [github.com/RustCrypto/password-hashes/tree/master/pbkdf2](https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2) |  |
 | `percent-encoding` | 2.3.2 | [github.com/servo/rust-url/](https://github.com/servo/rust-url/) |  |
-| `pin-project` | 1.1.13 | [github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |  |
-| `pin-project-internal` | 1.1.13 | [github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |  |
-| `pin-project-lite` | 0.2.17 | [github.com/taiki-e/pin-project-lite](https://github.com/taiki-e/pin-project-lite) |  |
+| `perf-event-data` | 0.1.8 | [github.com/Phantomical/perf-event-data.git](https://github.com/Phantomical/perf-event-data.git) |  |
+| `perf-event-open-sys2` | 5.0.6 | [github.com/Phantomical/perf-event.git](https://github.com/Phantomical/perf-event.git) |  |
+| `perf-event2` | 0.7.4 | [github.com/Phantomical/perf-event.git](https://github.com/Phantomical/perf-event.git) |  |
+| `pin-project` | 1.2.0 | [github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |  |
+| `pin-project-internal` | 1.2.0 | [github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |  |
+| `pin-project-lite` | 0.2.18 | [github.com/taiki-e/pin-project-lite](https://github.com/taiki-e/pin-project-lite) |  |
 | `piper` | 0.2.5 | [github.com/smol-rs/piper](https://github.com/smol-rs/piper) |  |
 | `pkg-config` | 0.3.34 | [github.com/rust-lang/pkg-config-rs](https://github.com/rust-lang/pkg-config-rs) |  |
 | `png` | 0.17.16 | [github.com/image-rs/image-png](https://github.com/image-rs/image-png) |  |
@@ -316,13 +325,13 @@ _527 个依赖_
 | `quote` | 1.0.47 | [github.com/dtolnay/quote](https://github.com/dtolnay/quote) |  |
 | `rand` | 0.8.8 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
 | `rand` | 0.9.5 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
-| `rand` | 0.10.3 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
+| `rand` | 0.10.4 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
 | `rand_chacha` | 0.3.1 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
 | `rand_chacha` | 0.9.0 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
 | `rand_core` | 0.6.4 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
 | `rand_core` | 0.9.5 | [github.com/rust-random/rand](https://github.com/rust-random/rand) |  |
 | `rand_core` | 0.10.1 | [github.com/rust-random/rand_core](https://github.com/rust-random/rand_core) |  |
-| `rand_pcg` | 0.10.2 | [github.com/rust-random/rngs](https://github.com/rust-random/rngs) |  |
+| `rand_pcg` | 0.10.3 | [github.com/rust-random/rngs](https://github.com/rust-random/rngs) |  |
 | `rand_xorshift` | 0.5.0 | [github.com/rust-random/rngs](https://github.com/rust-random/rngs) |  |
 | `range-alloc` | 0.1.5 | [github.com/gfx-rs/range-alloc](https://github.com/gfx-rs/range-alloc) |  |
 | `rangemap` | 1.8.0 | [github.com/jeffparsons/rangemap](https://github.com/jeffparsons/rangemap) |  |
@@ -333,22 +342,22 @@ _527 个依赖_
 | `read-fonts` | 0.41.0 | [github.com/googlefonts/fontations](https://github.com/googlefonts/fontations) |  |
 | `ref-cast` | 1.0.27 | [github.com/dtolnay/ref-cast](https://github.com/dtolnay/ref-cast) |  |
 | `ref-cast-impl` | 1.0.27 | [github.com/dtolnay/ref-cast](https://github.com/dtolnay/ref-cast) |  |
-| `regex` | 1.13.1 | [github.com/rust-lang/regex](https://github.com/rust-lang/regex) |  |
-| `regex-automata` | 0.4.18 | [github.com/rust-lang/regex](https://github.com/rust-lang/regex) |  |
-| `regex-syntax` | 0.8.11 | [github.com/rust-lang/regex](https://github.com/rust-lang/regex) |  |
+| `regex` | 1.13.2 | [github.com/rust-lang/regex](https://github.com/rust-lang/regex) |  |
+| `regex-automata` | 0.4.19 | [github.com/rust-lang/regex](https://github.com/rust-lang/regex) |  |
+| `regex-syntax` | 0.8.12 | [github.com/rust-lang/regex](https://github.com/rust-lang/regex) |  |
 | `renderdoc-sys` | 1.1.0 | [github.com/ebkalderon/renderdoc-rs](https://github.com/ebkalderon/renderdoc-rs) |  |
 | `reqwest` | 0.13.5 | [github.com/seanmonstar/reqwest](https://github.com/seanmonstar/reqwest) |  |
 | `resvg` | 0.45.1 | [github.com/linebender/resvg](https://github.com/linebender/resvg) |  |
 | `resvg` | 0.46.0 | [github.com/linebender/resvg](https://github.com/linebender/resvg) |  |
 | `ropey` | 2.0.0-beta.1 | [github.com/cessen/ropey](https://github.com/cessen/ropey) |  |
 | `roxmltree` | 0.20.0 | [github.com/RazrFalcon/roxmltree](https://github.com/RazrFalcon/roxmltree) |  |
-| `roxmltree` | 0.21.1 | [github.com/RazrFalcon/roxmltree](https://github.com/RazrFalcon/roxmltree) |  |
+| `roxmltree` | 0.21.2 | [github.com/RazrFalcon/roxmltree](https://github.com/RazrFalcon/roxmltree) |  |
 | `rustc-demangle` | 0.1.28 | [github.com/rust-lang/rustc-demangle](https://github.com/rust-lang/rustc-demangle) |  |
 | `rustc-hash` | 1.1.0 | [github.com/rust-lang-nursery/rustc-hash](https://github.com/rust-lang-nursery/rustc-hash) |  |
 | `rustc-hash` | 2.1.3 | [github.com/rust-lang/rustc-hash](https://github.com/rust-lang/rustc-hash) |  |
 | `rustc_version` | 0.4.1 | [github.com/djc/rustc-version-rs](https://github.com/djc/rustc-version-rs) |  |
 | `rusticata-macros` | 4.1.0 | [github.com/rusticata/rusticata-macros.git](https://github.com/rusticata/rusticata-macros.git) |  |
-| `rustls-pki-types` | 1.15.1 | [github.com/rustls/pki-types](https://github.com/rustls/pki-types) |  |
+| `rustls-pki-types` | 1.16.0 | [github.com/rustls/pki-types](https://github.com/rustls/pki-types) |  |
 | `rustls-platform-verifier` | 0.7.1 | [github.com/rustls/rustls-platform-verifier](https://github.com/rustls/rustls-platform-verifier) |  |
 | `rustls-platform-verifier-android` | 0.2.0 | [github.com/rustls/rustls-platform-verifier](https://github.com/rustls/rustls-platform-verifier) |  |
 | `rustversion` | 1.0.23 | [github.com/dtolnay/rustversion](https://github.com/dtolnay/rustversion) |  |
@@ -369,7 +378,7 @@ _527 个依赖_
 | `serde_json` | 1.0.154 | [github.com/serde-rs/json](https://github.com/serde-rs/json) |  |
 | `serde_repr` | 0.1.21 | [github.com/dtolnay/serde-repr](https://github.com/dtolnay/serde-repr) |  |
 | `serde_spanned` | 0.6.9 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
-| `serde_spanned` | 1.1.2 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
+| `serde_spanned` | 1.1.3 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
 | `serde_urlencoded` | 0.7.1 | [github.com/nox/serde_urlencoded](https://github.com/nox/serde_urlencoded) |  |
 | `sha2` | 0.10.9 | [github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |  |
 | `sha2` | 0.11.1 | [github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |  |
@@ -382,9 +391,9 @@ _527 个依赖_
 | `siphasher` | 1.0.4 | [github.com/jedisct1/rust-siphash](https://github.com/jedisct1/rust-siphash) |  |
 | `skrifa` | 0.40.0 | [github.com/googlefonts/fontations](https://github.com/googlefonts/fontations) |  |
 | `skrifa` | 0.44.0 | [github.com/googlefonts/fontations](https://github.com/googlefonts/fontations) |  |
-| `smallvec` | 1.16.3 | [github.com/servo/rust-smallvec](https://github.com/servo/rust-smallvec) |  |
+| `smallvec` | 1.16.6 | [github.com/smallvec/smallvec](https://github.com/smallvec/smallvec) |  |
 | `smol` | 2.0.2 | [github.com/smol-rs/smol](https://github.com/smol-rs/smol) |  |
-| `smol_str` | 0.3.6 | [github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str](https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str) |  |
+| `smol_str` | 0.3.7 | [github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str](https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str) |  |
 | `socket2` | 0.6.5 | [github.com/rust-lang/socket2](https://github.com/rust-lang/socket2) |  |
 | `stable_deref_trait` | 1.2.1 | [github.com/storyyeller/stable_deref_trait](https://github.com/storyyeller/stable_deref_trait) |  |
 | `static_assertions` | 1.1.0 | [github.com/nvzqz/static-assertions-rs](https://github.com/nvzqz/static-assertions-rs) |  |
@@ -394,14 +403,15 @@ _527 个依赖_
 | `string_cache_codegen` | 0.5.4 | [github.com/servo/string-cache](https://github.com/servo/string-cache) |  |
 | `svg_fmt` | 0.4.5 | [github.com/nical/rust_debug](https://github.com/nical/rust_debug) |  |
 | `svgtypes` | 0.15.3 | [github.com/linebender/svgtypes](https://github.com/linebender/svgtypes) |  |
-| `svgtypes` | 0.16.1 | [github.com/linebender/svgtypes](https://github.com/linebender/svgtypes) |  |
+| `svgtypes` | 0.16.2 | [github.com/linebender/svgtypes](https://github.com/linebender/svgtypes) |  |
 | `swash` | 0.2.10 | [github.com/dfrg/swash](https://github.com/dfrg/swash) |  |
 | `syn` | 2.0.119 | [github.com/dtolnay/syn](https://github.com/dtolnay/syn) |  |
-| `syn` | 3.0.9 | [github.com/dtolnay/syn](https://github.com/dtolnay/syn) |  |
+| `syn` | 3.0.10 | [github.com/dtolnay/syn](https://github.com/dtolnay/syn) |  |
 | `sys-locale` | 0.3.2 | [github.com/1Password/sys-locale](https://github.com/1Password/sys-locale) |  |
 | `system-configuration` | 0.6.1 | [github.com/mullvad/system-configuration-rs](https://github.com/mullvad/system-configuration-rs) |  |
 | `system-configuration` | 0.7.0 | [github.com/mullvad/system-configuration-rs](https://github.com/mullvad/system-configuration-rs) |  |
 | `system-configuration-sys` | 0.6.0 | [github.com/mullvad/system-configuration-rs](https://github.com/mullvad/system-configuration-rs) |  |
+| `target-features` | 0.1.6 | [github.com/calebzulawski/target-features](https://github.com/calebzulawski/target-features) |  |
 | `tauri-winrt-notification` | 0.8.1 | [github.com/tauri-apps/winrt-notification](https://github.com/tauri-apps/winrt-notification) |  |
 | `tempfile` | 3.27.0 | [github.com/Stebalien/tempfile](https://github.com/Stebalien/tempfile) |  |
 | `tendril` | 0.4.3 | [github.com/servo/tendril](https://github.com/servo/tendril) |  |
@@ -413,16 +423,17 @@ _527 个依赖_
 | `time` | 0.3.55 | [github.com/time-rs/time](https://github.com/time-rs/time) |  |
 | `time-core` | 0.1.9 | [github.com/time-rs/time](https://github.com/time-rs/time) |  |
 | `time-macros` | 0.2.32 | [github.com/time-rs/time](https://github.com/time-rs/time) |  |
+| `tinytemplate` | 1.2.1 | [github.com/bheisler/TinyTemplate](https://github.com/bheisler/TinyTemplate) |  |
 | `tokio-rustls` | 0.26.6 | [github.com/rustls/tokio-rustls](https://github.com/rustls/tokio-rustls) |  |
 | `toml` | 0.8.23 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
-| `toml` | 1.1.8+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
+| `toml` | 1.2.2+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
 | `toml_datetime` | 0.6.11 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
-| `toml_datetime` | 1.1.2+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
+| `toml_datetime` | 1.1.3+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
 | `toml_edit` | 0.22.27 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
-| `toml_edit` | 0.25.17+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
-| `toml_parser` | 1.1.5+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
+| `toml_edit` | 0.25.20+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
+| `toml_parser` | 1.1.6+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
 | `toml_write` | 0.1.2 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
-| `toml_writer` | 1.1.3+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
+| `toml_writer` | 1.2.0+spec-1.1.0 | [github.com/toml-rs/toml](https://github.com/toml-rs/toml) |  |
 | `triomphe` | 0.1.17 | [github.com/Manishearth/triomphe](https://github.com/Manishearth/triomphe) |  |
 | `ttf-parser` | 0.25.1 | [github.com/harfbuzz/ttf-parser](https://github.com/harfbuzz/ttf-parser) |  |
 | `typenum` | 1.20.1 | [github.com/paholg/typenum](https://github.com/paholg/typenum) |  |
@@ -432,43 +443,43 @@ _527 个依赖_
 | `unicode-bidi-mirroring` | 0.4.0 | [github.com/RazrFalcon/unicode-bidi-mirroring](https://github.com/RazrFalcon/unicode-bidi-mirroring) |  |
 | `unicode-ccc` | 0.4.0 | [github.com/RazrFalcon/unicode-ccc](https://github.com/RazrFalcon/unicode-ccc) |  |
 | `unicode-id` | 0.3.7 | [github.com/Boshen/unicode-id](https://github.com/Boshen/unicode-id) |  |
-| `unicode-properties` | 0.1.3 | [github.com/unicode-rs/unicode-properties](https://github.com/unicode-rs/unicode-properties) |  |
-| `unicode-script` | 0.5.8 | [github.com/unicode-rs/unicode-script](https://github.com/unicode-rs/unicode-script) |  |
+| `unicode-script` | 0.5.9 | [github.com/unicode-rs/unicode-script](https://github.com/unicode-rs/unicode-script) |  |
 | `unicode-segmentation` | 1.13.3 | [github.com/unicode-rs/unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) |  |
 | `unicode-vo` | 0.1.0 | [github.com/RazrFalcon/unicode-vo](https://github.com/RazrFalcon/unicode-vo) |  |
-| `unicode-width` | 0.2.2 | [github.com/unicode-rs/unicode-width](https://github.com/unicode-rs/unicode-width) |  |
-| `ureq` | 3.4.2 | [github.com/algesten/ureq](https://github.com/algesten/ureq) |  |
-| `ureq-proto` | 0.6.5 | [github.com/algesten/ureq-proto](https://github.com/algesten/ureq-proto) |  |
-| `url` | 2.5.8 | [github.com/servo/rust-url](https://github.com/servo/rust-url) |  |
+| `unicode-width` | 0.2.3 | [github.com/unicode-rs/unicode-width](https://github.com/unicode-rs/unicode-width) |  |
+| `ureq` | 3.5.2 | [github.com/algesten/ureq](https://github.com/algesten/ureq) |  |
+| `ureq-proto` | 0.7.1 | [github.com/algesten/ureq-proto](https://github.com/algesten/ureq-proto) |  |
+| `url` | 2.5.9 | [github.com/servo/rust-url](https://github.com/servo/rust-url) |  |
 | `usvg` | 0.45.1 | [github.com/linebender/resvg](https://github.com/linebender/resvg) |  |
 | `usvg` | 0.46.0 | [github.com/linebender/resvg](https://github.com/linebender/resvg) |  |
 | `utf-8` | 0.7.6 | [github.com/SimonSapin/rust-utf8](https://github.com/SimonSapin/rust-utf8) |  |
 | `utf8-zero` | 0.8.1 | [github.com/algesten/utf8-zero](https://github.com/algesten/utf8-zero) |  |
-| `utf8_iter` | 1.0.4 | [github.com/hsivonen/utf8_iter](https://github.com/hsivonen/utf8_iter) |  |
-| `uuid` | 1.28.0 | [github.com/uuid-rs/uuid](https://github.com/uuid-rs/uuid) |  |
+| `utf8_iter` | 1.1.0 | [github.com/hsivonen/utf8_iter](https://github.com/hsivonen/utf8_iter) |  |
+| `utf_types` | 1.0.0 | [github.com/hsivonen/utf_types](https://github.com/hsivonen/utf_types) |  |
+| `uuid` | 1.29.3 | [github.com/uuid-rs/uuid](https://github.com/uuid-rs/uuid) |  |
 | `version_check` | 0.9.5 | [github.com/SergioBenitez/version_check](https://github.com/SergioBenitez/version_check) |  |
 | `wait-timeout` | 0.2.1 | [github.com/alexcrichton/wait-timeout](https://github.com/alexcrichton/wait-timeout) |  |
 | `waker-fn` | 1.2.0 | [github.com/smol-rs/waker-fn](https://github.com/smol-rs/waker-fn) |  |
-| `wasm-bindgen` | 0.2.129 | [github.com/wasm-bindgen/wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) |  |
-| `wasm-bindgen-futures` | 0.4.79 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures) |  |
-| `wasm-bindgen-macro` | 0.2.129 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro) |  |
-| `wasm-bindgen-macro-support` | 0.2.129 | [github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support](https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support) |  |
-| `wasm-bindgen-shared` | 0.2.129 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared) |  |
+| `wasm-bindgen` | 0.2.130 | [github.com/wasm-bindgen/wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) |  |
+| `wasm-bindgen-futures` | 0.4.80 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures) |  |
+| `wasm-bindgen-macro` | 0.2.130 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro) |  |
+| `wasm-bindgen-macro-support` | 0.2.130 | [github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support](https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support) |  |
+| `wasm-bindgen-shared` | 0.2.130 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared) |  |
 | `wasm-streams` | 0.4.2 | [github.com/MattiasBuelens/wasm-streams/](https://github.com/MattiasBuelens/wasm-streams/) |  |
 | `wasm-streams` | 0.5.0 | [github.com/MattiasBuelens/wasm-streams/](https://github.com/MattiasBuelens/wasm-streams/) |  |
 | `wasm_thread` | 0.3.3 | [github.com/chemicstry/wasm_thread](https://github.com/chemicstry/wasm_thread) |  |
-| `web-sys` | 0.3.106 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys) |  |
+| `web-sys` | 0.3.107 | [github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys) |  |
 | `web-time` | 1.1.0 | [github.com/daxpedda/web-time](https://github.com/daxpedda/web-time) |  |
 | `weezl` | 0.1.12 | [github.com/image-rs/weezl](https://github.com/image-rs/weezl) |  |
-| `wgpu` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-core` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-core-deps-apple` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-core-deps-emscripten` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-core-deps-wasm` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-core-deps-windows-linux-android` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-hal` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-naga-bridge` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
-| `wgpu-types` | 29.0.4 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu` | 30.0.1 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-core` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-core-deps-apple` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-core-deps-emscripten` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-core-deps-wasm` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-core-deps-windows-linux-android` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-hal` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-naga-bridge` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
+| `wgpu-types` | 30.0.2 | [github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |  |
 | `winapi` | 0.3.9 | [github.com/retep998/winapi-rs](https://github.com/retep998/winapi-rs) |  |
 | `winapi-i686-pc-windows-gnu` | 0.4.0 | [github.com/retep998/winapi-rs](https://github.com/retep998/winapi-rs) |  |
 | `winapi-x86_64-pc-windows-gnu` | 0.4.0 | [github.com/retep998/winapi-rs](https://github.com/retep998/winapi-rs) |  |
@@ -506,7 +517,6 @@ _527 个依赖_
 | `windows-strings` | 0.5.1 | [github.com/microsoft/windows-rs](https://github.com/microsoft/windows-rs) |  |
 | `windows-sys` | 0.48.0 | [github.com/microsoft/windows-rs](https://github.com/microsoft/windows-rs) |  |
 | `windows-sys` | 0.52.0 | [github.com/microsoft/windows-rs](https://github.com/microsoft/windows-rs) |  |
-| `windows-sys` | 0.60.2 | [github.com/microsoft/windows-rs](https://github.com/microsoft/windows-rs) |  |
 | `windows-sys` | 0.61.2 | [github.com/microsoft/windows-rs](https://github.com/microsoft/windows-rs) |  |
 | `windows-targets` | 0.48.5 | [github.com/microsoft/windows-rs](https://github.com/microsoft/windows-rs) |  |
 | `windows-targets` | 0.52.6 | [github.com/microsoft/windows-rs](https://github.com/microsoft/windows-rs) |  |
@@ -542,19 +552,20 @@ _527 个依赖_
 | `x11rb-protocol` | 0.13.2 | [github.com/psychon/x11rb](https://github.com/psychon/x11rb) |  |
 | `x509-parser` | 0.18.1 | [github.com/rusticata/x509-parser.git](https://github.com/rusticata/x509-parser.git) |  |
 | `xml5ever` | 0.18.1 | [github.com/servo/html5ever](https://github.com/servo/html5ever) |  |
-| `yazi` | 0.2.1 | [github.com/dfrg/yazi](https://github.com/dfrg/yazi) |  |
+| `yazi` | 0.2.2 | [github.com/dfrg/yazi](https://github.com/dfrg/yazi) |  |
 | `zed-font-kit` | 0.14.1-zed | [github.com/servo/font-kit](https://github.com/servo/font-kit) |  |
 | `zeno` | 0.3.3 | [github.com/dfrg/zeno](https://github.com/dfrg/zeno) |  |
-| `zeroize` | 1.9.1 | [github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |  |
+| `zeroize` | 1.9.2 | [github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |  |
 | `zeroize_derive` | 1.5.0 | [github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |  |
 
 ### MIT
 
-_197 个依赖_
+_201 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
 | `aligned-vec` | 0.6.4 | [github.com/sarah-ek/aligned-vec/](https://github.com/sarah-ek/aligned-vec/) |  |
+| `alloca` | 0.4.0 | [github.com/playXE/alloca-rs](https://github.com/playXE/alloca-rs) |  |
 | `arg_enum_proc_macro` | 0.3.4 | [github.com/lu-zero/arg_enum_proc_macro](https://github.com/lu-zero/arg_enum_proc_macro) |  |
 | `ashpd` | 0.13.13 | [github.com/bilelmoussaoui/ashpd](https://github.com/bilelmoussaoui/ashpd) |  |
 | `av-scenechange` | 0.14.1 | [github.com/rust-av/av-scenechange](https://github.com/rust-av/av-scenechange) |  |
@@ -563,7 +574,7 @@ _197 个依赖_
 | `block2` | 0.5.1 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `block2` | 0.6.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `built` | 0.8.1 | [github.com/lukaslueg/built](https://github.com/lukaslueg/built) |  |
-| `bytes` | 1.12.1 | [github.com/tokio-rs/bytes](https://github.com/tokio-rs/bytes) |  |
+| `bytes` | 1.12.2 | [github.com/tokio-rs/bytes](https://github.com/tokio-rs/bytes) |  |
 | `calloop` | 0.14.5 | [github.com/Smithay/calloop](https://github.com/Smithay/calloop) |  |
 | `calloop-wayland-source` | 0.4.1 | [github.com/smithay/calloop-wayland-source](https://github.com/smithay/calloop-wayland-source) |  |
 | `cfg_aliases` | 0.2.2 | [github.com/katharostech/cfg_aliases](https://github.com/katharostech/cfg_aliases) |  |
@@ -578,6 +589,7 @@ _197 个依赖_
 | `derive_more-impl` | 2.1.1 | [github.com/JelteF/derive_more](https://github.com/JelteF/derive_more) |  |
 | `dispatch` | 0.2.0 | [http://github.com/SSheldon/rust-dispatch](http://github.com/SSheldon/rust-dispatch) |  |
 | `dlib` | 0.5.3 | [github.com/elinorbgr/dlib](https://github.com/elinorbgr/dlib) |  |
+| `ed25519-compact` | 2.6.1 | [github.com/jedisct1/rust-ed25519-compact](https://github.com/jedisct1/rust-ed25519-compact) |  |
 | `embed-resource` | 3.0.12 | [github.com/nabijaczleweli/rust-embed-resource](https://github.com/nabijaczleweli/rust-embed-resource) |  |
 | `endi` | 1.1.1 | [github.com/zeenix/endi](https://github.com/zeenix/endi) |  |
 | `equator` | 0.4.2 | [github.com/sarah-ek/equator/](https://github.com/sarah-ek/equator/) |  |
@@ -591,7 +603,6 @@ _197 个依赖_
 | `fontdb` | 0.23.0 | [github.com/RazrFalcon/fontdb](https://github.com/RazrFalcon/fontdb) |  |
 | `freetype-sys` | 0.20.1 | [github.com/PistonDevelopers/freetype-sys.git](https://github.com/PistonDevelopers/freetype-sys.git) |  |
 | `fs_extra` | 1.3.0 | [github.com/webdesus/fs_extra](https://github.com/webdesus/fs_extra) |  |
-| `fsevent-sys` | 4.1.0 | [github.com/octplane/fsevent-rust/tree/master/fsevent-sys](https://github.com/octplane/fsevent-rust/tree/master/fsevent-sys) |  |
 | `generic-array` | 0.14.7 | [github.com/fizyk20/generic-array.git](https://github.com/fizyk20/generic-array.git) |  |
 | `globwalk` | 0.8.1 | [github.com/gilnaa/globwalk](https://github.com/gilnaa/globwalk) |  |
 | `h2` | 0.4.20 | [github.com/hyperium/h2](https://github.com/hyperium/h2) |  |
@@ -618,7 +629,7 @@ _197 个依赖_
 | `memoffset` | 0.9.1 | [github.com/Gilnaa/memoffset](https://github.com/Gilnaa/memoffset) |  |
 | `mime_guess` | 2.0.5 | [github.com/abonander/mime_guess](https://github.com/abonander/mime_guess) |  |
 | `minisign-verify` | 0.2.5 | [github.com/jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) |  |
-| `mio` | 1.2.4 | [github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |  |
+| `mio` | 1.2.5 | [github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |  |
 | `new_debug_unreachable` | 1.0.6 | [github.com/mbrubeck/rust-debug-unreachable](https://github.com/mbrubeck/rust-debug-unreachable) |  |
 | `nom` | 7.1.3 | [github.com/Geal/nom](https://github.com/Geal/nom) |  |
 | `nom` | 8.0.0 | [github.com/rust-bakery/nom](https://github.com/rust-bakery/nom) |  |
@@ -640,8 +651,9 @@ _197 个依赖_
 | `objc_exception` | 0.1.2 | [http://github.com/SSheldon/rust-objc-exception](http://github.com/SSheldon/rust-objc-exception) |  |
 | `objc_id` | 0.1.1 | [http://github.com/SSheldon/rust-objc-id](http://github.com/SSheldon/rust-objc-id) |  |
 | `oo7` | 0.6.0 | [github.com/linux-credentials/oo7](https://github.com/linux-credentials/oo7) |  |
-| `open` | 5.4.4 | [github.com/Byron/open-rs](https://github.com/Byron/open-rs) |  |
-| `ordered-float` | 5.5.0 | [github.com/reem/rust-ordered-float](https://github.com/reem/rust-ordered-float) |  |
+| `oorandom` | 11.1.5 | [hg.sr.ht/~icefox/oorandom](https://hg.sr.ht/~icefox/oorandom) |  |
+| `open` | 5.4.5 | [github.com/Byron/open-rs](https://github.com/Byron/open-rs) |  |
+| `ordered-float` | 5.5.1 | [github.com/reem/rust-ordered-float](https://github.com/reem/rust-ordered-float) |  |
 | `phf` | 0.11.3 | [github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |  |
 | `phf` | 0.13.1 | [github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |  |
 | `phf_codegen` | 0.11.3 | [github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |  |
@@ -651,20 +663,19 @@ _197 个依赖_
 | `phf_shared` | 0.11.3 | [github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |  |
 | `phf_shared` | 0.13.1 | [github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |  |
 | `pico-args` | 0.5.0 | [github.com/RazrFalcon/pico-args](https://github.com/RazrFalcon/pico-args) |  |
+| `plotters` | 0.3.7 | [github.com/plotters-rs/plotters](https://github.com/plotters-rs/plotters) |  |
+| `plotters-backend` | 0.3.7 | [github.com/plotters-rs/plotters](https://github.com/plotters-rs/plotters) |  |
+| `plotters-svg` | 0.3.7 | [github.com/plotters-rs/plotters.git](https://github.com/plotters-rs/plotters.git) |  |
 | `postage` | 0.5.0 | [github.com/austinjones/postage-rs](https://github.com/austinjones/postage-rs) |  |
 | `precomputed-hash` | 0.1.1 | [github.com/emilio/precomputed-hash](https://github.com/emilio/precomputed-hash) |  |
-| `pulp` | 0.22.3 | [github.com/sarah-quinones/pulp/](https://github.com/sarah-quinones/pulp/) |  |
-| `pulp-wasm-simd-flag` | 0.1.1 | [github.com/sarah-quinones/pulp/](https://github.com/sarah-quinones/pulp/) |  |
 | `quick-xml` | 0.41.0 | [github.com/tafia/quick-xml](https://github.com/tafia/quick-xml) |  |
-| `raw-cpuid` | 11.6.0 | [github.com/gz/rust-cpuid](https://github.com/gz/rust-cpuid) |  |
-| `reborrow` | 0.5.5 | [github.com/sarah-ek/reborrow/](https://github.com/sarah-ek/reborrow/) |  |
 | `redox_syscall` | 0.5.18 | [gitlab.redox-os.org/redox-os/syscall](https://gitlab.redox-os.org/redox-os/syscall) |  |
 | `redox_users` | 0.4.6 | [gitlab.redox-os.org/redox-os/users](https://gitlab.redox-os.org/redox-os/users) |  |
 | `redox_users` | 0.5.3 | [gitlab.redox-os.org/redox-os/users](https://gitlab.redox-os.org/redox-os/users) |  |
 | `rgb` | 0.8.53 | [github.com/kornelski/rust-rgb](https://github.com/kornelski/rust-rgb) |  |
-| `rust-embed` | 8.13.0 | [pyrossh.dev/repos/rust-embed](https://pyrossh.dev/repos/rust-embed) |  |
-| `rust-embed-impl` | 8.13.0 | [pyrossh.dev/repos/rust-embed](https://pyrossh.dev/repos/rust-embed) |  |
-| `rust-embed-utils` | 8.13.0 | [pyrossh.dev/repos/rust-embed](https://pyrossh.dev/repos/rust-embed) |  |
+| `rust-embed` | 8.14.0 | [pyrossh.dev/repos/rust-embed](https://pyrossh.dev/repos/rust-embed) |  |
+| `rust-embed-impl` | 8.14.0 | [pyrossh.dev/repos/rust-embed](https://pyrossh.dev/repos/rust-embed) |  |
+| `rust-embed-utils` | 8.14.0 | [pyrossh.dev/repos/rust-embed](https://pyrossh.dev/repos/rust-embed) |  |
 | `rust-i18n` | 4.2.4 | [github.com/longbridge/rust-i18n](https://github.com/longbridge/rust-i18n) |  |
 | `rust-i18n-macro` | 4.2.4 | [github.com/longbridge/rust-i18n](https://github.com/longbridge/rust-i18n) |  |
 | `rust-i18n-support` | 4.2.4 | [github.com/longbridge/rust-i18n](https://github.com/longbridge/rust-i18n) |  |
@@ -685,11 +696,10 @@ _197 个依赖_
 | `synstructure` | 0.13.2 | [github.com/mystor/synstructure](https://github.com/mystor/synstructure) |  |
 | `synstructure` | 0.14.0 | [github.com/mystor/synstructure](https://github.com/mystor/synstructure) |  |
 | `sysinfo` | 0.31.4 | [github.com/GuillaumeGomez/sysinfo](https://github.com/GuillaumeGomez/sysinfo) |  |
-| `taffy` | 0.13.0 | [github.com/DioxusLabs/taffy](https://github.com/DioxusLabs/taffy) |  |
-| `taffy` | 0.14.0 | [github.com/DioxusLabs/taffy](https://github.com/DioxusLabs/taffy) |  |
+| `taffy` | 0.15.1 | [github.com/DioxusLabs/taffy](https://github.com/DioxusLabs/taffy) |  |
 | `tao-core-video-sys` | 0.2.0 | — |  |
 | `tiff` | 0.11.3 | [github.com/image-rs/image-tiff](https://github.com/image-rs/image-tiff) |  |
-| `tokio` | 1.53.3 | [github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |  |
+| `tokio` | 1.54.1 | [github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |  |
 | `tokio-macros` | 2.7.2 | [github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |  |
 | `tokio-socks` | 0.5.3 | [github.com/sticnarf/tokio-socks](https://github.com/sticnarf/tokio-socks) |  |
 | `tokio-util` | 0.7.20 | [github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |  |
@@ -726,7 +736,7 @@ _197 个依赖_
 | `which` | 8.0.6 | [github.com/harryfei/which-rs.git](https://github.com/harryfei/which-rs.git) |  |
 | `windows-capture` | 1.5.0 | [github.com/NiiightmareXD/windows-capture](https://github.com/NiiightmareXD/windows-capture) |  |
 | `winnow` | 0.7.15 | [github.com/winnow-rs/winnow](https://github.com/winnow-rs/winnow) |  |
-| `winnow` | 1.0.4 | [github.com/winnow-rs/winnow](https://github.com/winnow-rs/winnow) |  |
+| `winnow` | 1.0.5 | [github.com/winnow-rs/winnow](https://github.com/winnow-rs/winnow) |  |
 | `winreg` | 0.56.0 | [github.com/gentoo90/winreg-rs](https://github.com/gentoo90/winreg-rs) |  |
 | `x11` | 2.21.0 | [github.com/AltF02/x11-rs.git](https://github.com/AltF02/x11-rs.git) |  |
 | `xcb` | 1.7.1 | [github.com/rust-x-bindings/rust-xcb](https://github.com/rust-x-bindings/rust-xcb) |  |
@@ -739,63 +749,72 @@ _197 个依赖_
 | `y4m` | 0.8.0 | [github.com/image-rs/y4m.git](https://github.com/image-rs/y4m.git) |  |
 | `yeslogic-fontconfig-sys` | 6.0.1 | [github.com/yeslogic/fontconfig-rs](https://github.com/yeslogic/fontconfig-rs) |  |
 | `zbus` | 5.19.0 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
+| `zbus` | 6.5.0 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
 | `zbus-lockstep` | 0.5.2 | [github.com/luukvanderduim/zbus-lockstep](https://github.com/luukvanderduim/zbus-lockstep) |  |
 | `zbus-lockstep-macros` | 0.5.2 | [github.com/luukvanderduim/zbus-lockstep](https://github.com/luukvanderduim/zbus-lockstep) |  |
 | `zbus_macros` | 5.19.0 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
+| `zbus_macros` | 6.5.0 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
 | `zbus_names` | 4.3.5 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
+| `zbus_utils` | 6.1.0 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
 | `zbus_xml` | 5.2.1 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
-| `zcheapstr` | 1.1.0 | [github.com/z-galaxy/zcheapstr/](https://github.com/z-galaxy/zcheapstr/) |  |
+| `zcheapstr` | 1.4.0 | [github.com/z-galaxy/zcheapstr/](https://github.com/z-galaxy/zcheapstr/) |  |
 | `zed-scap` | 0.0.8-zed | [github.com/helmerapp/scap](https://github.com/helmerapp/scap) |  |
 | `zed-xim` | 0.4.0-zed | [github.com/Riey/xim-rs](https://github.com/Riey/xim-rs) |  |
 | `zmij` | 1.0.23 | [github.com/dtolnay/zmij](https://github.com/dtolnay/zmij) |  |
+| `zruntime` | 0.2.4 | [github.com/z-galaxy/zruntime](https://github.com/z-galaxy/zruntime) |  |
 | `zvariant` | 5.15.1 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
 | `zvariant_derive` | 5.15.1 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
 | `zvariant_utils` | 4.2.0 | [github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |  |
 
 ### Apache-2.0
 
-_44 个依赖_
+_49 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
 | `borsh-derive` | 1.8.1 | [github.com/near/borsh-rs](https://github.com/near/borsh-rs) |  |
+| `ciborium` | 0.2.2 | [github.com/enarx/ciborium](https://github.com/enarx/ciborium) |  |
+| `ciborium-io` | 0.2.2 | [github.com/enarx/ciborium](https://github.com/enarx/ciborium) |  |
+| `ciborium-ll` | 0.2.2 | [github.com/enarx/ciborium](https://github.com/enarx/ciborium) |  |
 | `codespan-reporting` | 0.13.1 | [github.com/brendanzab/codespan](https://github.com/brendanzab/codespan) |  |
 | `gethostname` | 1.1.0 | [codeberg.org/swsnr/gethostname.rs.git](https://codeberg.org/swsnr/gethostname.rs.git) |  |
 | `gl_generator` | 0.14.0 | [github.com/brendanzab/gl-rs/](https://github.com/brendanzab/gl-rs/) |  |
 | `glutin_wgl_sys` | 0.6.1 | [github.com/rust-windowing/glutin](https://github.com/rust-windowing/glutin) |  |
-| `gpui-base` | 0.7.3 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
-| `gpui-component` | 0.7.3 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
-| `gpui-component-macros` | 0.7.3 | — |  |
-| `gpui-fast` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-apple` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-linux` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-macos` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-macros` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-platform` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-web` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-wgpu` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-fast-windows` | 0.1.9 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
-| `gpui-kit` | 0.7.3 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
-| `gpui-kit-assets` | 0.7.3 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
-| `gpui-pre` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-apple` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-collections` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-derive-refineable` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-http-client` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-linux` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-macos` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-macros` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-platform` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-refineable` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-scheduler` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-shared-string` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-sum-tree` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-util` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-web` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-wgpu` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-windows` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-ztracing` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
-| `gpui-pre-ztracing-macro` | 0.3.9 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-base` | 0.10.0 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
+| `gpui-component` | 0.10.0 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
+| `gpui-component-macros` | 0.10.0 | — |  |
+| `gpui-fast` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-apple` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-linux` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-macos` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-macros` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-platform` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-web` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-wgpu` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-fast-windows` | 0.1.17 | [github.com/longbridge/gpui-fast](https://github.com/longbridge/gpui-fast) |  |
+| `gpui-kit` | 0.10.0 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
+| `gpui-kit-assets` | 0.10.0 | [github.com/longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) |  |
+| `gpui-pre` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-apple` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-bench-metrics` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-collections` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-derive-refineable` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-http-client` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-ios` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-linux` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-macos` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-macros` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-platform` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-refineable` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-scheduler` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-shared-string` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-sum-tree` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-util` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-web` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-wgpu` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-windows` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-ztracing` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
+| `gpui-pre-ztracing-macro` | 0.3.12 | [github.com/zed-industries/zed](https://github.com/zed-industries/zed) |  |
 | `gpui-tokio` | 0.1.0 | — |  |
 | `khronos_api` | 3.1.0 | [github.com/brendanzab/gl-rs/](https://github.com/brendanzab/gl-rs/) |  |
 | `similar` | 2.7.0 | [github.com/mitsuhiko/similar](https://github.com/mitsuhiko/similar) |  |
@@ -805,7 +824,7 @@ _44 个依赖_
 
 ### Apache-2.0 OR MIT OR Zlib
 
-_28 个依赖_
+_31 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
@@ -822,12 +841,15 @@ _28 个依赖_
 | `objc2-core-foundation` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-core-graphics` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-core-image` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
+| `objc2-core-services` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-core-text` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-core-video` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-io-surface` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-metal` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-quartz-core` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-security` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
+| `objc2-ui-kit` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
+| `objc2-uniform-type-identifiers` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `objc2-user-notifications` | 0.3.2 | [github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |  |
 | `raw-window-handle` | 0.6.2 | [github.com/rust-windowing/raw-window-handle](https://github.com/rust-windowing/raw-window-handle) |  |
 | `tinyvec` | 1.13.3 | [github.com/Lokathor/tinyvec](https://github.com/Lokathor/tinyvec) |  |
@@ -840,39 +862,43 @@ _28 个依赖_
 
 ### Unicode-3.0
 
-_18 个依赖_
+_22 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
-| `icu_collections` | 2.3.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `icu_locale_core` | 2.3.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `icu_normalizer` | 2.3.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `icu_normalizer_data` | 2.3.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `icu_properties` | 2.3.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `icu_properties_data` | 2.3.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `icu_provider` | 2.3.1 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_collections` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_locale_core` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_locale_fallback` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_locale_fallback_data` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_normalizer` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_normalizer_data` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_properties` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_properties_data` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_provider` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_segmenter` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `icu_segmenter_data` | 2.4.0 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 | `litemap` | 0.8.3 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 | `potential_utf` | 0.1.6 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `tinystr` | 0.8.4 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `tinystr` | 0.8.5 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 | `writeable` | 0.6.4 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `yoke` | 0.8.3 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `yoke` | 0.8.4 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 | `yoke-derive` | 0.8.4 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 | `zerofrom` | 0.1.8 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 | `zerofrom-derive` | 0.1.8 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 | `zerotrie` | 0.2.5 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `zerovec` | 0.11.8 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
-| `zerovec-derive` | 0.11.6 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `zerovec` | 0.11.9 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
+| `zerovec-derive` | 0.11.7 | [github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |  |
 
 ### BSD-3-Clause
 
-_14 个依赖_
+_13 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
 | `alloc-no-stdlib` | 3.0.0 | [github.com/dropbox/rust-alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) |  |
 | `alloc-stdlib` | 0.3.0 | [github.com/dropbox/rust-alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) |  |
 | `avif-serialize` | 0.8.9 | [github.com/kornelski/avif-serialize](https://github.com/kornelski/avif-serialize) |  |
-| `exr` | 1.74.2 | [github.com/johannesvollmer/exrs](https://github.com/johannesvollmer/exrs) |  |
+| `exr` | 1.74.3 | [github.com/johannesvollmer/exrs](https://github.com/johannesvollmer/exrs) |  |
 | `instant` | 0.1.13 | [github.com/sebcrozet/instant](https://github.com/sebcrozet/instant) |  |
 | `lebe` | 0.5.3 | [github.com/johannesvollmer/lebe](https://github.com/johannesvollmer/lebe) |  |
 | `ravif` | 0.13.0 | [github.com/kornelski/cavif-rs](https://github.com/kornelski/cavif-rs) |  |
@@ -880,9 +906,8 @@ _14 个依赖_
 | `subtle` | 2.6.1 | [github.com/dalek-cryptography/subtle](https://github.com/dalek-cryptography/subtle) |  |
 | `tiny-skia` | 0.11.4 | [github.com/RazrFalcon/tiny-skia](https://github.com/RazrFalcon/tiny-skia) |  |
 | `tiny-skia-path` | 0.11.4 | [github.com/RazrFalcon/tiny-skia/tree/master/path](https://github.com/RazrFalcon/tiny-skia/tree/master/path) |  |
-| `zstd` | 0.14.3 | [github.com/gyscos/zstd-rs](https://github.com/gyscos/zstd-rs) |  |
-| `zstd-safe` | 8.2.0 | [github.com/gyscos/zstd-rs](https://github.com/gyscos/zstd-rs) |  |
-| `zstd-sys` | 2.1.2+zstd.1.5.7 | [github.com/gyscos/zstd-rs](https://github.com/gyscos/zstd-rs) |  |
+| `zstd` | 0.14.4 | [github.com/gyscos/zstd-rs](https://github.com/gyscos/zstd-rs) |  |
+| `zstd-safe` | 8.3.0 | [github.com/gyscos/zstd-rs](https://github.com/gyscos/zstd-rs) |  |
 
 ### MIT OR Unlicense
 
@@ -893,12 +918,12 @@ _10 个依赖_
 | `aho-corasick` | 1.1.5 | [github.com/BurntSushi/aho-corasick](https://github.com/BurntSushi/aho-corasick) |  |
 | `byteorder` | 1.5.0 | [github.com/BurntSushi/byteorder](https://github.com/BurntSushi/byteorder) |  |
 | `byteorder-lite` | 0.1.0 | [github.com/image-rs/byteorder-lite](https://github.com/image-rs/byteorder-lite) |  |
-| `globset` | 0.4.20 | [github.com/BurntSushi/ripgrep/tree/master/crates/globset](https://github.com/BurntSushi/ripgrep/tree/master/crates/globset) |  |
-| `ignore` | 0.4.33 | [github.com/BurntSushi/ripgrep/tree/master/crates/ignore](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore) |  |
+| `globset` | 0.4.21 | [github.com/BurntSushi/ripgrep/tree/master/crates/globset](https://github.com/BurntSushi/ripgrep/tree/master/crates/globset) |  |
+| `ignore` | 0.4.34 | [github.com/BurntSushi/ripgrep/tree/master/crates/ignore](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore) |  |
 | `memchr` | 2.8.3 | [github.com/BurntSushi/memchr](https://github.com/BurntSushi/memchr) |  |
 | `same-file` | 1.0.6 | [github.com/BurntSushi/same-file](https://github.com/BurntSushi/same-file) |  |
 | `termcolor` | 1.4.1 | [github.com/BurntSushi/termcolor](https://github.com/BurntSushi/termcolor) |  |
-| `walkdir` | 2.5.0 | [github.com/BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) |  |
+| `walkdir` | 2.5.1 | [github.com/BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) |  |
 | `winapi-util` | 0.1.11 | [github.com/BurntSushi/winapi-util](https://github.com/BurntSushi/winapi-util) |  |
 
 ### Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT
@@ -908,7 +933,7 @@ _5 个依赖_
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
 | `linux-raw-sys` | 0.12.1 | [github.com/sunfishcode/linux-raw-sys](https://github.com/sunfishcode/linux-raw-sys) |  |
-| `rustix` | 1.1.5 | [github.com/bytecodealliance/rustix](https://github.com/bytecodealliance/rustix) |  |
+| `rustix` | 1.1.6 | [github.com/bytecodealliance/rustix](https://github.com/bytecodealliance/rustix) |  |
 | `wasi` | 0.11.1+wasi-snapshot-preview1 | [github.com/bytecodealliance/wasi](https://github.com/bytecodealliance/wasi) |  |
 | `wasip2` | 1.0.4+wasi-0.2.12 | [github.com/bytecodealliance/wasi-rs](https://github.com/bytecodealliance/wasi-rs) |  |
 | `wit-bindgen` | 0.57.1 | [github.com/bytecodealliance/wit-bindgen](https://github.com/bytecodealliance/wit-bindgen) |  |
@@ -922,7 +947,7 @@ _5 个依赖_
 | `inotify` | 0.11.5 | [github.com/hannobraun/inotify-rs](https://github.com/hannobraun/inotify-rs) |  |
 | `inotify-sys` | 0.1.8 | [github.com/hannobraun/inotify-sys](https://github.com/hannobraun/inotify-sys) |  |
 | `libloading` | 0.8.9 | [github.com/nagisa/rust_libloading/](https://github.com/nagisa/rust_libloading/) |  |
-| `rustls-webpki` | 0.103.15 | [github.com/rustls/webpki](https://github.com/rustls/webpki) |  |
+| `rustls-webpki` | 0.103.17 | [github.com/rustls/webpki](https://github.com/rustls/webpki) |  |
 | `untrusted` | 0.9.0 | [github.com/briansmith/untrusted](https://github.com/briansmith/untrusted) |  |
 
 ### Apache-2.0 OR ISC OR MIT
@@ -947,17 +972,6 @@ _4 个依赖_
 | `rav1e` | 0.8.1 | [github.com/xiph/rav1e/](https://github.com/xiph/rav1e/) |  |
 | `v_frame` | 0.3.9 | [github.com/rust-av/v_frame](https://github.com/rust-av/v_frame) |  |
 
-### Zlib
-
-_4 个依赖_
-
-| 依赖 | 版本 | 来源 | 备注 |
-| --- | --- | --- | --- |
-| `foldhash` | 0.1.5 | [github.com/orlp/foldhash](https://github.com/orlp/foldhash) |  |
-| `foldhash` | 0.2.0 | [github.com/orlp/foldhash](https://github.com/orlp/foldhash) |  |
-| `slotmap` | 1.1.1 | [github.com/orlp/slotmap](https://github.com/orlp/slotmap) |  |
-| `zlib-rs` | 0.6.8 | [github.com/trifectatechfoundation/zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) |  |
-
 ### Apache-2.0 OR BSD-2-Clause OR MIT
 
 _3 个依赖_
@@ -965,18 +979,8 @@ _3 个依赖_
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
 | `mach2` | 0.6.0 | [github.com/JohnTitor/mach2](https://github.com/JohnTitor/mach2) |  |
-| `zerocopy` | 0.8.63 | [github.com/google/zerocopy](https://github.com/google/zerocopy) |  |
-| `zerocopy-derive` | 0.8.63 | [github.com/google/zerocopy](https://github.com/google/zerocopy) |  |
-
-### CC0-1.0
-
-_3 个依赖_
-
-| 依赖 | 版本 | 来源 | 备注 |
-| --- | --- | --- | --- |
-| `hexf-parse` | 0.2.1 | [github.com/lifthrasiir/hexf](https://github.com/lifthrasiir/hexf) |  |
-| `notify` | 8.2.0 | [github.com/notify-rs/notify.git](https://github.com/notify-rs/notify.git) |  |
-| `tiny-keccak` | 2.0.2 | — |  |
+| `zerocopy` | 0.8.64 | [github.com/google/zerocopy](https://github.com/google/zerocopy) |  |
+| `zerocopy-derive` | 0.8.64 | [github.com/google/zerocopy](https://github.com/google/zerocopy) |  |
 
 ### MPL-2.0
 
@@ -987,6 +991,25 @@ _3 个依赖_
 | `cbindgen` | 0.28.0 | [github.com/mozilla/cbindgen](https://github.com/mozilla/cbindgen) | 弱 copyleft（文件级），仅构建期使用，不进入产物 |
 | `dwrote` | 0.11.5 | [github.com/servo/dwrote-rs](https://github.com/servo/dwrote-rs) | 弱 copyleft（文件级），仅 Windows |
 | `option-ext` | 0.2.0 | [github.com/soc/option-ext.git](https://github.com/soc/option-ext.git) | 弱 copyleft（文件级），未修改其源码 |
+
+### Zlib
+
+_3 个依赖_
+
+| 依赖 | 版本 | 来源 | 备注 |
+| --- | --- | --- | --- |
+| `foldhash` | 0.2.0 | [github.com/orlp/foldhash](https://github.com/orlp/foldhash) |  |
+| `slotmap` | 1.1.1 | [github.com/orlp/slotmap](https://github.com/orlp/slotmap) |  |
+| `zlib-rs` | 0.6.8 | [github.com/trifectatechfoundation/zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) |  |
+
+### (Apache-2.0 OR MIT) AND Unicode-3.0
+
+_2 个依赖_
+
+| 依赖 | 版本 | 来源 | 备注 |
+| --- | --- | --- | --- |
+| `unicode-ident` | 1.0.27 | [github.com/dtolnay/unicode-ident](https://github.com/dtolnay/unicode-ident) |  |
+| `unicode-properties` | 0.1.5 | [github.com/unicode-rs/unicode-properties](https://github.com/unicode-rs/unicode-properties) |  |
 
 ### 0BSD
 
@@ -1015,14 +1038,23 @@ _2 个依赖_
 | `r-efi` | 5.3.0 | [github.com/r-efi/r-efi](https://github.com/r-efi/r-efi) |  |
 | `r-efi` | 6.0.0 | [github.com/r-efi/r-efi](https://github.com/r-efi/r-efi) |  |
 
+### CC0-1.0
+
+_2 个依赖_
+
+| 依赖 | 版本 | 来源 | 备注 |
+| --- | --- | --- | --- |
+| `notify` | 8.2.2 | [github.com/notify-rs/notify.git](https://github.com/notify-rs/notify.git) |  |
+| `tiny-keccak` | 2.0.2 | — |  |
+
 ### CDLA-Permissive-2.0
 
 _2 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
-| `webpki-root-certs` | 1.0.9 | [github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |  |
-| `webpki-roots` | 1.0.9 | [github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |  |
+| `webpki-root-certs` | 1.0.12 | [github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |  |
+| `webpki-roots` | 1.0.12 | [github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |  |
 
 ### (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC) AND Apache-2.0 AND BSD-3-Clause AND ISC AND MIT
 
@@ -1030,7 +1062,7 @@ _1 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
-| `aws-lc-sys` | 0.46.0 | [github.com/aws/aws-lc-rs](https://github.com/aws/aws-lc-rs) |  |
+| `aws-lc-sys` | 0.47.0 | [github.com/aws/aws-lc-rs](https://github.com/aws/aws-lc-rs) |  |
 
 ### (Apache-2.0 OR ISC) AND ISC
 
@@ -1038,7 +1070,7 @@ _1 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
-| `aws-lc-rs` | 1.18.2 | [github.com/aws/aws-lc-rs](https://github.com/aws/aws-lc-rs) |  |
+| `aws-lc-rs` | 1.19.0 | [github.com/aws/aws-lc-rs](https://github.com/aws/aws-lc-rs) |  |
 
 ### (Apache-2.0 OR MIT) AND BSD-3-Clause
 
@@ -1046,7 +1078,7 @@ _1 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
-| `encoding_rs` | 0.8.42 | [github.com/hsivonen/encoding_rs](https://github.com/hsivonen/encoding_rs) |  |
+| `encoding_rs` | 0.8.44 | [github.com/hsivonen/encoding_rs](https://github.com/hsivonen/encoding_rs) |  |
 
 ### (Apache-2.0 OR MIT) AND NCSA
 
@@ -1055,14 +1087,6 @@ _1 个依赖_
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
 | `libfuzzer-sys` | 0.4.13 | [github.com/rust-fuzz/libfuzzer](https://github.com/rust-fuzz/libfuzzer) |  |
-
-### (Apache-2.0 OR MIT) AND Unicode-3.0
-
-_1 个依赖_
-
-| 依赖 | 版本 | 来源 | 备注 |
-| --- | --- | --- | --- |
-| `unicode-ident` | 1.0.27 | [github.com/dtolnay/unicode-ident](https://github.com/dtolnay/unicode-ident) |  |
 
 ### 0BSD OR Apache-2.0 OR MIT
 
@@ -1112,13 +1136,21 @@ _1 个依赖_
 | --- | --- | --- | --- |
 | `self_cell` | 1.3.0 | [github.com/Voultapher/self_cell](https://github.com/Voultapher/self_cell) |  |
 
+### BSD-2-Clause AND BSD-3-Clause
+
+_1 个依赖_
+
+| 依赖 | 版本 | 来源 | 备注 |
+| --- | --- | --- | --- |
+| `zstd-sys` | 2.1.3+zstd.1.5.7 | [github.com/gyscos/zstd-rs](https://github.com/gyscos/zstd-rs) |  |
+
 ### BSD-3-Clause AND MIT
 
 _1 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
-| `brotli` | 9.0.0 | [github.com/dropbox/rust-brotli](https://github.com/dropbox/rust-brotli) |  |
+| `brotli` | 9.1.3 | [github.com/dropbox/rust-brotli](https://github.com/dropbox/rust-brotli) |  |
 
 ### BSD-3-Clause OR MIT
 
@@ -1126,4 +1158,4 @@ _1 个依赖_
 
 | 依赖 | 版本 | 来源 | 备注 |
 | --- | --- | --- | --- |
-| `brotli-decompressor` | 6.0.1 | [github.com/dropbox/rust-brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) |  |
+| `brotli-decompressor` | 6.3.2 | [github.com/dropbox/rust-brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) |  |

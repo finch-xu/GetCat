@@ -13,7 +13,9 @@ use std::path::PathBuf;
 
 use memchr::memmem;
 
-use crate::model::{AssertOp, BodyKind, FormValue, KeyValue, PostOpKind, RequestDraft, Variable};
+use crate::model::{
+    AssertOp, AuthConfig, BodyKind, FormValue, KeyValue, PostOpKind, RequestDraft, Variable,
+};
 
 /// 值里再引用变量时的最大展开层数。
 pub const MAX_DEPTH: usize = 8;
@@ -253,6 +255,18 @@ pub fn resolve_draft(draft: RequestDraft, ctx: &VarContext) -> Resolved {
     resolve_kvs(&mut r, &mut out.path_params, false);
     resolve_kvs(&mut r, &mut out.params, true);
     resolve_kvs(&mut r, &mut out.headers, true);
+    match &mut out.auth {
+        AuthConfig::None => {}
+        AuthConfig::Bearer { token } => r.resolve_in(token),
+        AuthConfig::Basic { username, password } => {
+            r.resolve_in(username);
+            r.resolve_in(password);
+        }
+        AuthConfig::ApiKey { key, value, .. } => {
+            r.resolve_in(key);
+            r.resolve_in(value);
+        }
+    }
     match &mut out.body {
         BodyKind::None => {}
         BodyKind::Raw { text, .. } => r.resolve_in(text),
@@ -655,6 +669,72 @@ mod tests {
         let req = crate::http::prepare(&resolved.draft).unwrap();
         assert_eq!(req.url.path(), "/users/42");
         assert_eq!(req.url.as_str(), "https://api.example.com/users/42");
+    }
+
+    #[test]
+    fn resolve_draft_expands_auth_fields_and_tracks_unresolved() {
+        let globals = vars(&[("tok", "abc"), ("user", "cat"), ("k", "X-Key")]);
+        let ctx = VarContext::new(&globals, &[], &[]);
+
+        let bearer = resolve_draft(
+            RequestDraft {
+                auth: AuthConfig::Bearer {
+                    token: "{{tok}}-{{missing}}".into(),
+                },
+                ..Default::default()
+            },
+            &ctx,
+        );
+        assert_eq!(
+            bearer.draft.auth,
+            AuthConfig::Bearer {
+                token: "abc-{{missing}}".into(),
+            }
+        );
+        assert_eq!(
+            bearer.unresolved.into_iter().collect::<Vec<_>>(),
+            vec!["missing"]
+        );
+
+        let basic = resolve_draft(
+            RequestDraft {
+                auth: AuthConfig::Basic {
+                    username: "{{user}}".into(),
+                    password: "{{tok}}".into(),
+                },
+                ..Default::default()
+            },
+            &ctx,
+        );
+        assert_eq!(
+            basic.draft.auth,
+            AuthConfig::Basic {
+                username: "cat".into(),
+                password: "abc".into(),
+            }
+        );
+        assert!(basic.unresolved.is_empty());
+
+        let apikey = resolve_draft(
+            RequestDraft {
+                auth: AuthConfig::ApiKey {
+                    key: "{{k}}".into(),
+                    value: "{{tok}}".into(),
+                    location: crate::model::ApiKeyLocation::Header,
+                },
+                ..Default::default()
+            },
+            &ctx,
+        );
+        assert_eq!(
+            apikey.draft.auth,
+            AuthConfig::ApiKey {
+                key: "X-Key".into(),
+                value: "abc".into(),
+                location: crate::model::ApiKeyLocation::Header,
+            }
+        );
+        assert!(apikey.unresolved.is_empty());
     }
 
     #[test]

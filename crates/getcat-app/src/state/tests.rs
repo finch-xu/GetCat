@@ -1348,6 +1348,9 @@ fn load_draft_restores_every_body_kind_without_dirtying(cx: &mut TestAppContext)
                 ..KeyValue::new("q", "v")
             }],
             headers: vec![KeyValue::new("X-Token", "t")],
+            auth: getcat_core::model::AuthConfig::Bearer {
+                token: "tok-42".into(),
+            },
             body: BodyKind::Raw {
                 format: RawFormat::Xml,
                 text: "<a/>".into(),
@@ -4498,34 +4501,34 @@ fn settings_shortcut_keystroke_parses() {
 // ---------------------------------------------------------------------------
 
 /// 返回固定结果的 `UpdateSource`；闭包每次调用构造新值（`Error` 不是 Clone）。
-struct FakeSource(Box<dyn Fn() -> gpui_updater::Result<gpui_updater::Release> + Send + Sync>);
+struct FakeSource(
+    Box<dyn Fn() -> gpui_updater_core::Result<gpui_updater_core::Release> + Send + Sync>,
+);
 
-impl gpui_updater::UpdateSource for FakeSource {
-    fn fetch_latest(&self) -> gpui_updater::Result<gpui_updater::Release> {
+impl gpui_updater_core::UpdateSource for FakeSource {
+    fn fetch_latest(&self) -> gpui_updater_core::Result<gpui_updater_core::Release> {
         (self.0)()
     }
 }
 
 /// 带签名与校验和声明的 release：`Verification::Strict` 在检查阶段只验"有没有"，不访问网络。
-fn fake_release(version: gpui_updater::Version) -> gpui_updater::Release {
-    gpui_updater::Release {
+fn fake_release(version: gpui_updater_core::Version) -> gpui_updater_core::Release {
+    gpui_updater_core::Release::new(
         version,
-        notes: None,
-        asset: gpui_updater::Asset {
-            name: "GetCat-macos-arm64.dmg".into(),
-            url: "https://example.invalid/GetCat-macos-arm64.dmg".into(),
-            size: 0,
-        },
-        signature: Some("untrusted comment: test\nRUSTtest".into()),
-        signature_url: None,
-        sha256: Some("00".repeat(32)),
-    }
+        gpui_updater_core::Asset::new(
+            "GetCat-macos-arm64.dmg",
+            "https://example.invalid/GetCat-macos-arm64.dmg",
+            0,
+        ),
+    )
+    .with_minisign_signature("untrusted comment: test\nRUSTtest")
+    .with_sha256("00".repeat(32))
 }
 
 fn install_fake_updater(
     cx: &mut VisualTestContext,
     kind: InstallKind,
-    fetch: impl Fn() -> gpui_updater::Result<gpui_updater::Release> + Send + Sync + 'static,
+    fetch: impl Fn() -> gpui_updater_core::Result<gpui_updater_core::Release> + Send + Sync + 'static,
 ) {
     cx.update(|_, cx| {
         update::install_with_source(
@@ -4537,8 +4540,8 @@ fn install_fake_updater(
     });
 }
 
-fn v(major: u64) -> gpui_updater::Version {
-    gpui_updater::Version::new(major, 0, 0)
+fn v(major: u64) -> gpui_updater_core::Version {
+    gpui_updater_core::Version::new(major, 0, 0)
 }
 
 #[gpui_kit::test]
@@ -4548,7 +4551,7 @@ async fn update_check_surfaces_new_version_in_workspace(cx: &mut TestAppContext)
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     assert_eq!(
         cx.update(|_, cx| ws.read(cx).update_status().clone()),
-        gpui_updater::UpdateStatus::Idle
+        gpui_updater_core::UpdateStatus::Idle
     );
 
     cx.update(|_, cx| update::check(cx));
@@ -4556,7 +4559,7 @@ async fn update_check_surfaces_new_version_in_workspace(cx: &mut TestAppContext)
 
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::Available(v(99))
+        gpui_updater_core::UpdateStatus::Available(v(99))
     );
     // Workspace 通过 observe 同步到了同一状态
     let status = cx.update(|_, cx| ws.read(cx).update_status().clone());
@@ -4583,7 +4586,7 @@ async fn update_check_up_to_date_has_no_hint(cx: &mut TestAppContext) {
 
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::UpToDate
+        gpui_updater_core::UpdateStatus::UpToDate
     );
     let status = cx.update(|_, cx| ws.read(cx).update_status().clone());
     assert_eq!(update::hint_version(&status), None);
@@ -4594,7 +4597,7 @@ async fn update_check_up_to_date_has_no_hint(cx: &mut TestAppContext) {
 async fn update_check_error_is_surfaced(cx: &mut TestAppContext) {
     let cx = init(cx);
     install_fake_updater(cx, InstallKind::Installed, || {
-        Err(gpui_updater::Error::Http("offline".into()))
+        Err(gpui_updater_core::Error::Http("offline".into()))
     });
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
 
@@ -4603,7 +4606,7 @@ async fn update_check_error_is_surfaced(cx: &mut TestAppContext) {
 
     let status = cx.update(|_, cx| update::status(cx));
     assert!(
-        matches!(&status, gpui_updater::UpdateStatus::Errored(msg) if msg.contains("offline")),
+        matches!(&status, gpui_updater_core::UpdateStatus::Errored(err) if err.message().contains("offline")),
         "{status:?}"
     );
     assert_eq!(update::hint_version(&status), None);
@@ -4640,7 +4643,7 @@ async fn launch_check_respects_setting(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::Idle,
+        gpui_updater_core::UpdateStatus::Idle,
         "关闭开关后启动不应检查"
     );
 
@@ -4650,14 +4653,14 @@ async fn launch_check_respects_setting(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::Idle
+        gpui_updater_core::UpdateStatus::Idle
     );
     cx.executor()
         .advance_clock(update::LAUNCH_CHECK_DELAY + Duration::from_secs(1));
     cx.run_until_parked();
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::Available(v(99))
+        gpui_updater_core::UpdateStatus::Available(v(99))
     );
 }
 
@@ -4670,7 +4673,7 @@ async fn dev_builds_can_check_but_not_install(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::Available(v(99))
+        gpui_updater_core::UpdateStatus::Available(v(99))
     );
     assert!(!cx.update(|_, cx| update::can_install(cx)));
 
@@ -4679,7 +4682,7 @@ async fn dev_builds_can_check_but_not_install(cx: &mut TestAppContext) {
     // 没有进入 Downloading / Errored：开发构建直接拒绝安装
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::Available(v(99))
+        gpui_updater_core::UpdateStatus::Available(v(99))
     );
 }
 
@@ -4689,7 +4692,7 @@ async fn unsupported_platform_has_no_updater(cx: &mut TestAppContext) {
     assert!(!cx.update(|_, cx| update::supported(cx)));
     assert_eq!(
         cx.update(|_, cx| update::status(cx)),
-        gpui_updater::UpdateStatus::Idle
+        gpui_updater_core::UpdateStatus::Idle
     );
     // 没有更新器时这些动作都是空操作，不能 panic
     cx.update(|_, cx| {
@@ -4701,7 +4704,7 @@ async fn unsupported_platform_has_no_updater(cx: &mut TestAppContext) {
     let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
     assert_eq!(
         cx.update(|_, cx| ws.read(cx).update_status().clone()),
-        gpui_updater::UpdateStatus::Idle
+        gpui_updater_core::UpdateStatus::Idle
     );
 }
 
@@ -6321,4 +6324,159 @@ fn url_edits_and_load_draft_clear_unresolved_vars(cx: &mut TestAppContext) {
         assert!(t.prepare_error.is_none());
         assert!(t.unresolved_vars.is_empty(), "{:?}", t.unresolved_vars);
     });
+}
+
+/// Auth 面板：四种鉴权模式往返草稿、敏感字段掩码切换、同名 Header 覆盖提示，以及完整渲染不 panic。
+#[gpui_kit::test]
+fn auth_section_round_trips_masks_and_renders_all_modes(cx: &mut TestAppContext) {
+    use crate::state::request_tab::AuthMode;
+    use getcat_core::model::{ApiKeyLocation, AuthConfig};
+
+    let cx = init(cx);
+    let tab = new_tab(cx);
+
+    let cases = [
+        AuthConfig::None,
+        AuthConfig::Bearer {
+            token: "{{api_token}}".into(),
+        },
+        AuthConfig::Basic {
+            username: "cat".into(),
+            password: "secret".into(),
+        },
+        AuthConfig::ApiKey {
+            key: "X-API-Key".into(),
+            value: "k-99".into(),
+            location: ApiKeyLocation::Header,
+        },
+        AuthConfig::ApiKey {
+            key: "api_key".into(),
+            value: "k-query".into(),
+            location: ApiKeyLocation::Query,
+        },
+    ];
+
+    for auth in cases {
+        let expected = RequestDraft {
+            url: "https://api.test/auth".into(),
+            auth: auth.clone(),
+            ..Default::default()
+        };
+        cx.update(|window, cx| {
+            tab.update(cx, |t, cx| {
+                t.load_draft(&expected, window, cx);
+                t.request_section = RequestSection::Auth;
+                assert_eq!(t.draft(cx).auth, auth);
+                // 未手动设置同名 Header 时不报覆盖
+                assert!(t.auth_overridden_header(cx).is_none());
+            });
+        });
+        cx.draw(
+            gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)),
+            gpui_kit::size(gpui_kit::px(1100.), gpui_kit::px(760.)),
+            |_, _| tab.clone().into_any_element(),
+        );
+    }
+
+    // 敏感字段默认掩码，切换后变为明文；在 Headers 中加同名头后能识别覆盖
+    cx.update(|window, cx| {
+        tab.update(cx, |t, cx| {
+            t.auth_mode = AuthMode::Bearer;
+            assert!(!t.auth_reveal_secret);
+            assert!(t.auth_bearer.read(cx).presentation().is_masked());
+            t.toggle_auth_secret(window, cx);
+            assert!(t.auth_reveal_secret);
+            assert!(!t.auth_bearer.read(cx).presentation().is_masked());
+
+            t.headers.update(cx, |h, cx| {
+                h.set_values(&[KeyValue::new("Authorization", "Manual")], window, cx);
+            });
+            assert_eq!(
+                t.auth_overridden_header(cx).as_deref(),
+                Some("Authorization")
+            );
+        });
+    });
+}
+
+/// 历史记录：请求完成后自动入库并落盘、保留原文 `{{var}}` 模板、支持新 Tab 重开 / 单删 / 清空与侧栏渲染。
+#[gpui_kit::test]
+fn history_records_persists_opens_and_clears(cx: &mut TestAppContext) {
+    use getcat_core::model::HistoryEntry;
+
+    let (cx, store, _dir) = init_with_store(cx);
+    let ws = cx.update(|window, cx| cx.new(|cx| Workspace::new(window, cx)));
+
+    let entry = HistoryEntry {
+        id: Ulid::generate(),
+        timestamp: 1_700_000_000_000,
+        draft: RequestDraft {
+            method: Method::Post,
+            url: "https://api.test/{{env}}/orders".into(),
+            auth: getcat_core::model::AuthConfig::Bearer {
+                token: "{{secret_tok}}".into(),
+            },
+            ..Default::default()
+        },
+        status: Some(201),
+        duration_ms: 120,
+        body_len: Some(256),
+        error: None,
+    };
+
+    cx.update(|_, cx| {
+        cx.default_global::<crate::state::request_tab::CompletedRequest>()
+            .0
+            .borrow_mut()
+            .push(entry.clone());
+    });
+    cx.run_until_parked();
+
+    cx.read(|app| {
+        assert_eq!(ws.read(app).history().len(), 1);
+        assert_eq!(ws.read(app).history()[0], entry);
+    });
+    assert!(store.flush());
+    assert_eq!(store.load_all().history, vec![entry.clone()]);
+
+    // 切到历史侧栏渲染 + 打开历史条目到新 Tab
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_sidebar_section(SidebarSection::History, cx);
+            ws.open_history_entry(entry.id, window, cx);
+        });
+    });
+    cx.draw(
+        gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)),
+        gpui_kit::size(gpui_kit::px(1200.), gpui_kit::px(760.)),
+        |_, _| ws.clone().into_any_element(),
+    );
+    cx.read(|app| {
+        assert_eq!(ws.read(app).tab_count(), 2);
+        let active_draft = ws.read(app).active_tab().read(app).draft(app);
+        assert_eq!(active_draft.url, "https://api.test/{{env}}/orders");
+        assert_eq!(
+            active_draft.auth,
+            getcat_core::model::AuthConfig::Bearer {
+                token: "{{secret_tok}}".into()
+            }
+        );
+    });
+
+    // 单删与清空同步落盘
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| ws.delete_history_entry(entry.id, cx));
+    });
+    cx.read(|app| assert!(ws.read(app).history().is_empty()));
+    assert!(store.flush());
+    assert!(store.load_all().history.is_empty());
+
+    // 再次记录后一键清空
+    cx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.record_history(entry.clone(), cx);
+            ws.clear_history(cx);
+        });
+    });
+    cx.read(|app| assert!(ws.read(app).history().is_empty()));
 }

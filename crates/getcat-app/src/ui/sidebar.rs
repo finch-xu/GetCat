@@ -25,7 +25,7 @@ use gpui_kit::*;
 
 use getcat_core::model::ThemePref;
 
-use crate::assets::logo_mini_path;
+use crate::assets::{ICON_HISTORY, logo_mini_path};
 use crate::brand::APP_NAME;
 use crate::i18n::tr;
 use crate::state::request_tab::SendPulse;
@@ -35,7 +35,9 @@ use crate::state::workspace::{SidebarSection, Workspace};
 use crate::templates::{self, TemplateGroup};
 use crate::ui::text::theme_label;
 use crate::ui::variables_sheet::SheetScope;
-use crate::ui::{LOGO_WIGGLE_DURATION, card, logo_wiggle_offset, method_color};
+use crate::ui::{
+    LOGO_WIGGLE_DURATION, card, format_duration, logo_wiggle_offset, method_color, status_color,
+};
 use crate::{OpenSettings, SaveRequest, ToggleSidebar};
 
 /// 列表行高：布局用 `h_11()`（2.75 rem），默认 rem 下等于 44 px；
@@ -77,14 +79,16 @@ impl SidebarSection {
     pub fn title(self) -> SharedString {
         match self {
             SidebarSection::Saved => tr!("sidebar.saved.title"),
+            SidebarSection::History => tr!("sidebar.history.title"),
             SidebarSection::Templates => tr!("sidebar.templates.title"),
         }
     }
 
-    fn icon(self) -> IconName {
+    fn icon(self) -> Icon {
         match self {
-            SidebarSection::Saved => IconName::Inbox,
-            SidebarSection::Templates => IconName::LayoutDashboard,
+            SidebarSection::Saved => Icon::new(IconName::Inbox),
+            SidebarSection::History => Icon::empty().path(ICON_HISTORY),
+            SidebarSection::Templates => Icon::new(IconName::LayoutDashboard),
         }
     }
 }
@@ -96,6 +100,7 @@ impl Workspace {
         let expanded = !self.sidebar_collapsed();
         let current = self.sidebar_section();
         let saved_count = self.saved().len();
+        let history_count = self.history().len();
         v_flex()
             .id("sidebar-rail")
             .role(Role::Group)
@@ -127,16 +132,20 @@ impl Workspace {
             )
             .children(SidebarSection::ALL.iter().map(|section| {
                 let section = *section;
-                let tooltip: SharedString = match (section, saved_count) {
-                    (SidebarSection::Saved, n) if n > 0 => {
+                let tooltip: SharedString = match (section, saved_count, history_count) {
+                    (SidebarSection::Saved, n, _) if n > 0 => {
                         tr!("sidebar.saved.title_with_count", count = n)
+                    }
+                    (SidebarSection::History, _, n) if n > 0 => {
+                        tr!("sidebar.history.title_with_count", count = n)
                     }
                     _ => section.title(),
                 };
                 Button::new(("rail-section", section as usize))
                     .ghost()
                     .selected(expanded && current == section)
-                    .icon(Icon::new(section.icon()).size_4())
+                    .icon(section.icon().size_4())
+                    .accessibility_label(tooltip.clone())
                     .tooltip(tooltip)
                     .on_click(
                         cx.listener(move |this, _, _, cx| this.open_sidebar_section(section, cx)),
@@ -185,6 +194,7 @@ impl Workspace {
     /// 卡片里的内容：标题行 + 当前功能的列表。
     fn render_sidebar_body(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let section = self.sidebar_section();
+        let show_clear_history = section == SidebarSection::History && !self.history().is_empty();
         v_flex()
             .size_full()
             .child(
@@ -205,6 +215,17 @@ impl Workspace {
                             .truncate()
                             .child(section.title()),
                     )
+                    .when(show_clear_history, |h| {
+                        h.child(
+                            Button::new("clear-history")
+                                .ghost()
+                                .xsmall()
+                                .icon(Icon::new(IconName::Delete).size_4())
+                                .accessibility_label(tr!("sidebar.history.clear_all"))
+                                .tooltip(tr!("sidebar.history.clear_all"))
+                                .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx))),
+                        )
+                    })
                     .child(
                         Button::new("collapse-sidebar")
                             .ghost()
@@ -216,8 +237,158 @@ impl Workspace {
             )
             .child(match section {
                 SidebarSection::Saved => self.render_saved_list(window, cx),
+                SidebarSection::History => self.render_history_list(cx),
                 SidebarSection::Templates => self.render_template_list(cx),
             })
+    }
+
+    /// 历史记录面板：`uniform_list` 虚拟化渲染，每帧 O(可见行)。
+    fn render_history_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.history().is_empty() {
+            return v_flex()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .px_4()
+                .text_sm()
+                .text_center()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr!("sidebar.history.empty_title"))
+                .child(div().text_xs().child(tr!("sidebar.history.empty_hint")))
+                .into_any_element();
+        }
+        let history = self.history_rc();
+        let weak = cx.entity().downgrade();
+        let list = uniform_list("history-list", history.len(), move |range, _window, cx| {
+            let hover_bg = cx.theme().list_hover;
+            let muted = cx.theme().muted_foreground;
+            let danger = cx.theme().danger;
+            let radius = cx.theme().radius;
+            range
+                .map(|ix| {
+                    let entry = &history[ix];
+                    let id = entry.id;
+                    let method = entry.draft.method;
+                    let url = entry.draft.url.clone();
+                    let display_url = if url.is_empty() {
+                        tab_title(&url)
+                    } else {
+                        SharedString::from(url.clone())
+                    };
+                    let duration =
+                        format_duration(std::time::Duration::from_millis(entry.duration_ms));
+                    let status = entry.status;
+                    let open = weak.clone();
+                    let delete = weak.clone();
+                    let menu_ws = weak.clone();
+
+                    div().h_11().w_full().py_0p5().child(
+                        h_flex()
+                            .id(("history-row", ix))
+                            .size_full()
+                            .px_2()
+                            .gap_2()
+                            .items_center()
+                            .rounded(radius)
+                            .hover(|style| style.bg(hover_bg))
+                            .aria_label(tr!(
+                                "sidebar.history.row_aria",
+                                method = method.as_str(),
+                                url = display_url.clone()
+                            ))
+                            .on_click(move |_, window, cx| {
+                                if let Some(ws) = open.upgrade() {
+                                    ws.update(cx, |ws, cx| ws.open_history_entry(id, window, cx));
+                                }
+                            })
+                            .child(
+                                div()
+                                    .w_12()
+                                    .flex_none()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(method_color(method, cx))
+                                    .child(method.as_str()),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(div().text_sm().truncate().child(display_url))
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .text_xs()
+                                            .child(match status {
+                                                Some(code) => div()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(status_color(code, cx))
+                                                    .child(code.to_string()),
+                                                None => div()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(danger)
+                                                    .child(tr!("sidebar.history.failed")),
+                                            })
+                                            .child(div().text_color(muted).child(duration)),
+                                    ),
+                            )
+                            .child(
+                                Button::new(("history-delete", ix))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Close)
+                                    .tooltip(tr!("sidebar.history.delete"))
+                                    .on_click(move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        if let Some(ws) = delete.upgrade() {
+                                            ws.update(cx, |ws, cx| ws.delete_history_entry(id, cx));
+                                        }
+                                    }),
+                            )
+                            .context_menu(move |menu, _, _| {
+                                let open = menu_ws.clone();
+                                let delete = menu_ws.clone();
+                                menu.item(
+                                    PopupMenuItem::new(tr!("sidebar.history.menu_open")).on_click(
+                                        move |_, window, cx| {
+                                            if let Some(ws) = open.upgrade() {
+                                                ws.update(cx, |ws, cx| {
+                                                    ws.open_history_entry(id, window, cx)
+                                                });
+                                            }
+                                        },
+                                    ),
+                                )
+                                .separator()
+                                .item(
+                                    PopupMenuItem::new(tr!("sidebar.history.delete")).on_click(
+                                        move |_, _, cx| {
+                                            if let Some(ws) = delete.upgrade() {
+                                                ws.update(cx, |ws, cx| {
+                                                    ws.delete_history_entry(id, cx)
+                                                });
+                                            }
+                                        },
+                                    ),
+                                )
+                            }),
+                    )
+                })
+                .collect()
+        })
+        .size_full()
+        .track_scroll(self.history_scroll());
+
+        div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .px_2()
+            .pb_2()
+            .child(list)
+            .child(Scrollbar::vertical(self.history_scroll()))
+            .into_any_element()
     }
 
     /// 模板面板：内置模板是编译期常量、只有几条，用不上 uniform_list 虚拟化，

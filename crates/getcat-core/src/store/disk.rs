@@ -11,13 +11,15 @@ use tempfile::NamedTempFile;
 use tracing::warn;
 
 use crate::model::{
-    AppSettings, SavedRequest, TabDraft, TabId, Ulid, VariableSets, WorkspaceState, now_ms,
+    AppSettings, HistoryEntry, HistoryLog, SavedRequest, TabDraft, TabId, Ulid, VariableSets,
+    WorkspaceState, now_ms,
 };
 use crate::store::codec::{StoreError, decode};
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const VARIABLES_FILE: &str = "variables.json";
+pub const HISTORY_FILE: &str = "history.json";
 pub const REQUESTS_DIR: &str = "requests";
 pub const DRAFTS_DIR: &str = "drafts";
 
@@ -46,6 +48,10 @@ impl Layout {
 
     pub fn variables_path(&self) -> PathBuf {
         self.root.join(VARIABLES_FILE)
+    }
+
+    pub fn history_path(&self) -> PathBuf {
+        self.root.join(HISTORY_FILE)
     }
 
     pub fn requests_dir(&self) -> PathBuf {
@@ -197,17 +203,21 @@ pub struct Loaded {
     pub workspace: Option<WorkspaceState>,
     pub settings: Option<AppSettings>,
     pub variables: Option<VariableSets>,
+    pub history: Vec<HistoryEntry>,
     pub drafts: Vec<TabDraft>,
     pub requests: Vec<SavedRequest>,
     pub errors: Vec<LoadError>,
 }
 
-/// 一次性读取三类文件（spec §9.4）。不存在的目录 / 文件视为空；损坏文件改名隔离并继续。
+/// 一次性读取数据目录内全部文件（spec §9.4）。不存在的目录 / 文件视为空；损坏文件改名隔离并继续。
 pub fn load_all(layout: &Layout) -> Loaded {
     let mut errors = Vec::new();
     let workspace = load_file(&layout.workspace_path(), &mut errors);
     let settings = load_file(&layout.settings_path(), &mut errors);
     let variables = load_file(&layout.variables_path(), &mut errors);
+    let history = load_file::<HistoryLog>(&layout.history_path(), &mut errors)
+        .map(|log| log.entries)
+        .unwrap_or_default();
     let mut requests = Vec::new();
     load_dir(&layout.requests_dir(), &mut requests, &mut errors);
     let mut drafts = Vec::new();
@@ -216,6 +226,7 @@ pub fn load_all(layout: &Layout) -> Loaded {
         workspace,
         settings,
         variables,
+        history,
         drafts,
         requests,
         errors,

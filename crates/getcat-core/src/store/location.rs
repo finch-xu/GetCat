@@ -1,8 +1,8 @@
 //! 数据目录的独立引导配置与显式复制；不会把位置设置写进可切换的 settings.json。
 
 use super::{
-    DRAFTS_DIR, Layout, REQUESTS_DIR, SETTINGS_FILE, StoreError, VARIABLES_FILE, WORKSPACE_FILE,
-    write_atomic,
+    DRAFTS_DIR, HISTORY_FILE, Layout, REQUESTS_DIR, SETTINGS_FILE, StoreError, VARIABLES_FILE,
+    WORKSPACE_FILE, write_atomic,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,7 +14,7 @@ const CONFIG_FILE: &str = "storage-location.json";
 const PORTABLE_CONFIG_FILE: &str = "getcat-storage.json";
 const PORTABLE_DATA_DIR: &str = "GetCatData";
 const MIGRATION_MARKER: &str = ".getcat-migration-in-progress";
-const ROOT_FILES: [&str; 3] = [WORKSPACE_FILE, SETTINGS_FILE, VARIABLES_FILE];
+const ROOT_FILES: [&str; 4] = [WORKSPACE_FILE, SETTINGS_FILE, VARIABLES_FILE, HISTORY_FILE];
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocationError {

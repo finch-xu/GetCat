@@ -7,8 +7,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use getcat_core::model::{
-    MAX_TAB_ROWS, Method, SavedRequest, SplitDirection, TabDraft, TabId, ThemePref, Ulid,
-    WorkspaceState, now_ms,
+    HistoryEntry, MAX_HISTORY_ENTRIES, MAX_TAB_ROWS, Method, SavedRequest, SplitDirection,
+    TabDraft, TabId, ThemePref, Ulid, WorkspaceState, now_ms,
 };
 use getcat_core::store::Loaded;
 use gpui_kit::component::{
@@ -31,11 +31,11 @@ use gpui_kit::{
     div, point, px,
 };
 
-use gpui_updater::UpdateStatus;
+use gpui_updater_core::UpdateStatus;
 
 use crate::brand::APP_NAME;
 use crate::i18n::tr;
-use crate::state::request_tab::{RequestTab, SendPulse};
+use crate::state::request_tab::{CompletedRequest, RequestTab, SendPulse};
 use crate::state::saved_filter::{self, SavedFilter};
 use crate::state::settings;
 use crate::state::store::{banner, store};
@@ -70,11 +70,16 @@ const TAB_SCROLL_STEP: f32 = 180.;
 pub enum SidebarSection {
     #[default]
     Saved,
+    History,
     Templates,
 }
 
 impl SidebarSection {
-    pub const ALL: [SidebarSection; 2] = [SidebarSection::Saved, SidebarSection::Templates];
+    pub const ALL: [SidebarSection; 3] = [
+        SidebarSection::Saved,
+        SidebarSection::History,
+        SidebarSection::Templates,
+    ];
 }
 
 /// 右侧图标栏上的功能；点一下从右侧滑出对应的抽屉。
@@ -122,6 +127,10 @@ pub struct Workspace {
     saved_scroll: UniformListScrollHandle,
     /// 侧栏「已保存」当前的过滤器。会话状态，不落盘（spec §3），重启回「全部」。
     saved_filter: SavedFilter,
+    /// 请求历史记录，最新在前，上限 [`MAX_HISTORY_ENTRIES`]；Rc 让侧栏列表每帧只 clone 指针。
+    history: Rc<Vec<HistoryEntry>>,
+    /// 历史列表的虚拟滚动句柄。
+    history_scroll: UniformListScrollHandle,
     /// 标签栏的横向滚动句柄：单行模式下左右箭头与「激活项滚入视口」都靠它。
     tab_scroll: ScrollHandle,
     /// 标签栏行数：1 = 单行横向滚动，`MAX_TAB_ROWS` = 多行分页。写入 workspace.json。
@@ -174,12 +183,14 @@ impl Workspace {
             settings: _,
             // 变量由全局句柄管理，这里不用
             variables: _,
+            mut history,
             drafts,
             requests,
             errors: _,
         } = loaded;
         let mut saved = requests;
         sort_saved(&mut saved);
+        history.truncate(MAX_HISTORY_ENTRIES);
         let state = state.unwrap_or_default();
         let mut ws = Self {
             tabs: Vec::new(),
@@ -194,6 +205,8 @@ impl Workspace {
             saved: Rc::new(saved),
             saved_scroll: UniformListScrollHandle::new(),
             saved_filter: SavedFilter::default(),
+            history: Rc::new(history),
+            history_scroll: UniformListScrollHandle::new(),
             tab_scroll: ScrollHandle::new(),
             tab_rows: state.tab_rows.clamp(1, MAX_TAB_ROWS),
             tab_page: 0,
@@ -225,6 +238,19 @@ impl Workspace {
         // 任意 Tab 发出请求 → 重绘图标栏，让 logo 晃一下（见 `ui::sidebar::render_logo`）
         ws._subs
             .push(cx.observe_global::<SendPulse>(|_, cx| cx.notify()));
+        // 任意 Tab 完成请求（成功或非取消失败）→ 追加进历史记录并落盘。
+        // 必须用 `try_global` 只读借出 + `RefCell::borrow_mut` 排空；不能用 `default_global` /
+        // `global_mut`，否则 GPUI 会把全局再次标脏，导致 `observe_global` 无限自触发。
+        ws._subs
+            .push(cx.observe_global::<CompletedRequest>(|this, cx| {
+                let entries: Vec<HistoryEntry> = cx
+                    .try_global::<CompletedRequest>()
+                    .map(|queue| queue.0.borrow_mut().drain(..).collect())
+                    .unwrap_or_default();
+                for entry in entries {
+                    this.record_history(entry, cx);
+                }
+            }));
         // 更新器状态变化 → 刷新状态栏提示；设置对话框层在本实体的 render 里，同一次 notify 也刷新「关于」页
         if let Some(updater) = update::updater(cx) {
             ws._subs.push(cx.observe(&updater, |this, updater, cx| {
@@ -806,6 +832,85 @@ impl Workspace {
     /// 当前过滤下的下标快照；渲染闭包拿它 + `saved_rc()`，每帧仍是 O(可见行)。
     pub(crate) fn filtered_saved_indices(&self) -> Vec<usize> {
         saved_filter::filter_indices(&self.saved_filter, &self.saved)
+    }
+
+    /// 历史记录读取用（最新在前）。
+    pub(crate) fn history(&self) -> &[HistoryEntry] {
+        &self.history
+    }
+
+    /// 渲染闭包用：每帧只 clone 一个 Rc。
+    pub(crate) fn history_rc(&self) -> Rc<Vec<HistoryEntry>> {
+        self.history.clone()
+    }
+
+    pub(crate) fn history_scroll(&self) -> &UniformListScrollHandle {
+        &self.history_scroll
+    }
+
+    /// 把一条刚完成的请求记录插入历史最前，超出上限时淘汰最旧的条目并异步落盘。
+    pub fn record_history(&mut self, entry: HistoryEntry, cx: &mut Context<Self>) {
+        let mut next = Vec::with_capacity((self.history.len() + 1).min(MAX_HISTORY_ENTRIES));
+        next.push(entry);
+        next.extend(
+            self.history
+                .iter()
+                .take(MAX_HISTORY_ENTRIES.saturating_sub(1))
+                .cloned(),
+        );
+        self.history = Rc::new(next);
+        if let Some(store) = store(cx) {
+            store.write_history((*self.history).clone());
+        }
+        cx.notify();
+    }
+
+    /// 打开历史记录条目：开一个新 Tab 并载入当时的请求快照（不破坏已有 Tab）。
+    pub fn open_history_entry(&mut self, id: Ulid, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(entry) = self.history.iter().find(|h| h.id == id).cloned() else {
+            return;
+        };
+        self.new_tab(window, cx);
+        let tab = self.active_tab();
+        tab.update(cx, |t, cx| {
+            t.load_draft(&entry.draft, window, cx);
+            t.saved_id = None;
+            t.dirty = true;
+            t.save_draft_now(cx);
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// 删除单条历史记录。
+    pub fn delete_history_entry(&mut self, id: Ulid, cx: &mut Context<Self>) {
+        let before = self.history.len();
+        let next: Vec<HistoryEntry> = self
+            .history
+            .iter()
+            .filter(|h| h.id != id)
+            .cloned()
+            .collect();
+        if next.len() == before {
+            return;
+        }
+        self.history = Rc::new(next);
+        if let Some(store) = store(cx) {
+            store.write_history((*self.history).clone());
+        }
+        cx.notify();
+    }
+
+    /// 清空全部历史记录。
+    pub fn clear_history(&mut self, cx: &mut Context<Self>) {
+        if self.history.is_empty() {
+            return;
+        }
+        self.history = Rc::new(Vec::new());
+        if let Some(store) = store(cx) {
+            store.write_history(Vec::new());
+        }
+        cx.notify();
     }
 
     /// 组织操作共用：`retag` 返回 None = 这条不动，Some(g) = 把 group 设为 g。

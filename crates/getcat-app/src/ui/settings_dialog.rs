@@ -23,7 +23,7 @@ use gpui_kit::{
     AnyElement, App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
     WeakEntity, Window, div, img, px, rems,
 };
-use gpui_updater::UpdateStatus;
+use gpui_updater_core::UpdateStatus;
 
 use crate::assets::logo_path;
 use crate::brand;
@@ -514,6 +514,7 @@ fn render_update_row(cx: &App) -> AnyElement {
                 )
                 .child(releases_button("open-releases"));
         }
+        _ => {}
     }
 
     let note = match (&status, kind) {

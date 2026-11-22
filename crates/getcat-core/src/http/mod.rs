@@ -19,7 +19,8 @@ pub use error::RequestError;
 
 use crate::body::spill::{HEAD_BYTES, SpillFile};
 use crate::model::{
-    BodyKind, FormValue, HttpVersionPref, Method, RequestDraft, RequestSettings, ResponseMeta,
+    ApiKeyLocation, AuthConfig, BodyKind, FormValue, HttpVersionPref, Method, RequestDraft,
+    RequestSettings, ResponseMeta,
 };
 use crate::tls;
 use crate::url::build_url;
@@ -381,7 +382,7 @@ fn version_label(version: reqwest::Version) -> String {
 }
 
 pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
-    let url = build_url(draft).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
+    let mut url = build_url(draft).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
 
     let mut headers = Vec::new();
     for h in draft
@@ -395,6 +396,56 @@ pub fn prepare(draft: &RequestDraft) -> Result<HttpRequest, RequestError> {
             .map_err(|_| RequestError::InvalidHeader(key.to_string()))?;
         HeaderValue::from_str(value).map_err(|_| RequestError::InvalidHeader(key.to_string()))?;
         headers.push((key.to_string(), value.to_string()));
+    }
+
+    // 鉴权配置：按 vacant-entry 语义注入，用户在 Headers 里显式填写的同名头优先。
+    let has_header = |headers: &[(String, String)], target: &str| {
+        headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(target))
+    };
+    match &draft.auth {
+        AuthConfig::None => {}
+        AuthConfig::Bearer { token } => {
+            let token = token.trim();
+            if !token.is_empty() && !has_header(&headers, "authorization") {
+                let value = format!("Bearer {token}");
+                HeaderValue::from_str(&value)
+                    .map_err(|_| RequestError::InvalidHeader("Authorization".to_string()))?;
+                headers.push(("Authorization".to_string(), value));
+            }
+        }
+        AuthConfig::Basic { username, password } => {
+            if (!username.is_empty() || !password.is_empty())
+                && !has_header(&headers, "authorization")
+            {
+                let raw = format!("{username}:{password}");
+                let encoded = crate::import::curl::base64(raw.as_bytes());
+                headers.push(("Authorization".to_string(), format!("Basic {encoded}")));
+            }
+        }
+        AuthConfig::ApiKey {
+            key,
+            value,
+            location,
+        } => {
+            let key = key.trim();
+            if !key.is_empty() {
+                match location {
+                    ApiKeyLocation::Header => {
+                        if !has_header(&headers, key) {
+                            let value = value.trim();
+                            HeaderName::from_bytes(key.as_bytes())
+                                .map_err(|_| RequestError::InvalidHeader(key.to_string()))?;
+                            HeaderValue::from_str(value)
+                                .map_err(|_| RequestError::InvalidHeader(key.to_string()))?;
+                            headers.push((key.to_string(), value.to_string()));
+                        }
+                    }
+                    ApiKeyLocation::Query => {
+                        url.query_pairs_mut().append_pair(key, value);
+                    }
+                }
+            }
+        }
     }
 
     let body = match &draft.body {
@@ -1578,5 +1629,60 @@ mod tests {
         let err = run(&d).await.unwrap_err();
         assert!(err.to_string().contains("Not a regular file"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_applies_bearer_basic_and_api_key_auth() {
+        let mut bearer = draft(Method::Get, "https://api.example.com/items".into());
+        bearer.auth = AuthConfig::Bearer {
+            token: "  sk-123  ".into(),
+        };
+        let req = prepare(&bearer).unwrap();
+        assert_eq!(
+            req.headers,
+            vec![("Authorization".into(), "Bearer sk-123".into())]
+        );
+
+        // 用户显式填写了 Authorization 时，Auth 配置不会重复追加或覆盖
+        bearer
+            .headers
+            .push(KeyValue::new("authorization", "Custom override"));
+        let req = prepare(&bearer).unwrap();
+        assert_eq!(
+            req.headers,
+            vec![("authorization".into(), "Custom override".into())]
+        );
+
+        let mut basic = draft(Method::Get, "https://api.example.com/items".into());
+        basic.auth = AuthConfig::Basic {
+            username: "alice".into(),
+            password: "secret".into(),
+        };
+        let req = prepare(&basic).unwrap();
+        assert_eq!(
+            req.headers,
+            vec![("Authorization".into(), "Basic YWxpY2U6c2VjcmV0".into())]
+        );
+
+        let mut api_header = draft(Method::Get, "https://api.example.com/items".into());
+        api_header.auth = AuthConfig::ApiKey {
+            key: "X-API-Key".into(),
+            value: "k-42".into(),
+            location: ApiKeyLocation::Header,
+        };
+        let req = prepare(&api_header).unwrap();
+        assert_eq!(req.headers, vec![("X-API-Key".into(), "k-42".into())]);
+
+        let mut api_query = draft(Method::Get, "https://api.example.com/items?page=1".into());
+        api_query.auth = AuthConfig::ApiKey {
+            key: "api_key".into(),
+            value: "k-42".into(),
+            location: ApiKeyLocation::Query,
+        };
+        let req = prepare(&api_query).unwrap();
+        assert_eq!(
+            req.url.as_str(),
+            "https://api.example.com/items?page=1&api_key=k-42"
+        );
     }
 }

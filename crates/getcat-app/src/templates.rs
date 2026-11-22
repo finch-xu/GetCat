@@ -87,6 +87,7 @@ impl RequestTemplate {
                 .iter()
                 .map(|(k, v)| KeyValue::new(*k, *v))
                 .collect(),
+            auth: Default::default(),
             body: BodyKind::Raw {
                 format: RawFormat::Json,
                 text: self.body.to_string(),

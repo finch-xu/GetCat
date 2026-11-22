@@ -54,6 +54,8 @@ pub const ICON_LOCK_OPEN: &str = "icons/lock-open.svg";
 pub const ICON_LOCK: &str = "icons/lock.svg";
 /// 标题栏工具按钮「变量」的图标（`{}` 呼应 `{{var}}` 占位符）。
 pub const ICON_BRACES: &str = "icons/braces.svg";
+/// 侧栏「历史记录」图标。
+pub const ICON_HISTORY: &str = "icons/history.svg";
 
 /// 应用自带的资源表。上游 `gpui-component-assets` 没有的图标补在这里——
 /// 都取自 Lucide（ISC），与上游图标集同源，风格与 24px 网格自然一致。
@@ -89,6 +91,7 @@ const ASSETS: &[(&str, &[u8])] = &[
     ),
     (ICON_LOCK, include_bytes!("../assets/icons/lock.svg")),
     (ICON_BRACES, include_bytes!("../assets/icons/braces.svg")),
+    (ICON_HISTORY, include_bytes!("../assets/icons/history.svg")),
 ];
 
 pub struct AppAssets;
@@ -156,6 +159,7 @@ mod tests {
             ICON_LOCK_OPEN,
             ICON_LOCK,
             ICON_BRACES,
+            ICON_HISTORY,
         ] {
             let bytes = AppAssets
                 .load(path)

@@ -15,7 +15,7 @@ No Postman, Just GetCat!
 GPU 繪製 · 低資源占用 · 免帳號 · 資料全在本機 · No Electron, No Tauri, No WebView
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-007EC6?style=flat-square)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.97%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.100%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![GPUI](https://img.shields.io/badge/UI-GPUI-8B5CF6?style=flat-square)](https://gpui.rs)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://github.com/finch-xu/GetCat/releases)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/finch-xu/GetCat/releases)
@@ -178,7 +178,7 @@ crates/
 
 ### 建置與除錯
 
-- Rust ≥ 1.97（edition 2024）。macOS 不需要額外的工具鏈；Linux 需要 Vulkan 與 Wayland / X11 / fontconfig 標頭檔（清單見 `.github/workflows/ci.yml`）；Windows 需要 MSVC 工具鏈，Direct3D 11 已包含在 Windows SDK 中。
+- Rust ≥ 1.100（edition 2024）。macOS 不需要額外的工具鏈；Linux 需要 Vulkan 與 Wayland / X11 / fontconfig 標頭檔（清單見 `.github/workflows/ci.yml`）；Windows 需要 MSVC 工具鏈，Direct3D 11 已包含在 Windows SDK 中。
 - 應用程式 logo：`crates/getcat-app/assets/logo/getcat-art.svg`（完整版）與 `getcat-art-mini.svg`（≤ 32 px 用的簡化版）是原圖，`scripts/gen-logo.py` 會把它們合成為淺 / 深兩套配色的產物 —— app 內嵌的 `getcat.png` 與 `getcat-mini.png`（淺色，另有 `-dark` 深色版，app 依主題切換）、macOS 圖示來源 `resources/macos/getcat-1024.png`、Windows exe 圖示 `resources/windows/getcat.ico`；修改 logo 後請手動重新執行指令碼並提交產物（CI 不會產生，需要 `pip install pillow numpy`，SVG 點陣化由 `tools/svg-raster` 完成）。
 - Windows 的 exe 圖示與版本資訊由 `crates/getcat-app/build.rs` 嵌入，只在 Windows 上原生編譯時生效（從 macOS 交叉編譯出的 exe 沒有圖示）。安裝檔定義在 `crates/getcat-app/resources/windows/GetCat.wxs`，需要 WiX v6：`dotnet tool install --global wix --version 6.*`。
 

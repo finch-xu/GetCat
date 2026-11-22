@@ -491,6 +491,61 @@ sidebar:
     zh-TW: "主題：%{theme}（按一下切換）"
     ja: "テーマ：%{theme}（クリックで切り替え）"
     fr: "Thème : %{theme} (cliquer pour changer)"
+  history:
+    title:
+      en: History
+      zh-CN: 历史记录
+      zh-TW: 歷史紀錄
+      ja: 履歴
+      fr: Historique
+    title_with_count:
+      en: "History (%{count})"
+      zh-CN: "历史记录（%{count}）"
+      zh-TW: "歷史紀錄（%{count}）"
+      ja: "履歴（%{count}）"
+      fr: "Historique (%{count})"
+    empty_title:
+      en: No request history yet
+      zh-CN: 尚无请求历史
+      zh-TW: 尚無請求歷史
+      ja: リクエスト履歴はまだありません
+      fr: Aucun historique de requête
+    empty_hint:
+      en: Sent requests will appear here automatically
+      zh-CN: 发送过的请求会自动记录在这里
+      zh-TW: 傳送過的請求會自動記錄在這裡
+      ja: 送信したリクエストがここに自動で記録されます
+      fr: Les requêtes envoyées apparaîtront ici automatiquement
+    clear_all:
+      en: Clear history
+      zh-CN: 清空历史
+      zh-TW: 清空歷史
+      ja: 履歴をクリア
+      fr: Vider l’historique
+    delete:
+      en: Remove from history
+      zh-CN: 从历史中移除
+      zh-TW: 從歷史中移除
+      ja: 履歴から削除
+      fr: Retirer de l’historique
+    row_aria:
+      en: "History: %{method} %{url}"
+      zh-CN: "历史记录：%{method} %{url}"
+      zh-TW: "歷史紀錄：%{method} %{url}"
+      ja: "履歴：%{method} %{url}"
+      fr: "Historique : %{method} %{url}"
+    failed:
+      en: Failed
+      zh-CN: 失败
+      zh-TW: 失敗
+      ja: 失敗
+      fr: Échec
+    menu_open:
+      en: Open in new tab
+      zh-CN: 在新 Tab 中打开
+      zh-TW: 在新 Tab 中開啟
+      ja: 新しいタブで開く
+      fr: Ouvrir dans un nouvel onglet
   saved:
     title:
       en: Saved requests
@@ -987,6 +1042,138 @@ request:
     zh-TW: 已被本請求的同名 Header 覆寫
     ja: このリクエストの同名ヘッダーで上書きされています
     fr: Remplacé par un en-tête de cette requête
+  section_auth:
+    en: Auth
+    zh-CN: 鉴权
+    zh-TW: 驗證
+    ja: 認証
+    fr: Auth
+  auth_none:
+    en: None
+    zh-CN: 无
+    zh-TW: 無
+    ja: なし
+    fr: Aucune
+  auth_bearer:
+    en: Bearer Token
+    zh-CN: Bearer Token
+    zh-TW: Bearer Token
+    ja: Bearer トークン
+    fr: Jeton Bearer
+  auth_basic:
+    en: Basic Auth
+    zh-CN: Basic 认证
+    zh-TW: Basic 驗證
+    ja: Basic 認証
+    fr: Auth Basic
+  auth_api_key:
+    en: API Key
+    zh-CN: API Key
+    zh-TW: API Key
+    ja: API キー
+    fr: Clé API
+  auth_none_desc:
+    en: This request does not use dedicated authentication
+    zh-CN: 此请求未配置独立鉴权（仍可在 Headers 中手写认证头）
+    zh-TW: 此請求未設定獨立驗證（仍可在 Headers 中手寫驗證標頭）
+    ja: このリクエストは個別の認証を使用しません（Headers で直接指定することもできます）
+    fr: Cette requête n’utilise pas d’authentification dédiée
+  auth_token_label:
+    en: Token
+    zh-CN: Token
+    zh-TW: Token
+    ja: トークン
+    fr: Jeton
+  auth_token_placeholder:
+    en: "Token or {{api_token}}"
+    zh-CN: "输入 Token，支持 {{api_token}}"
+    zh-TW: "輸入 Token，支援 {{api_token}}"
+    ja: "トークン（{{api_token}} 使用可）"
+    fr: "Jeton ou {{api_token}}"
+  auth_username_label:
+    en: Username
+    zh-CN: 用户名
+    zh-TW: 使用者名稱
+    ja: ユーザー名
+    fr: Nom d’utilisateur
+  auth_username_placeholder:
+    en: "Username or {{username}}"
+    zh-CN: "输入用户名，支持 {{username}}"
+    zh-TW: "輸入使用者名稱，支援 {{username}}"
+    ja: "ユーザー名（{{username}} 使用可）"
+    fr: "Nom d’utilisateur ou {{username}}"
+  auth_password_label:
+    en: Password
+    zh-CN: 密码
+    zh-TW: 密碼
+    ja: パスワード
+    fr: Mot de passe
+  auth_password_placeholder:
+    en: "Password or {{password}}"
+    zh-CN: "输入密码，支持 {{password}}"
+    zh-TW: "輸入密碼，支援 {{password}}"
+    ja: "パスワード（{{password}} 使用可）"
+    fr: "Mot de passe ou {{password}}"
+  auth_key_label:
+    en: Key
+    zh-CN: 参数名
+    zh-TW: 參數名稱
+    ja: キー名
+    fr: Clé
+  auth_key_placeholder:
+    en: "e.g. X-API-Key"
+    zh-CN: "例如 X-API-Key"
+    zh-TW: "例如 X-API-Key"
+    ja: "例：X-API-Key"
+    fr: "p. ex. X-API-Key"
+  auth_value_label:
+    en: Value
+    zh-CN: 参数值
+    zh-TW: 參數值
+    ja: 値
+    fr: Valeur
+  auth_value_placeholder:
+    en: "Value or {{api_key}}"
+    zh-CN: "输入值，支持 {{api_key}}"
+    zh-TW: "輸入值，支援 {{api_key}}"
+    ja: "値（{{api_key}} 使用可）"
+    fr: "Valeur ou {{api_key}}"
+  auth_add_to_label:
+    en: Add to
+    zh-CN: 添加位置
+    zh-TW: 加入位置
+    ja: 追加先
+    fr: Ajouter à
+  auth_location_header:
+    en: Header
+    zh-CN: 请求头（Header）
+    zh-TW: 請求標頭（Header）
+    ja: ヘッダー
+    fr: En-tête
+  auth_location_query:
+    en: Query Params
+    zh-CN: 查询参数（Query）
+    zh-TW: 查詢參數（Query）
+    ja: クエリパラメータ
+    fr: Paramètres de requête
+  auth_show_secret:
+    en: Show secret
+    zh-CN: 显示明文
+    zh-TW: 顯示明文
+    ja: 値を表示
+    fr: Afficher le secret
+  auth_hide_secret:
+    en: Hide secret
+    zh-CN: 隐藏明文
+    zh-TW: 隱藏明文
+    ja: 値を隠す
+    fr: Masquer le secret
+  auth_overridden_hint:
+    en: "Headers already defines \"%{header}\"; that header takes precedence over Auth"
+    zh-CN: "Headers 中已设置 \"%{header}\"，发送时以 Headers 中的值为准"
+    zh-TW: "Headers 中已設定 \"%{header}\"，傳送時以 Headers 中的值為準"
+    ja: "Headers に「%{header}」が定義されているため、そちらが優先されます"
+    fr: "L’en-tête « %{header} » est déjà défini dans Headers et sera prioritaire"
   section_ops:
     en: Pre/Post
     zh-CN: 前后置
@@ -1427,6 +1614,18 @@ response:
     zh-TW: 請求失敗
     ja: リクエスト失敗
     fr: Échec de la requête
+  timing_tooltip:
+    en: "Total %{total} · TTFB %{ttfb} · Download %{download}"
+    zh-CN: "总耗时 %{total} · 首字节（TTFB）%{ttfb} · 下载 %{download}"
+    zh-TW: "總耗時 %{total} · 首字節（TTFB）%{ttfb} · 下載 %{download}"
+    ja: "合計 %{total} · TTFB %{ttfb} · ダウンロード %{download}"
+    fr: "Total %{total} · TTFB %{ttfb} · Téléchargement %{download}"
+  ttfb_short:
+    en: "TTFB %{ttfb}"
+    zh-CN: "TTFB %{ttfb}"
+    zh-TW: "TTFB %{ttfb}"
+    ja: "TTFB %{ttfb}"
+    fr: "TTFB %{ttfb}"
   find:
     en: Find in response
     zh-CN: 在响应中查找

@@ -54,12 +54,18 @@ fn linux_window_icon() -> Option<std::sync::Arc<image::RgbaImage>> {
     }
 }
 
-fn primary(key: &str) -> String {
-    if cfg!(target_os = "macos") {
-        format!("cmd-{key}")
-    } else {
-        format!("ctrl-{key}")
-    }
+/// 平台主修饰键组合（返回 `&'static str`，满足 GPUI `KeyBinding::new` 的静态生命周期要求）。
+macro_rules! primary {
+    ($key:literal) => {{
+        #[cfg(target_os = "macos")]
+        {
+            concat!("cmd-", $key)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            concat!("ctrl-", $key)
+        }
+    }};
 }
 
 fn main() {
@@ -99,16 +105,16 @@ fn main() {
         .detach();
 
         cx.bind_keys([
-            KeyBinding::new(&primary("enter"), SendRequest, None),
-            KeyBinding::new(&primary("t"), NewTab, None),
-            KeyBinding::new(&primary("w"), CloseTab, None),
-            KeyBinding::new(&primary("b"), ToggleSidebar, None),
-            KeyBinding::new(&primary("s"), SaveRequest, None),
-            KeyBinding::new(&primary("f"), FindInResponse, None),
-            KeyBinding::new(&primary(","), OpenSettings, None),
+            KeyBinding::new(primary!("enter"), SendRequest, None),
+            KeyBinding::new(primary!("t"), NewTab, None),
+            KeyBinding::new(primary!("w"), CloseTab, None),
+            KeyBinding::new(primary!("b"), ToggleSidebar, None),
+            KeyBinding::new(primary!("s"), SaveRequest, None),
+            KeyBinding::new(primary!("f"), FindInResponse, None),
+            KeyBinding::new(primary!(","), OpenSettings, None),
             // B/C 档行视图：⌘A 全选响应体（⌘C 由 gpui-component 的 Root 统一处理窗口选区）
             KeyBinding::new(
-                &primary("a"),
+                primary!("a"),
                 gpui_kit::component::input::SelectAll,
                 Some(ui::body_view::LINES_KEY_CONTEXT),
             ),

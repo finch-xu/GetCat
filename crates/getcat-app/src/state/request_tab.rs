@@ -10,8 +10,8 @@ use getcat_core::body::tier::{ViewTier, mib_label};
 use getcat_core::detect::ContentKind;
 use getcat_core::http::{self, HttpResponse, RequestError, guess_content_type};
 use getcat_core::model::{
-    BodyKind, HttpVersionPref, Method, PostOp, PreOp, RawFormat, RequestDraft, SplitDirection,
-    TabDraft, TabId, Ulid,
+    ApiKeyLocation, AuthConfig, BodyKind, HistoryEntry, HttpVersionPref, Method, PostOp, PreOp,
+    RawFormat, RequestDraft, SplitDirection, TabDraft, TabId, Ulid, now_ms,
 };
 use getcat_core::ops::{self, OpOutcome};
 use getcat_core::url::extract_path_params;
@@ -47,14 +47,16 @@ use crate::ui::{card, card_gap_resizable};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestSection {
     Params,
+    Auth,
     Headers,
     Body,
     Ops,
 }
 
 impl RequestSection {
-    pub const ALL: [RequestSection; 4] = [
+    pub const ALL: [RequestSection; 5] = [
         RequestSection::Params,
+        RequestSection::Auth,
         RequestSection::Headers,
         RequestSection::Body,
         RequestSection::Ops,
@@ -64,6 +66,33 @@ impl RequestSection {
     }
     pub fn from_index(ix: usize) -> Self {
         Self::ALL.get(ix).copied().unwrap_or(RequestSection::Params)
+    }
+}
+
+/// 鉴权模式；`ALL` 的顺序即分段控件顺序。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthMode {
+    #[default]
+    None,
+    Bearer,
+    Basic,
+    ApiKey,
+}
+
+impl AuthMode {
+    pub const ALL: [AuthMode; 4] = [
+        AuthMode::None,
+        AuthMode::Bearer,
+        AuthMode::Basic,
+        AuthMode::ApiKey,
+    ];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|m| *m == self).unwrap_or(0)
+    }
+
+    pub fn from_index(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or(AuthMode::None)
     }
 }
 
@@ -264,6 +293,14 @@ pub struct SendPulse(pub u64);
 
 impl Global for SendPulse {}
 
+/// 最近一次已结束（成功或非取消失败）的请求历史队列：与 [`SendPulse`] 同款机制，
+/// 任意 Tab 在 `apply_outcome` 里写入，`Workspace` 观察一次全局并通过只读引用
+/// (`try_global` + `RefCell::borrow_mut`) 排空，避免 `global_mut` 再次触发 `observe_global` 死循环。
+#[derive(Default)]
+pub struct CompletedRequest(pub std::cell::RefCell<Vec<HistoryEntry>>);
+
+impl Global for CompletedRequest {}
+
 pub struct RequestTab {
     /// Tab 的稳定标识：也是草稿文件名 `drafts/<id>.json`。
     pub id: TabId,
@@ -297,6 +334,19 @@ pub struct RequestTab {
     /// 标成「请求失败，未执行」。生命周期与 `pre_results` 相同（send 写入，apply_outcome /
     /// cancel / clear_response 清掉）。
     sent_post_ops: Vec<PostOp>,
+    /// 本次发送前的原始草稿快照（未展开 `{{var}}`，不落盘明文 secret）与发出的时刻，
+    /// 供 `apply_outcome` 组装历史记录。
+    sent_draft: Option<RequestDraft>,
+    sent_at: Option<Instant>,
+    pub auth_mode: AuthMode,
+    pub auth_bearer: Entity<InputState>,
+    pub auth_username: Entity<InputState>,
+    pub auth_password: Entity<InputState>,
+    pub auth_apikey_key: Entity<InputState>,
+    pub auth_apikey_value: Entity<InputState>,
+    pub auth_apikey_location: ApiKeyLocation,
+    /// 是否明文显示 Auth 敏感输入框（Token / Password / API Key Value）。默认掩码隐藏。
+    pub auth_reveal_secret: bool,
     pub path_params: Entity<KvTable>,
     pub params: Entity<KvTable>,
     pub headers: Entity<KvTable>,
@@ -355,6 +405,26 @@ impl RequestTab {
             cx.new(|cx| KvTable::new(KvPlaceholder::Field, window, cx).file_capable(true));
         let pre_ops = cx.new(|cx| OpsTable::new(OpsMode::Pre, window, cx));
         let post_ops = cx.new(|cx| OpsTable::new(OpsMode::Post, window, cx));
+        let auth_bearer = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr!("request.auth_token_placeholder"))
+                .masked(true)
+        });
+        let auth_username = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(tr!("request.auth_username_placeholder"))
+        });
+        let auth_password = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr!("request.auth_password_placeholder"))
+                .masked(true)
+        });
+        let auth_apikey_key = cx
+            .new(|cx| InputState::new(window, cx).placeholder(tr!("request.auth_key_placeholder")));
+        let auth_apikey_value = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr!("request.auth_value_placeholder"))
+                .masked(true)
+        });
 
         // 换行是全局偏好：新建的 Tab 直接按当前设置建，不必等第一次 render 去纠正
         let wrap = wrap_prefs(cx);
@@ -420,6 +490,11 @@ impl RequestTab {
             cx.subscribe_in(&post_ops, window, |this, _, _: &OpsTableEvent, _, cx| {
                 this.mark_dirty(cx)
             }),
+            cx.subscribe_in(&auth_bearer, window, Self::on_auth_input_event),
+            cx.subscribe_in(&auth_username, window, Self::on_auth_input_event),
+            cx.subscribe_in(&auth_password, window, Self::on_auth_input_event),
+            cx.subscribe_in(&auth_apikey_key, window, Self::on_auth_input_event),
+            cx.subscribe_in(&auth_apikey_value, window, Self::on_auth_input_event),
         ];
         for (_, editor) in &body_editors {
             subs.push(cx.subscribe_in(editor, window, Self::on_body_editor_event));
@@ -428,6 +503,21 @@ impl RequestTab {
         subs.push(cx.observe_global_in::<Locale>(window, |this, window, cx| {
             this.url.update(cx, |state, cx| {
                 state.set_placeholder(tr!("url_bar.placeholder"), window, cx)
+            });
+            this.auth_bearer.update(cx, |state, cx| {
+                state.set_placeholder(tr!("request.auth_token_placeholder"), window, cx)
+            });
+            this.auth_username.update(cx, |state, cx| {
+                state.set_placeholder(tr!("request.auth_username_placeholder"), window, cx)
+            });
+            this.auth_password.update(cx, |state, cx| {
+                state.set_placeholder(tr!("request.auth_password_placeholder"), window, cx)
+            });
+            this.auth_apikey_key.update(cx, |state, cx| {
+                state.set_placeholder(tr!("request.auth_key_placeholder"), window, cx)
+            });
+            this.auth_apikey_value.update(cx, |state, cx| {
+                state.set_placeholder(tr!("request.auth_value_placeholder"), window, cx)
             });
         }));
         // body 编辑器内的 ⌘⏎ 由全局 SendRequest 动作处理（见 main.rs 的 bind_keys），不在此订阅
@@ -447,6 +537,16 @@ impl RequestTab {
             post_ops,
             pre_results: Vec::new(),
             sent_post_ops: Vec::new(),
+            sent_draft: None,
+            sent_at: None,
+            auth_mode: AuthMode::None,
+            auth_bearer,
+            auth_username,
+            auth_password,
+            auth_apikey_key,
+            auth_apikey_value,
+            auth_apikey_location: ApiKeyLocation::Header,
+            auth_reveal_secret: false,
             path_params,
             params,
             headers,
@@ -498,6 +598,59 @@ impl RequestTab {
             InputEvent::PressEnter { .. } => self.send(window, cx),
             _ => {}
         }
+    }
+
+    /// Auth 输入框变化：只响应 Change，按回车不误触发送。
+    fn on_auth_input_event(
+        &mut self,
+        _: &Entity<InputState>,
+        ev: &InputEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(ev, InputEvent::Change) {
+            self.mark_dirty(cx);
+        }
+    }
+
+    /// 切换 Auth 敏感字段（Token / Password / API Key Value）的明文 / 掩码显示。
+    pub fn toggle_auth_secret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.auth_reveal_secret = !self.auth_reveal_secret;
+        let masked = !self.auth_reveal_secret;
+        for field in [
+            &self.auth_bearer,
+            &self.auth_password,
+            &self.auth_apikey_value,
+        ] {
+            field.update(cx, |s, cx| s.set_masked(masked, window, cx));
+        }
+        cx.notify();
+    }
+
+    /// 若 Headers 中已手写与当前 Auth 同名的启用头（Authorization 或 API Key Header），
+    /// 返回该头名，供 Auth 面板展示非阻塞提示。
+    pub fn auth_overridden_header(&self, cx: &App) -> Option<String> {
+        let target = match self.auth_mode {
+            AuthMode::None => return None,
+            AuthMode::Bearer | AuthMode::Basic => "Authorization".to_string(),
+            AuthMode::ApiKey => {
+                if self.auth_apikey_location != ApiKeyLocation::Header {
+                    return None;
+                }
+                let key = self.auth_apikey_key.read(cx).value().trim().to_string();
+                if key.is_empty() {
+                    return None;
+                }
+                key
+            }
+        };
+        let overridden = self
+            .headers
+            .read(cx)
+            .values(cx)
+            .iter()
+            .any(|h| h.enabled && h.key.trim().eq_ignore_ascii_case(&target));
+        overridden.then_some(target)
     }
 
     /// 文本 Body 编辑器内容变化：按 rope 的字节数（O(1)）判断是否提示改用文件 Body。
@@ -641,12 +794,28 @@ impl RequestTab {
                     .map(|p| guess_content_type(p).to_string()),
             },
         };
+        let auth = match self.auth_mode {
+            AuthMode::None => AuthConfig::None,
+            AuthMode::Bearer => AuthConfig::Bearer {
+                token: self.auth_bearer.read(cx).value().to_string(),
+            },
+            AuthMode::Basic => AuthConfig::Basic {
+                username: self.auth_username.read(cx).value().to_string(),
+                password: self.auth_password.read(cx).value().to_string(),
+            },
+            AuthMode::ApiKey => AuthConfig::ApiKey {
+                key: self.auth_apikey_key.read(cx).value().to_string(),
+                value: self.auth_apikey_value.read(cx).value().to_string(),
+                location: self.auth_apikey_location,
+            },
+        };
         RequestDraft {
             method: self.current_method(cx),
             url: self.url.read(cx).value().to_string(),
             path_params: self.path_params.read(cx).values(cx),
             params: self.params.read(cx).values(cx),
             headers: self.headers.read(cx).values(cx),
+            auth,
             body,
             pre_ops: self.pre_ops.read(cx).pre_ops(cx),
             post_ops: self.post_ops.read(cx).post_ops(cx),
@@ -811,6 +980,33 @@ impl RequestTab {
             .update(cx, |t, cx| t.set_values(&draft.params, window, cx));
         self.headers
             .update(cx, |t, cx| t.set_values(&draft.headers, window, cx));
+        match &draft.auth {
+            AuthConfig::None => self.auth_mode = AuthMode::None,
+            AuthConfig::Bearer { token } => {
+                self.auth_mode = AuthMode::Bearer;
+                self.auth_bearer
+                    .update(cx, |s, cx| s.set_value(token.clone(), window, cx));
+            }
+            AuthConfig::Basic { username, password } => {
+                self.auth_mode = AuthMode::Basic;
+                self.auth_username
+                    .update(cx, |s, cx| s.set_value(username.clone(), window, cx));
+                self.auth_password
+                    .update(cx, |s, cx| s.set_value(password.clone(), window, cx));
+            }
+            AuthConfig::ApiKey {
+                key,
+                value,
+                location,
+            } => {
+                self.auth_mode = AuthMode::ApiKey;
+                self.auth_apikey_key
+                    .update(cx, |s, cx| s.set_value(key.clone(), window, cx));
+                self.auth_apikey_value
+                    .update(cx, |s, cx| s.set_value(value.clone(), window, cx));
+                self.auth_apikey_location = *location;
+            }
+        }
         self.file_path = None;
         self.file_size = None;
         match &draft.body {
@@ -873,9 +1069,10 @@ impl RequestTab {
         if self.response.is_in_flight() {
             return;
         }
-        // 前置操作在变量表副本上执行，再按副本替换（按值交出 draft() 刚拷出来的快照，
-        // 替换后直接复用，不再多克隆一次 body）
-        let prepared = variables::prepare_send(cx, self.saved_group.as_deref(), self.draft(cx));
+        // 保留一份发送前的原文草稿（未展开 `{{var}}`，不落盘明文 secret）用于历史记录
+        let raw_draft = self.draft(cx);
+        // 前置操作在变量表副本上执行，再按副本替换
+        let prepared = variables::prepare_send(cx, self.saved_group.as_deref(), raw_draft.clone());
         self.unresolved_vars = prepared.resolved.unresolved;
         let mut draft = prepared.resolved.draft;
         let req = match http::prepare(&draft) {
@@ -884,6 +1081,8 @@ impl RequestTab {
                 // 请求发不出去：丢掉副本，前置操作的写入不进全局、不落盘（反复点发送也不会反复写）
                 self.pre_results.clear();
                 self.sent_post_ops.clear();
+                self.sent_draft = None;
+                self.sent_at = None;
                 self.prepare_error = Some(e);
                 cx.notify();
                 return;
@@ -897,6 +1096,8 @@ impl RequestTab {
         // 断言的期望值在上面已经替换完：一份随完成任务进后台执行，一份留给请求失败时标记「未执行」
         let post_ops: Vec<PostOp> = std::mem::take(&mut draft.post_ops);
         self.sent_post_ops = post_ops.clone();
+        self.sent_draft = Some(raw_draft);
+        self.sent_at = Some(Instant::now());
         self.prepare_error = None;
         self.notice = None;
         self.generation += 1;
@@ -1031,8 +1232,22 @@ impl RequestTab {
         // 本次发送的前置结果与后置快照：无论成败都在这里取走
         let pre = std::mem::take(&mut self.pre_results);
         let sent_post_ops = std::mem::take(&mut self.sent_post_ops);
+        let sent_draft = self.sent_draft.take();
+        let sent_at = self.sent_at.take();
+        let mut history_entry = None;
         match outcome {
             Ok((body, mut view, report)) => {
+                if let Some(raw_draft) = sent_draft {
+                    history_entry = Some(HistoryEntry {
+                        id: Ulid::generate(),
+                        timestamp: now_ms(),
+                        draft: raw_draft,
+                        status: Some(view.meta.status),
+                        duration_ms: view.meta.duration.as_millis() as u64,
+                        body_len: Some(view.meta.body_len),
+                        error: None,
+                    });
+                }
                 // TTFT（首个内容 delta 的时刻）只有在途解析才知道：从被替换掉的
                 // InFlight 状态里合并进 Done 视图。
                 if let Some(sse) = view.sse.as_mut()
@@ -1076,11 +1291,30 @@ impl RequestTab {
                 let ops = if matches!(error, RequestError::Cancelled) {
                     None
                 } else {
+                    if let Some(raw_draft) = sent_draft {
+                        history_entry = Some(HistoryEntry {
+                            id: Ulid::generate(),
+                            timestamp: now_ms(),
+                            draft: raw_draft,
+                            status: None,
+                            duration_ms: sent_at
+                                .map(|s| s.elapsed().as_millis() as u64)
+                                .unwrap_or(0),
+                            body_len: None,
+                            error: Some(error.to_string()),
+                        });
+                    }
                     let post = ops::skip_all(&sent_post_ops);
                     (!pre.is_empty() || !post.results.is_empty()).then_some(OpsReport { pre, post })
                 };
                 self.response = ResponseState::Failed { error, ops };
             }
+        }
+        if let Some(entry) = history_entry {
+            cx.default_global::<CompletedRequest>()
+                .0
+                .borrow_mut()
+                .push(entry);
         }
         cx.notify();
     }
@@ -1093,6 +1327,8 @@ impl RequestTab {
         self.generation += 1;
         self.pre_results.clear();
         self.sent_post_ops.clear();
+        self.sent_draft = None;
+        self.sent_at = None;
         // 取消是用户主动放弃：前后置结果一并丢弃（spec 前后置操作 · 限制）
         self.response = ResponseState::Failed {
             error: RequestError::Cancelled,
@@ -1118,6 +1354,8 @@ impl RequestTab {
         // 在途请求的前置结果与后置快照随它一起作废（完成回调已因 generation 失效，不会再来取）
         self.pre_results.clear();
         self.sent_post_ops.clear();
+        self.sent_draft = None;
+        self.sent_at = None;
         // 编辑器是常驻实体，不随 response 一起 drop。留着上一条响应的文本，
         // 下一条非 A 档响应到来时 apply_outcome 不会覆写它，残留内容会在 ⌘F 里冒出来
         for (_, editor) in &self.response_editors {

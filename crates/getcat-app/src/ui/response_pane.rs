@@ -16,6 +16,7 @@ use gpui_kit::component::{
     skeleton::Skeleton,
     tab::{Tab, TabBar},
     tag::Tag,
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -940,6 +941,58 @@ impl RequestTab {
                     Transition::new(STATUS_ARRIVAL_DURATION).ease(animation::ease_out_cubic),
                 )
                 .sample(window, cx);
+                let total_ms = view.meta.duration.as_secs_f32().max(0.000_001);
+                let timing_detail = view.meta.ttfb.map(|ttfb| {
+                    let download = view.meta.duration.saturating_sub(ttfb);
+                    let ttfb_ratio = (ttfb.as_secs_f32() / total_ms).clamp(0.05, 1.0);
+                    let tip = tr!(
+                        "response.timing_tooltip",
+                        total = format_duration(view.meta.duration),
+                        ttfb = format_duration(ttfb),
+                        download = format_duration(download)
+                    );
+                    (ttfb, ttfb_ratio, tip)
+                });
+                let duration_view: AnyElement = if let Some((ttfb, ttfb_ratio, tip)) = timing_detail
+                {
+                    h_flex()
+                        .id("response-timing")
+                        .gap_1p5()
+                        .items_center()
+                        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                        .child(
+                            div()
+                                .text_color(muted)
+                                .child(format_duration(view.meta.duration)),
+                        )
+                        // 紧凑双段比例条：主色段代表 TTFB（等待首字节），成功色段代表正文下载
+                        .child(
+                            h_flex()
+                                .w_8()
+                                .h_1p5()
+                                .rounded_full()
+                                .overflow_hidden()
+                                .bg(cx.theme().success.opacity(0.65))
+                                .child(
+                                    div()
+                                        .h_full()
+                                        .w(relative(ttfb_ratio))
+                                        .bg(cx.theme().primary.opacity(0.8)),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr!("response.ttfb_short", ttfb = format_duration(ttfb))),
+                        )
+                        .into_any_element()
+                } else {
+                    div()
+                        .text_color(muted)
+                        .child(format_duration(view.meta.duration))
+                        .into_any_element()
+                };
                 h_flex()
                     .relative()
                     .top(px(4. * (1. - arrival.progress)))
@@ -955,11 +1008,7 @@ impl RequestTab {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(format!("{} {}", view.meta.status, view.meta.status_text)),
                     )
-                    .child(
-                        div()
-                            .text_color(muted)
-                            .child(format_duration(view.meta.duration)),
-                    )
+                    .child(duration_view)
                     .child(
                         div()
                             .text_color(muted)

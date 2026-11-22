@@ -13,13 +13,15 @@ use std::{
 
 pub use codec::{FORMAT_VERSION, StoreError};
 pub use disk::{
-    DRAFTS_DIR, Layout, LoadError, Loaded, REQUESTS_DIR, SETTINGS_FILE, VARIABLES_FILE,
-    WORKSPACE_FILE, copy_atomic, copy_atomic_user, load_all, write_atomic, write_atomic_user,
+    DRAFTS_DIR, HISTORY_FILE, Layout, LoadError, Loaded, REQUESTS_DIR, SETTINGS_FILE,
+    VARIABLES_FILE, WORKSPACE_FILE, copy_atomic, copy_atomic_user, load_all, write_atomic,
+    write_atomic_user,
 };
 pub use writer::{COALESCE_WINDOW, FLUSH_TIMEOUT, StoreWriter};
 
 use crate::model::{
-    AppSettings, SavedRequest, TabDraft, TabId, Ulid, VariableSets, WorkspaceState,
+    AppSettings, HistoryEntry, HistoryLog, SavedRequest, TabDraft, TabId, Ulid, VariableSets,
+    WorkspaceState,
 };
 
 /// 持久化门面：路径布局 + 写入线程。可 Clone（共享同一线程）。
@@ -86,6 +88,12 @@ impl Store {
     pub fn write_variables(&self, sets: VariableSets) {
         let path = self.layout.variables_path();
         self.writer.write(path, move || codec::encode(&sets));
+    }
+
+    pub fn write_history(&self, entries: Vec<HistoryEntry>) {
+        let path = self.layout.history_path();
+        let log = HistoryLog { entries };
+        self.writer.write(path, move || codec::encode(&log));
     }
 
     pub fn delete_request(&self, id: Ulid) {
@@ -223,6 +231,26 @@ mod tests {
         store.write_variables(sets.clone());
         assert!(store.flush());
         assert_eq!(store.load_all().variables, Some(sets));
+    }
+
+    #[test]
+    fn write_history_round_trips() {
+        let (_dir, store) = open(Duration::ZERO);
+        let entry = HistoryEntry {
+            id: Ulid::generate(),
+            timestamp: 1_700_000_000_000,
+            draft: RequestDraft {
+                url: "https://api.example.com/orders".into(),
+                ..Default::default()
+            },
+            status: Some(200),
+            duration_ms: 85,
+            body_len: Some(1024),
+            error: None,
+        };
+        store.write_history(vec![entry.clone()]);
+        assert!(store.flush());
+        assert_eq!(store.load_all().history, vec![entry]);
     }
 
     #[cfg(unix)]

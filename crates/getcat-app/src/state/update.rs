@@ -21,18 +21,176 @@
 // 显式导入而非 `use gpui_kit::*`：本文件含 `#[cfg(test)] mod tests`，通配符会引入 gpui 的 `test` 属性宏
 // 与标准库 `#[test]` 冲突（见 workspace.rs 顶部说明）。
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use getcat_core::model::{AppSettings, UpdateSourcePref};
-use gpui_kit::{App, AppContext, Entity, Global, SharedString};
-use gpui_updater::{
-    EngineConfig, GitHubSource, StaticManifestSource, UpdateSource, UpdateStatus, Updater,
-    Verification, Version,
+use gpui_kit::{App, AppContext, Context, Entity, Global, SharedString, Task};
+use gpui_updater_core::{
+    EngineConfig, GitHubSource, Release, StaticManifestSource, UpdateEngine, UpdateError,
+    UpdateSource, UpdateStatus, Verification, Version,
 };
 
 use crate::i18n::tr;
 use crate::state::settings;
+
+type BoxedEngine = UpdateEngine<Box<dyn UpdateSource>>;
+
+/// GPUI 可观察的更新器实体：在后台执行器上驱动 [`UpdateEngine`]，状态变更时 `cx.notify()`。
+///
+/// 上游 `gpui-updater` 从 0.2 起已拆出无 UI 依赖的 `gpui-updater-core`，这里直接做一层薄封装
+/// 对接 `gpui-kit`（`gpui-pre`），不再 vendor 整个上游仓库。
+pub struct Updater {
+    status: UpdateStatus,
+    available: Option<Release>,
+    engine: Arc<BoxedEngine>,
+    task: Option<Task<()>>,
+}
+
+impl Updater {
+    pub fn new<S: UpdateSource>(source: S, config: EngineConfig, _cx: &mut Context<Self>) -> Self {
+        let engine = UpdateEngine::new(Box::new(source) as Box<dyn UpdateSource>, config);
+        Self {
+            status: UpdateStatus::Idle,
+            available: None,
+            engine: Arc::new(engine),
+            task: None,
+        }
+    }
+
+    pub fn status(&self) -> &UpdateStatus {
+        &self.status
+    }
+
+    fn set_status(&mut self, status: UpdateStatus, cx: &mut Context<Self>) {
+        self.status = status;
+        cx.notify();
+    }
+
+    pub fn check(&mut self, cx: &mut Context<Self>) {
+        if self.status.is_busy() {
+            return;
+        }
+        self.set_status(UpdateStatus::Checking, cx);
+        let engine = self.engine.clone();
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { engine.check() })
+                .await;
+            this.update(cx, |this, cx| {
+                this.task = None;
+                match result {
+                    Ok(Some(release)) => {
+                        let version = release.version.clone();
+                        this.available = Some(release);
+                        this.set_status(UpdateStatus::Available(version), cx);
+                    }
+                    Ok(None) => this.set_status(UpdateStatus::UpToDate, cx),
+                    Err(e) => this.set_status(UpdateStatus::Errored(UpdateError::from(e)), cx),
+                }
+            })
+            .ok();
+        }));
+    }
+
+    pub fn download_and_install(&mut self, cx: &mut Context<Self>) {
+        if self.status.is_busy() {
+            return;
+        }
+        let Some(release) = self.available.clone() else {
+            return;
+        };
+        let engine = self.engine.clone();
+        self.set_status(
+            UpdateStatus::Downloading {
+                downloaded: 0,
+                total: None,
+            },
+            cx,
+        );
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let downloaded = Arc::new(AtomicU64::new(0));
+            let total = Arc::new(AtomicU64::new(0));
+            let done = Arc::new(AtomicBool::new(false));
+
+            let dl_task = {
+                let (engine, release) = (engine.clone(), release.clone());
+                let (d, t, fin) = (downloaded.clone(), total.clone(), done.clone());
+                cx.background_executor().spawn(async move {
+                    let result = engine.download(&release, |got, tot| {
+                        d.store(got, Ordering::Relaxed);
+                        t.store(tot.unwrap_or(0), Ordering::Relaxed);
+                    });
+                    fin.store(true, Ordering::Relaxed);
+                    result
+                })
+            };
+
+            loop {
+                let got = downloaded.load(Ordering::Relaxed);
+                let tot = total.load(Ordering::Relaxed);
+                this.update(cx, |this, cx| {
+                    this.set_status(
+                        UpdateStatus::Downloading {
+                            downloaded: got,
+                            total: (tot != 0).then_some(tot),
+                        },
+                        cx,
+                    );
+                })
+                .ok();
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(120))
+                    .await;
+            }
+
+            let artifact = match dl_task.await {
+                Ok(artifact) => artifact,
+                Err(e) => {
+                    this.update(cx, |this, cx| {
+                        this.task = None;
+                        this.set_status(UpdateStatus::Errored(UpdateError::from(e)), cx);
+                    })
+                    .ok();
+                    return;
+                }
+            };
+
+            this.update(cx, |this, cx| this.set_status(UpdateStatus::Installing, cx))
+                .ok();
+
+            let installed = {
+                let engine = engine.clone();
+                cx.background_executor()
+                    .spawn(async move { engine.install(&artifact) })
+                    .await
+            };
+            this.update(cx, |this, cx| {
+                this.task = None;
+                match installed {
+                    Ok(installed) => {
+                        if let Some(path) = &installed.restart_path {
+                            cx.set_restart_path(path.clone());
+                        }
+                        let version = release.version.clone();
+                        this.set_status(UpdateStatus::Staged(version), cx);
+                    }
+                    Err(e) => this.set_status(UpdateStatus::Errored(UpdateError::from(e)), cx),
+                }
+            })
+            .ok();
+        }));
+    }
+
+    pub fn restart(&self, cx: &mut Context<Self>) {
+        cx.restart();
+    }
+}
 
 pub const REPO_OWNER: &str = "finch-xu";
 pub const REPO_NAME: &str = "GetCat";
@@ -107,7 +265,7 @@ struct SwitchableSource<G, M> {
 }
 
 impl<G: UpdateSource, M: UpdateSource> UpdateSource for SwitchableSource<G, M> {
-    fn fetch_latest(&self) -> gpui_updater::Result<gpui_updater::Release> {
+    fn fetch_latest(&self) -> gpui_updater_core::Result<gpui_updater_core::Release> {
         // 锁中毒说明写入方（主线程的 sync_source）panic 过；值是 Copy 的、不会写坏，取出继续用
         let current = *self
             .current
@@ -221,7 +379,7 @@ pub fn install_kind() -> InstallKind {
     }
     #[cfg(target_os = "macos")]
     {
-        let Ok(root) = gpui_updater::current_install_root() else {
+        let Ok(root) = gpui_updater_core::current_install_root() else {
             return InstallKind::DevBuild;
         };
         if root.to_string_lossy().contains("/AppTranslocation/") {
@@ -440,7 +598,8 @@ pub fn status_line(status: &UpdateStatus, current: &str) -> SharedString {
         } => tr!("update.downloaded", downloaded = format_mb(*downloaded)),
         UpdateStatus::Installing => tr!("update.installing"),
         UpdateStatus::Staged(v) => tr!("update.staged", version = v),
-        UpdateStatus::Errored(msg) => tr!("update.failed", error = msg),
+        UpdateStatus::Errored(err) => tr!("update.failed", error = err.message()),
+        _ => tr!("update.idle", current = current),
     }
 }
 
@@ -600,19 +759,16 @@ mod tests {
 
         struct Fake(&'static str);
         impl UpdateSource for Fake {
-            fn fetch_latest(&self) -> gpui_updater::Result<gpui_updater::Release> {
-                Ok(gpui_updater::Release {
-                    version: Version::new(9, 9, 9),
-                    notes: Some(self.0.to_string()),
-                    asset: gpui_updater::Asset {
-                        name: "GetCat-test".into(),
-                        url: format!("https://{}/GetCat-test", self.0),
-                        size: 0,
-                    },
-                    signature: None,
-                    signature_url: None,
-                    sha256: None,
-                })
+            fn fetch_latest(&self) -> gpui_updater_core::Result<gpui_updater_core::Release> {
+                Ok(gpui_updater_core::Release::new(
+                    Version::new(9, 9, 9),
+                    gpui_updater_core::Asset::new(
+                        "GetCat-test",
+                        format!("https://{}/GetCat-test", self.0),
+                        0,
+                    ),
+                )
+                .with_notes(self.0))
             }
         }
 
@@ -674,7 +830,7 @@ mod tests {
                 total: None,
             },
             UpdateStatus::Installing,
-            UpdateStatus::Errored("x".into()),
+            UpdateStatus::Errored(UpdateError::new(gpui_updater_core::ErrorKind::Other, "x")),
         ] {
             assert_eq!(hint_version(&s), None, "{s:?}");
         }
@@ -733,7 +889,10 @@ mod tests {
         );
         assert_eq!(
             status_line(
-                &UpdateStatus::Errored("http error: offline".into()),
+                &UpdateStatus::Errored(UpdateError::new(
+                    gpui_updater_core::ErrorKind::Network,
+                    "http error: offline"
+                )),
                 "0.1.0"
             )
             .as_ref(),
